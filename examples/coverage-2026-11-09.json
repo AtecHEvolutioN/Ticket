@@ -1,0 +1,233 @@
+[
+  {
+    "id": "nl-jamiroquai-ziggo",
+    "country": "NL",
+    "artist": "Jamiroquai",
+    "venue": "Ziggo Dome",
+    "city": "Amsterdam",
+    "date": "2027-07-05T20:00:00",
+    "event_url": "https://www.ticketmaster.nl/event/jamiroquai-tickets/1823751680",
+    "entry_url": "https://www.ticketmaster.nl/artist/jamiroquai-tickets/5285",
+    "source_url": "https://www.ticketmaster.nl/event/jamiroquai-tickets/1823751680"
+  },
+  {
+    "id": "de-noah-kahan-waldbuhne",
+    "country": "DE",
+    "artist": "Noah Kahan",
+    "venue": "Waldbühne",
+    "city": "Berlin",
+    "date": "2027-07-02T19:00:00",
+    "event_url": "https://www.ticketmaster.de/event/noah-kahan-the-last-of-the-bugs-world-tour-tickets/1306451961",
+    "entry_url": "https://www.ticketmaster.de/artist/noah-kahan-tickets/986292",
+    "source_url": "https://www.ticketmaster.de/event/noah-kahan-the-last-of-the-bugs-world-tour-tickets/1306451961"
+  },
+  {
+    "id": "cz-bocelli-o2",
+    "country": "CZ",
+    "artist": "Andrea Bocelli",
+    "venue": "O2 arena",
+    "city": "Praha 9",
+    "date": "2027-05-27T20:00:00",
+    "event_url": "https://www.ticketmaster.cz/event/andrea-bocelli-vstupenky/493115848",
+    "entry_url": "https://www.ticketmaster.cz/artist/andrea-bocelli-vstupenky/4434",
+    "source_url": "https://www.ticketmaster.cz/event/andrea-bocelli-vstupenky/493115848"
+  },
+  {
+    "id": "be-mon-laferte-cirque",
+    "country": "BE",
+    "artist": "Mon Laferte",
+    "venue": "Cirque Royal - Koninklijk Circus",
+    "city": "Brussels",
+    "date": "2027-01-18T20:00:00",
+    "event_url": "https://www.ticketmaster.be/event/mon-laferte-tickets/622908318",
+    "entry_url": "https://www.ticketmaster.be/artist/mon-laferte-tickets/962806",
+    "source_url": "https://www.ticketmaster.be/event/mon-laferte-tickets/622908318"
+  },
+  {
+    "id": "pl-sting-ergo",
+    "country": "PL",
+    "artist": "Sting",
+    "venue": "ERGO ARENA",
+    "city": "Gdańsk/Sopot",
+    "date": "2027-06-07T18:00:00",
+    "event_url": "https://www.ticketmaster.pl/event/sting-30-tour-bilety/1047384207",
+    "entry_url": "https://www.ticketmaster.pl/artist/sting-tickets/2196",
+    "source_url": "https://www.ticketmaster.pl/event/sting-30-tour-bilety/1047384207"
+  },
+  {
+    "id": "it-hilary-duff-dome",
+    "country": "IT",
+    "artist": "Hilary Duff",
+    "venue": "Unipol Dome",
+    "city": "Milano",
+    "date": "2027-05-10T20:00:00",
+    "event_url": "https://www.ticketmaster.it/biglietti/hilary-duff-the-lucky-me-tour-milano-10-05-2027/event/segp4wi4du5m?language=en-us",
+    "entry_url": "https://www.ticketmaster.it/artist/hilary-duff-tickets/23801?language=en-us",
+    "source_url": "https://www.ticketmaster.it/artist/hilary-duff-tickets/23801?language=en-us"
+  },
+  {
+    "id": "es-mon-laferte-movistar",
+    "country": "ES",
+    "artist": "Mon Laferte",
+    "venue": "Movistar Arena",
+    "city": "Madrid",
+    "date": "2027-01-13T21:00:00",
+    "event_url": "https://www.ticketmaster.es/event/mon-laferte-entradas/1776378129",
+    "entry_url": "https://www.ticketmaster.es/artist/mon-laferte-entradas/962806",
+    "source_url": "https://www.ticketmaster.es/event/mon-laferte-entradas/1776378129"
+  },
+  {
+    "id": "se-dirty-honey-debaser",
+    "country": "SE",
+    "artist": "Dirty Honey",
+    "venue": "Debaser Strand",
+    "city": "Stockholm",
+    "date": "2027-02-10T19:30:00",
+    "event_url": "https://www.ticketmaster.se/event/dirty-honey-biljetter/1940251376",
+    "entry_url": "https://www.ticketmaster.se/artist/dirty-honey-biljetter/1003190",
+    "source_url": "https://www.ticketmaster.se/event/dirty-honey-biljetter/1940251376"
+  },
+  {
+    "id": "uk-u2",
+    "country": "GB",
+    "artist": "U2",
+    "venue": "Tottenham Hotspur Stadium",
+    "city": "London",
+    "date": "2027-06-18T17:30:00",
+    "event_url": "https://www.ticketmaster.co.uk/u2-the-greatest-show-on-earth-london-18-06-2027/event/3500655683001AA0",
+    "entry_url": "https://www.ticketmaster.co.uk/u2-tickets/artist/736365",
+    "source_url": "https://www.ticketmaster.co.uk/u2-the-greatest-show-on-earth-london-18-06-2027/event/3500655683001AA0"
+  },
+  {
+    "id": "us-luke-combs",
+    "country": "US",
+    "artist": "Luke Combs",
+    "venue": "Gillette Stadium",
+    "city": "Foxborough, MA",
+    "date": "2027-05-01T17:20:00",
+    "event_url": "https://www.ticketmaster.com/luke-combs-my-kinda-saturday-night-foxborough-massachusetts-05-01-2027/event/0100650A23A974B2",
+    "entry_url": "https://www.ticketmaster.com/luke-combs-tickets/artist/2150342",
+    "source_url": "https://www.ticketmaster.com/luke-combs-my-kinda-saturday-night-foxborough-massachusetts-05-01-2027/event/0100650A23A974B2"
+  },
+  {
+    "id": "ca-bon-jovi",
+    "country": "CA",
+    "artist": "Bon Jovi",
+    "venue": "Rogers Stadium",
+    "city": "Toronto, ON",
+    "date": "2027-08-07T18:30:00",
+    "event_url": "https://www.ticketmaster.ca/bon-jovi-forever-tour-toronto-ontario-08-07-2027/event/1000655B041F7CCB",
+    "entry_url": "https://www.ticketmaster.ca/bon-jovi-tickets/artist/734608",
+    "source_url": "https://www.ticketmaster.ca/bon-jovi-forever-tour-toronto-ontario-08-07-2027/event/1000655B041F7CCB"
+  },
+  {
+    "id": "au-sevendust",
+    "country": "AU",
+    "artist": "Sevendust",
+    "venue": "The Tivoli",
+    "city": "Brisbane, QLD",
+    "date": "2027-02-17T19:00:00",
+    "event_url": "https://www.ticketmaster.com.au/sevendust-brisbane-17-02-2027/event/130065628C7B2F46",
+    "entry_url": "https://www.ticketmaster.com.au/sevendust-tickets/artist/783708",
+    "source_url": "https://www.ticketmaster.com.au/sevendust-brisbane-17-02-2027/event/130065628C7B2F46"
+  },
+  {
+    "id": "nl-10cc-tivoli",
+    "country": "NL",
+    "artist": "10cc",
+    "venue": "TivoliVredenburg",
+    "city": "Utrecht",
+    "date": "2027-11-16T20:00:00",
+    "event_url": "https://www.ticketmaster.nl/event/10cc-tickets/593318371",
+    "entry_url": "https://www.ticketmaster.nl/artist/10cc-tickets/33262",
+    "source_url": "https://www.ticketmaster.nl/event/10cc-tickets/593318371"
+  },
+  {
+    "id": "de-meltt-kranhalle",
+    "country": "DE",
+    "artist": "Meltt",
+    "venue": "Kranhalle",
+    "city": "München",
+    "date": "2027-02-01T20:00:00",
+    "event_url": "https://www.ticketmaster.de/event/meltt-tickets/2066123927",
+    "entry_url": "https://www.ticketmaster.de/artist/meltt-tickets/1266103",
+    "source_url": "https://www.ticketmaster.de/event/meltt-tickets/2066123927"
+  },
+  {
+    "id": "cz-ross-noble-divadlo",
+    "country": "CZ",
+    "artist": "Ross Noble",
+    "venue": "Divadlo U Hasičů",
+    "city": "Praha 2",
+    "date": "2027-10-05T20:00:00",
+    "event_url": "https://www.ticketmaster.cz/event/ross-noble-vstupenky/1898352484",
+    "entry_url": "https://www.ticketmaster.cz/artist/ross-noble-vstupenky/26653",
+    "source_url": "https://www.ticketmaster.cz/event/ross-noble-vstupenky/1898352484"
+  },
+  {
+    "id": "be-john-summit-forest",
+    "country": "BE",
+    "artist": "John Summit",
+    "venue": "Vorst Nationaal/Forest National",
+    "city": "Forest (Brussels)",
+    "date": "2027-02-12T18:30:00",
+    "event_url": "https://www.ticketmaster.be/event/john-summit--europe-ctrl-escape-arena-tour-tickets/206059935",
+    "entry_url": "https://www.ticketmaster.be/artist/john-summit-tickets/1060582",
+    "source_url": "https://www.ticketmaster.be/event/john-summit--europe-ctrl-escape-arena-tour-tickets/206059935"
+  },
+  {
+    "id": "pl-hollywood-undead-torwar",
+    "country": "PL",
+    "artist": "Hollywood Undead",
+    "venue": "COS Torwar",
+    "city": "Warszawa",
+    "date": "2027-02-08T18:00:00",
+    "event_url": "https://www.ticketmaster.pl/event/hollywood-undead-eu-uk-2027-bilety/224274430",
+    "entry_url": "https://www.ticketmaster.pl/artist/hollywood-undead-tickets/41672",
+    "source_url": "https://www.ticketmaster.pl/event/hollywood-undead-eu-uk-2027-bilety/224274430"
+  },
+  {
+    "id": "uk-from-the-jam",
+    "country": "GB",
+    "artist": "From the Jam",
+    "venue": "O2 Academy Islington",
+    "city": "London",
+    "date": "2027-09-04T19:00:00",
+    "event_url": "https://www.ticketmaster.co.uk/from-the-jam-london-04-09-2027/event/3E00654CFB936CA4",
+    "entry_url": "https://www.ticketmaster.co.uk/from-the-jam-tickets/artist/1149156",
+    "source_url": "https://www.ticketmaster.co.uk/from-the-jam-london-04-09-2027/event/3E00654CFB936CA4"
+  },
+  {
+    "id": "us-gracie-abrams",
+    "country": "US",
+    "artist": "Gracie Abrams",
+    "venue": "Oakland Arena",
+    "city": "Oakland, CA",
+    "date": "2026-12-06T20:00:00",
+    "event_url": "https://www.ticketmaster.com/gracie-abrams-the-look-at-my-oakland-california-12-06-2026/event/1C0064ADBB8886FE",
+    "entry_url": "https://www.ticketmaster.com/gracie-abrams-tickets/artist/2763148",
+    "source_url": "https://www.ticketmaster.com/gracie-abrams-the-look-at-my-oakland-california-12-06-2026/event/1C0064ADBB8886FE"
+  },
+  {
+    "id": "ca-kings-of-leon",
+    "country": "CA",
+    "artist": "Kings of Leon",
+    "venue": "RBC Amphitheatre",
+    "city": "Toronto, ON",
+    "date": "2027-06-02T19:30:00",
+    "event_url": "https://www.ticketmaster.ca/kings-of-leon-toronto-ontario-06-02-2027/event/1000656470D028EE",
+    "entry_url": "https://www.ticketmaster.ca/kings-of-leon-tickets/artist/862453",
+    "source_url": "https://www.ticketmaster.ca/kings-of-leon-toronto-ontario-06-02-2027/event/1000656470D028EE"
+  },
+  {
+    "id": "au-bron-lewis",
+    "country": "AU",
+    "artist": "Bron Lewis",
+    "venue": "Athenaeum Theatre One",
+    "city": "Melbourne, VIC",
+    "date": "2027-03-24T19:30:00",
+    "event_url": "https://www.ticketmaster.com.au/bron-lewis-melbourne-24-03-2027/event/13006562DF40CCDE",
+    "entry_url": "https://www.ticketmaster.com.au/bron-lewis-tickets/artist/3068817",
+    "source_url": "https://www.ticketmaster.com.au/bron-lewis-melbourne-24-03-2027/event/13006562DF40CCDE"
+  }
+]

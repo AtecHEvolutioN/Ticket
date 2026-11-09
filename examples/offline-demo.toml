@@ -1,0 +1,34 @@
+# SYNTHETIC LOCAL DEMO. These selectors are not Ticketmaster selectors.
+database = "../data/demo.sqlite"
+
+[[watches]]
+id = "demo"
+name = "Synthetic KoRn example — not live inventory"
+artist = "KoRn"
+country = "PL"
+city = "Krakow"
+url = "https://www.ticketmaster.pl/event/korn-bilety/496543017"
+currency = "PLN"
+min_quantity = 2
+max_price_minor = 100000
+notify_initial = false
+
+[watches.parser]
+selectors_verified = true
+offers_selector = "article[data-test='offer']"
+offer_available_selector = ".buy"
+complete_selector = "main[data-test='complete']"
+unavailable_selector = "[data-test='unavailable']"
+offer_id_attribute = "data-offer-id"
+section_selector = ".section"
+row_selector = ".row"
+seats_selector = ".seats"
+ticket_type_selector = ".type"
+inventory_selector = ".inventory"
+price_selector = ".price"
+quantity_selector = ".quantity"
+quantity_is_stock = true
+quantity_kind = "remaining"
+price_scope = "per_ticket"
+fees = "unknown"
+price_decimal_separator = ","

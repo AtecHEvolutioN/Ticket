@@ -1,0 +1,17 @@
+{
+  "name": "ticket-watch-browser",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Optional ordinary Chromium transport for the Rust ticket monitor",
+  "scripts": {
+    "test": "node --test browser/*.test.cjs",
+    "browser:install": "playwright install chromium",
+    "capture": "node browser/capture.cjs"
+  },
+  "dependencies": {
+    "playwright": "1.62.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

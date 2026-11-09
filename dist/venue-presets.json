@@ -1,0 +1,254 @@
+[
+  {
+    "id": "venue-1cadc24b3f34f6a86dee8f600c36a9210d463914d762a1d7869f7885fb64d4cd",
+    "site_host": "ticketmaster.com.au",
+    "provider_venue_id": null,
+    "name": "The Tivoli",
+    "city": "Brisbane, QLD",
+    "country": "AU",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.com.au/sevendust-brisbane-17-02-2027/event/130065628C7B2F46"
+    ]
+  },
+  {
+    "id": "venue-84c5c31a48ae4d5e7b38b648482c9108649d88d006ed74bdc17eda33d4d5eb34",
+    "site_host": "ticketmaster.com.au",
+    "provider_venue_id": null,
+    "name": "Athenaeum Theatre One",
+    "city": "Melbourne, VIC",
+    "country": "AU",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.com.au/bron-lewis-melbourne-24-03-2027/event/13006562DF40CCDE"
+    ]
+  },
+  {
+    "id": "venue-40dbd29abc38a290b20656755ffa2496e359bb5e677e5332ac8a548b975c4804",
+    "site_host": "ticketmaster.be",
+    "provider_venue_id": null,
+    "name": "Cirque Royal - Koninklijk Circus",
+    "city": "Brussels",
+    "country": "BE",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.be/event/mon-laferte-tickets/622908318"
+    ]
+  },
+  {
+    "id": "venue-a2ef65f3c40da1ab9fe7405bd7159855e6012128a949152e3d822777cc24adc4",
+    "site_host": "ticketmaster.be",
+    "provider_venue_id": null,
+    "name": "Vorst Nationaal/Forest National",
+    "city": "Forest (Brussels)",
+    "country": "BE",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.be/event/john-summit--europe-ctrl-escape-arena-tour-tickets/206059935"
+    ]
+  },
+  {
+    "id": "venue-edf69c72eeea4bfe4c5bb7c1f355883c217a82f660bcdcd3314cacd3e8587799",
+    "site_host": "ticketmaster.ca",
+    "provider_venue_id": null,
+    "name": "RBC Amphitheatre",
+    "city": "Toronto, ON",
+    "country": "CA",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.ca/kings-of-leon-toronto-ontario-06-02-2027/event/1000656470D028EE"
+    ]
+  },
+  {
+    "id": "venue-a0fa90ce48baf2c61cf6d68425f2419231e085861888f5533b12455fc9fd868d",
+    "site_host": "ticketmaster.ca",
+    "provider_venue_id": null,
+    "name": "Rogers Stadium",
+    "city": "Toronto, ON",
+    "country": "CA",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.ca/bon-jovi-forever-tour-toronto-ontario-08-07-2027/event/1000655B041F7CCB"
+    ]
+  },
+  {
+    "id": "venue-3491bf14469d1d2e28902a3b31f577ec19daf66e370a8530919b98efe53087ac",
+    "site_host": "ticketmaster.cz",
+    "provider_venue_id": null,
+    "name": "Divadlo U Hasičů",
+    "city": "Praha 2",
+    "country": "CZ",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.cz/event/ross-noble-vstupenky/1898352484"
+    ]
+  },
+  {
+    "id": "venue-487271df7a6e81938f4935cde722a86bbb52a8ccf693bb5f2141cfa7a37d4676",
+    "site_host": "ticketmaster.cz",
+    "provider_venue_id": null,
+    "name": "O2 arena",
+    "city": "Praha 9",
+    "country": "CZ",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.cz/event/andrea-bocelli-vstupenky/493115848"
+    ]
+  },
+  {
+    "id": "venue-ccc5600f406323c457b40db5ff0e736e8b54b189df558b84bb12713e278671a4",
+    "site_host": "ticketmaster.de",
+    "provider_venue_id": null,
+    "name": "Waldbühne",
+    "city": "Berlin",
+    "country": "DE",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.de/event/noah-kahan-the-last-of-the-bugs-world-tour-tickets/1306451961"
+    ]
+  },
+  {
+    "id": "venue-42a65cd23c1526330f1c1986d77377283240c4aa854d705006eb6e3f646d5121",
+    "site_host": "ticketmaster.de",
+    "provider_venue_id": null,
+    "name": "Kranhalle",
+    "city": "München",
+    "country": "DE",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.de/event/meltt-tickets/2066123927"
+    ]
+  },
+  {
+    "id": "venue-4cb17ea61a80c69046c581e73168f0b88d32bc332cefe65a794c78755aee8424",
+    "site_host": "ticketmaster.es",
+    "provider_venue_id": null,
+    "name": "Movistar Arena",
+    "city": "Madrid",
+    "country": "ES",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.es/event/mon-laferte-entradas/1776378129"
+    ]
+  },
+  {
+    "id": "venue-24f474e19816d4a6ee8559a6b8ce18bc01c8fa8eb9f83f2c4247bc3861e597ac",
+    "site_host": "ticketmaster.co.uk",
+    "provider_venue_id": null,
+    "name": "O2 Academy Islington",
+    "city": "London",
+    "country": "GB",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.co.uk/from-the-jam-london-04-09-2027/event/3E00654CFB936CA4"
+    ]
+  },
+  {
+    "id": "venue-4b8ab2d95304b2a76cd2e81890478bf21c3d7395d25ec569eedb49ce4af68b33",
+    "site_host": "ticketmaster.co.uk",
+    "provider_venue_id": null,
+    "name": "Tottenham Hotspur Stadium",
+    "city": "London",
+    "country": "GB",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.co.uk/u2-the-greatest-show-on-earth-london-18-06-2027/event/3500655683001AA0"
+    ]
+  },
+  {
+    "id": "venue-6f80684d06b9111a532b2a5b89117e3999fb6a570f9acb1d5507d2527a8ba9b0",
+    "site_host": "ticketmaster.it",
+    "provider_venue_id": null,
+    "name": "Unipol Dome",
+    "city": "Milano",
+    "country": "IT",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.it/biglietti/hilary-duff-the-lucky-me-tour-milano-10-05-2027/event/segp4wi4du5m"
+    ]
+  },
+  {
+    "id": "venue-e5f3f8cdebd2711eea256d1888287c356e7e990d7cb3ddfc2392e55f0e3c426e",
+    "site_host": "ticketmaster.nl",
+    "provider_venue_id": null,
+    "name": "Ziggo Dome",
+    "city": "Amsterdam",
+    "country": "NL",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.nl/event/jamiroquai-tickets/1823751680"
+    ]
+  },
+  {
+    "id": "venue-b11bb8a15461250cd1db45f7c2e7fe1f18873e30075014693bd186fa7f779283",
+    "site_host": "ticketmaster.nl",
+    "provider_venue_id": null,
+    "name": "TivoliVredenburg",
+    "city": "Utrecht",
+    "country": "NL",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.nl/event/10cc-tickets/593318371"
+    ]
+  },
+  {
+    "id": "venue-cdb1c2a94f8fbe766b71707d4b707824496f652ab18d33ad5b9dd692212fb3a2",
+    "site_host": "ticketmaster.pl",
+    "provider_venue_id": null,
+    "name": "ERGO ARENA",
+    "city": "Gdańsk/Sopot",
+    "country": "PL",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.pl/event/sting-30-tour-bilety/1047384207"
+    ]
+  },
+  {
+    "id": "venue-3974842b9e0641284eac9db67e76f7973807e20c7783d74c96bb19cd6295646f",
+    "site_host": "ticketmaster.pl",
+    "provider_venue_id": null,
+    "name": "COS Torwar",
+    "city": "Warszawa",
+    "country": "PL",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.pl/event/hollywood-undead-eu-uk-2027-bilety/224274430"
+    ]
+  },
+  {
+    "id": "venue-a6e6542dab4396ff493b76a276f037813b87a4b46ddd6e7715ec3a3d45bad2c4",
+    "site_host": "ticketmaster.se",
+    "provider_venue_id": null,
+    "name": "Debaser Strand",
+    "city": "Stockholm",
+    "country": "SE",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.se/event/dirty-honey-biljetter/1940251376"
+    ]
+  },
+  {
+    "id": "venue-ccef9502408ddbb7a1bd04c97f06f8ec76ad2ec1b5466e2e70ce35ef88408ede",
+    "site_host": "ticketmaster.com",
+    "provider_venue_id": null,
+    "name": "Gillette Stadium",
+    "city": "Foxborough, MA",
+    "country": "US",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.com/luke-combs-my-kinda-saturday-night-foxborough-massachusetts-05-01-2027/event/0100650A23A974B2"
+    ]
+  },
+  {
+    "id": "venue-dd1fab2e8912911306a76651423a7a941c4cb96ec4fce80bc2a9c9835ba1e6ff",
+    "site_host": "ticketmaster.com",
+    "provider_venue_id": null,
+    "name": "Oakland Arena",
+    "city": "Oakland, CA",
+    "country": "US",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.com/gracie-abrams-the-look-at-my-oakland-california-12-06-2026/event/1C0064ADBB8886FE"
+    ]
+  }
+]

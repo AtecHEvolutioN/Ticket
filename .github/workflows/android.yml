@@ -1,0 +1,41 @@
+name: Build Android test APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'android/**'
+      - '.github/workflows/android.yml'
+  pull_request:
+    paths:
+      - 'android/**'
+      - '.github/workflows/android.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install pinned SDK components
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Build and verify app and internal instrumentation APKs
+        run: |
+          bash android/build-apk.sh
+          bash android/build-instrumentation.sh
+      - name: Upload user APK and checksum only
+        uses: actions/upload-artifact@v4
+        with:
+          name: ticket-watch-android-test
+          path: |
+            dist/ticket-watch-android.apk
+            dist/ticket-watch-android.apk.sha256
+          if-no-files-found: error
+          retention-days: 14

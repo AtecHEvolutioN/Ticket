@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "source": "rendered_public_event_page",
+  "event": {
+    "id": "496543017",
+    "name": "KoRn",
+    "venue": "TAURON Arena Kraków",
+    "date_local": "2026-11-17T18:00:00",
+    "timezone": "Europe/Warsaw",
+    "url": "https://www.ticketmaster.pl/event/korn-bilety/496543017"
+  },
+  "captured_at": "2026-11-09T13:02:07.392871+00:00",
+  "http_status": 200,
+  "acquisition": "Ordinary graphical Chromium: artist page, event link, best-available tab. No ticket selection or reservation.",
+  "primary_categories": [
+    {
+      "ticket_type": "GA - miejsce stojące",
+      "currency": "PLN",
+      "displayed_price": "379,00 zł",
+      "minimum_price_minor": 37900,
+      "maximum_price_minor": 37900,
+      "price_kind": "single",
+      "evidence": "displayed_ticket_category",
+      "remaining_quantity": null
+    },
+    {
+      "ticket_type": "Miejsce siedzące",
+      "currency": "PLN",
+      "displayed_price": "179,00 zł–379,00 zł",
+      "minimum_price_minor": 17900,
+      "maximum_price_minor": 37900,
+      "price_kind": "range",
+      "evidence": "displayed_ticket_category",
+      "remaining_quantity": null
+    },
+    {
+      "ticket_type": "Widok ograniczony",
+      "currency": "PLN",
+      "displayed_price": "179,00 zł–379,00 zł",
+      "minimum_price_minor": 17900,
+      "maximum_price_minor": 37900,
+      "price_kind": "range",
+      "evidence": "displayed_ticket_category",
+      "remaining_quantity": null
+    },
+    {
+      "ticket_type": "Oficjalny bilet Platinum",
+      "currency": "PLN",
+      "displayed_price": "343,00 zł–932,50 zł",
+      "minimum_price_minor": 34300,
+      "maximum_price_minor": 93250,
+      "price_kind": "range",
+      "evidence": "displayed_ticket_category",
+      "remaining_quantity": null
+    }
+  ],
+  "resale_listings": [
+    {
+      "ticket_type": "Oficjalny bilet Platinum",
+      "section": "C9",
+      "row": "27",
+      "currency": "PLN",
+      "displayed_price": "575,00 zł",
+      "price_minor": 57500,
+      "price_scope": "per_ticket",
+      "quantity": 2,
+      "quantity_kind": "listing",
+      "displayed_quantity": "Dostępne 2",
+      "fees": "unknown"
+    },
+    {
+      "ticket_type": "Official Platinum Ticket",
+      "section": "A9",
+      "row": "6",
+      "currency": "PLN",
+      "displayed_price": "910,80 zł",
+      "price_minor": 91080,
+      "price_scope": "per_ticket",
+      "quantity": 2,
+      "quantity_kind": "listing",
+      "displayed_quantity": "Dostępne 2",
+      "fees": "unknown"
+    }
+  ],
+  "event_remaining_quantity": null,
+  "purchase_limit_per_person": 6,
+  "fees": {
+    "mandatory_service_fee_included": true,
+    "additional_delivery_or_product_fees_possible": true,
+    "mobile_delivery_price_minor": 0,
+    "currency": "PLN"
+  },
+  "limitations": [
+    "Single snapshot, not a continuously refreshed inventory feed.",
+    "Primary categories and price ranges do not establish fulfillment for a requested quantity.",
+    "Listing quantities must not be summed into total remaining event inventory.",
+    "Automated background fetching of this view has not been validated."
+  ]
+}

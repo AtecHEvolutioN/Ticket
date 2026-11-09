@@ -1,0 +1,72 @@
+# Copy to config.local.toml at the repository root.
+# Supply TICKETMASTER_API_KEY and DISCORD_BOT_TOKEN through the environment.
+database = "data/ticket.sqlite"
+per_host_interval_secs = 60
+blocked_retry_secs = 900
+unknown_retry_secs = 120
+max_in_flight = 4
+
+[catalog]
+refresh_interval_secs = 900
+max_requests_per_refresh = 20
+max_requests_per_day = 4000
+max_events = 1000
+
+[browser]
+script = "browser/worker.cjs"
+
+[discord]
+token_env = "DISCORD_BOT_TOKEN"
+# channel_id = "YOUR_NUMERIC_CHANNEL_ID"
+mention_user_ids = []
+mention_role_ids = []
+
+[[subscriptions]]
+id = "selected-artist"
+artist = "Your selected artist"
+attraction_id = "YOUR_DISCOVERY_ATTRACTION_ID"
+# country = "PL" # Omit to discover this artist across countries.
+# city = "Krakow"
+profile = "ticketmaster"
+# Set true after choosing the artist ID and configuring the API key.
+enabled = false
+# Review exclusions for the selected market/language; they match event titles.
+exclude_keywords = ["parking", "upgrade"]
+
+[[profiles]]
+id = "ticketmaster"
+hosts = [
+  "www.ticketmaster.pl", "ticketmaster.pl",
+  "www.ticketmaster.cz", "ticketmaster.cz",
+  "www.ticketmaster.com", "ticketmaster.com",
+  "www.ticketmaster.co.uk", "ticketmaster.co.uk",
+  "www.ticketmaster.de", "ticketmaster.de",
+  "www.ticketmaster.at", "ticketmaster.at",
+  "www.ticketmaster.ch", "ticketmaster.ch",
+  "www.ticketmaster.be", "ticketmaster.be",
+  "www.ticketmaster.nl", "ticketmaster.nl",
+  "www.ticketmaster.ie", "ticketmaster.ie",
+  "www.ticketmaster.es", "ticketmaster.es",
+  "www.ticketmaster.it", "ticketmaster.it",
+  "www.ticketmaster.fr", "ticketmaster.fr",
+  "www.ticketmaster.dk", "ticketmaster.dk",
+  "www.ticketmaster.no", "ticketmaster.no",
+  "www.ticketmaster.se", "ticketmaster.se",
+  "www.ticketmaster.fi", "ticketmaster.fi",
+  "www.ticketmaster.ca", "ticketmaster.ca",
+  "www.ticketmaster.com.au", "ticketmaster.com.au",
+  "www.ticketmaster.co.nz", "ticketmaster.co.nz",
+  "www.ticketmaster.com.mx", "ticketmaster.com.mx",
+  "www.ticketmaster.co.za", "ticketmaster.co.za",
+]
+mode = "browser"
+interval_secs = 60
+notify_initial = false
+notify_offer_changes = true
+# currency = "PLN" # Optional currency filter; required with a price ceiling.
+# min_quantity = 2
+# max_price_minor = 100000
+
+[profiles.parser]
+adapter = "ticketmaster"
+# Layout support is detected per event. Unknown layouts are reported, never sold out.

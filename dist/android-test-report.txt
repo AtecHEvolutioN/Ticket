@@ -1,0 +1,52 @@
+Android verification
+
+APK: ticket-watch-android.apk
+Version: 0.6.0-test (versionCode 6)
+SHA256: e193118a47d99030c6a72f31c2d43fbe3dd45ef18f156dcd3c3a888fdf04b831
+Size: 107634 bytes
+Device: Android 9 / API 28 x86_64 emulator, 480 x 960, software emulation
+Verification date: 2026-11-09
+Install / upgrade: passed for main and instrumentation APKs
+MainActivity launch: passed
+Offline instrumentation: 291 assertions passed
+Result source: completed executor session 57523; command:
+  adb shell am instrument -w app.ticketwatch.mobile.test/app.ticketwatch.mobile.SmokeInstrumentation
+Exact instrumentation result: android-instrumentation-result.txt
+
+New venue coverage (56 assertions):
+- Discovery venue ID preservation through event parsing, watch creation, and persistence.
+- Provider-ID/site isolation, conflicting-location rejection, normalized exact fallback.
+- Stable local identity and preset references across fallback-to-official-ID promotion.
+- Ambiguous fallback rejection for multiple known IDs and stale-key collision protection.
+- Named section references and notes persist independently of event observations.
+- Cross-event selection never copies prices, ticket types, stock, or verified selectors.
+- Metadata-only watch re-save preserves valid selection; explicit clear and deletion work.
+- Actual Add -> Save -> Use form flow, current selection, removal and reopening.
+- Fresh synthetic venue preview: android-venues.png, rendered from actual app views.
+
+Existing coverage remains passing:
+- Artist/event-independent extraction and supported URL identity forms.
+- Primary categories and price ranges kept separate from observed resale offers.
+- Observed European controls/field labels and strict localized per-ticket prices.
+- Matching Event currency metadata; wrong-event or conflicting bindings stay unknown.
+- UK quickpick section/row contexts, duplicate suppression, and price-conflict rejection.
+- No stock inference from selectable quantities, toolbar counts, or result totals.
+- Blocked/wrong-event pages, read-only preparation, watch persistence, credential storage,
+  UI navigation, synthetic local notifications, and Discord payloads without transmission.
+
+WebView fixtures use synthetic minimal structures with network loads disabled.
+No live Ticketmaster or Discord request was made, and no real credentials were used.
+The first UI test attempts encountered an emulator System UI dialog and then missing
+accessibility-window state. Connecting accessibility before the Activity and waiting
+for focused window readiness resolved the harness issue; the complete final run passed.
+The final main APK was unchanged during those harness-only fixes.
+
+Declared minSdk: 26; runtime verification covered API 28 only.
+APK alignment and v2/v3 signature verification passed; prior signing certificate retained.
+Certificate SHA256: e6e886e15cf3b2757fd30336a54dbac73f756bf23e40640759f47372da0abbc0
+Android venue storage is device-local; it does not automatically synchronize the backend
+example registry. Presets are static references, not verified seating maps or inventory.
+Checks remain manual/foreground; live phone access and background monitoring are not
+established by this offline verification.
+
+Report generated at 2026-11-09T14:21:07.125342+00:00 from the final run.

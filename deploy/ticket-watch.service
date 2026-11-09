@@ -1,0 +1,31 @@
+[Unit]
+Description=Ticket Watch availability monitor
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=ticketwatch
+Group=ticketwatch
+WorkingDirectory=/opt/ticket-watch
+EnvironmentFile=-/etc/ticket-watch.env
+# Preview-only by default. Append --send-discord only after explicit setup.
+ExecStart=/opt/ticket-watch/target/release/ticket-watch --config /opt/ticket-watch/config.local.toml run
+# Set the TOML database path to /var/lib/ticket-watch/ticket.sqlite.
+StateDirectory=ticket-watch
+StateDirectoryMode=0750
+UMask=0077
+Restart=on-failure
+RestartSec=30
+KillSignal=SIGINT
+KillMode=control-group
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

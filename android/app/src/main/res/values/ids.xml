@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="ui_explore" type="id" />
+    <item name="ui_watchlist" type="id" />
+    <item name="ui_settings" type="id" />
+    <item name="ui_demo" type="id" />
+    <item name="ui_add_watch" type="id" />
+    <item name="ui_demo_unavailable" type="id" />
+    <item name="ui_demo_available" type="id" />
+    <item name="ui_demo_blocked" type="id" />
+    <item name="ui_search" type="id" />
+    <item name="ui_check_page" type="id" />
+    <item name="ui_open_browser" type="id" />
+    <item name="ui_advanced" type="id" />
+    <item name="ui_save_selectors" type="id" />
+    <item name="ui_back" type="id" />
+    <item name="ui_ticket_details" type="id" />
+    <item name="ui_venue_presets" type="id" />
+    <item name="ui_venue_add" type="id" />
+    <item name="ui_venue_preset_name" type="id" />
+    <item name="ui_venue_sections" type="id" />
+    <item name="ui_venue_notes" type="id" />
+    <item name="ui_venue_selected" type="id" />
+</resources>

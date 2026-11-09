@@ -1,0 +1,212 @@
+[
+  {
+    "site_host": "ticketmaster.com.au",
+    "name": "The Tivoli",
+    "city": "Brisbane, QLD",
+    "country": "AU",
+    "source_event_urls": [
+      "https://www.ticketmaster.com.au/sevendust-brisbane-17-02-2027/event/130065628C7B2F46"
+    ],
+    "layouts": []
+  },
+  {
+    "site_host": "ticketmaster.com.au",
+    "name": "Athenaeum Theatre One",
+    "city": "Melbourne, VIC",
+    "country": "AU",
+    "source_event_urls": [
+      "https://www.ticketmaster.com.au/bron-lewis-melbourne-24-03-2027/event/13006562DF40CCDE"
+    ],
+    "layouts": []
+  },
+  {
+    "site_host": "ticketmaster.be",
+    "name": "Cirque Royal - Koninklijk Circus",
+    "city": "Brussels",
+    "country": "BE",
+    "source_event_urls": [
+      "https://www.ticketmaster.be/event/mon-laferte-tickets/622908318"
+    ],
+    "layouts": []
+  },
+  {
+    "site_host": "ticketmaster.be",
+    "name": "Vorst Nationaal/Forest National",
+    "city": "Forest (Brussels)",
+    "country": "BE",
+    "source_event_urls": [
+      "https://www.ticketmaster.be/event/john-summit--europe-ctrl-escape-arena-tour-tickets/206059935"
+    ],
+    "layouts": []
+  },
+  {
+    "site_host": "ticketmaster.ca",
+    "name": "RBC Amphitheatre",
+    "city": "Toronto, ON",
+    "country": "CA",
+    "source_event_urls": [
+      "https://www.ticketmaster.ca/kings-of-leon-toronto-ontario-06-02-2027/event/1000656470D028EE"
+    ],
+    "layouts": []
+  },
+  {
+    "site_host": "ticketmaster.ca",
+    "name": "Rogers Stadium",
+    "city": "Toronto, ON",
+    "country": "CA",
+    "source_event_urls": [
+      "https://www.ticketmaster.ca/bon-jovi-forever-tour-toronto-ontario-08-07-2027/event/1000655B041F7CCB"
+    ],
+    "layouts": []
+  },
+  {
+    "site_host": "ticketmaster.cz",
+    "name": "Divadlo U Hasičů",
+    "city": "Praha 2",
+    "country": "CZ",
+    "source_event_urls": [
+      "https://www.ticketmaster.cz/event/ross-noble-vstupenky/1898352484"
+    ],
+    "layouts": []
+  },
+  {
+    "site_host": "ticketmaster.cz",
+    "name": "O2 arena",
+    "city": "Praha 9",
+    "country": "CZ",
+    "source_event_urls": [
+      "https://www.ticketmaster.cz/event/andrea-bocelli-vstupenky/493115848"
+    ],
+    "layouts": []
+  },
+  {
+    "site_host": "ticketmaster.de",
+    "name": "Waldbühne",
+    "city": "Berlin",
+    "country": "DE",
+    "source_event_urls": [
+      "https://www.ticketmaster.de/event/noah-kahan-the-last-of-the-bugs-world-tour-tickets/1306451961"
+    ],
+    "layouts": []
+  },
+  {
+    "site_host": "ticketmaster.de",
+    "name": "Kranhalle",
+    "city": "München",
+    "country": "DE",
+    "source_event_urls": [
+      "https://www.ticketmaster.de/event/meltt-tickets/2066123927"
+    ],
+    "layouts": []
+  },
+  {
+    "site_host": "ticketmaster.es",
+    "name": "Movistar Arena",
+    "city": "Madrid",
+    "country": "ES",
+    "source_event_urls": [
+      "https://www.ticketmaster.es/event/mon-laferte-entradas/1776378129"
+    ],
+    "layouts": []
+  },
+  {
+    "site_host": "ticketmaster.co.uk",
+    "name": "O2 Academy Islington",
+    "city": "London",
+    "country": "GB",
+    "source_event_urls": [
+      "https://www.ticketmaster.co.uk/from-the-jam-london-04-09-2027/event/3E00654CFB936CA4"
+    ],
+    "layouts": []
+  },
+  {
+    "site_host": "ticketmaster.co.uk",
+    "name": "Tottenham Hotspur Stadium",
+    "city": "London",
+    "country": "GB",
+    "source_event_urls": [
+      "https://www.ticketmaster.co.uk/u2-the-greatest-show-on-earth-london-18-06-2027/event/3500655683001AA0"
+    ],
+    "layouts": []
+  },
+  {
+    "site_host": "ticketmaster.it",
+    "name": "Unipol Dome",
+    "city": "Milano",
+    "country": "IT",
+    "source_event_urls": [
+      "https://www.ticketmaster.it/biglietti/hilary-duff-the-lucky-me-tour-milano-10-05-2027/event/segp4wi4du5m"
+    ],
+    "layouts": []
+  },
+  {
+    "site_host": "ticketmaster.nl",
+    "name": "Ziggo Dome",
+    "city": "Amsterdam",
+    "country": "NL",
+    "source_event_urls": [
+      "https://www.ticketmaster.nl/event/jamiroquai-tickets/1823751680"
+    ],
+    "layouts": []
+  },
+  {
+    "site_host": "ticketmaster.nl",
+    "name": "TivoliVredenburg",
+    "city": "Utrecht",
+    "country": "NL",
+    "source_event_urls": [
+      "https://www.ticketmaster.nl/event/10cc-tickets/593318371"
+    ],
+    "layouts": []
+  },
+  {
+    "site_host": "ticketmaster.pl",
+    "name": "ERGO ARENA",
+    "city": "Gdańsk/Sopot",
+    "country": "PL",
+    "source_event_urls": [
+      "https://www.ticketmaster.pl/event/sting-30-tour-bilety/1047384207"
+    ],
+    "layouts": []
+  },
+  {
+    "site_host": "ticketmaster.pl",
+    "name": "COS Torwar",
+    "city": "Warszawa",
+    "country": "PL",
+    "source_event_urls": [
+      "https://www.ticketmaster.pl/event/hollywood-undead-eu-uk-2027-bilety/224274430"
+    ],
+    "layouts": []
+  },
+  {
+    "site_host": "ticketmaster.se",
+    "name": "Debaser Strand",
+    "city": "Stockholm",
+    "country": "SE",
+    "source_event_urls": [
+      "https://www.ticketmaster.se/event/dirty-honey-biljetter/1940251376"
+    ],
+    "layouts": []
+  },
+  {
+    "site_host": "ticketmaster.com",
+    "name": "Gillette Stadium",
+    "city": "Foxborough, MA",
+    "country": "US",
+    "source_event_urls": [
+      "https://www.ticketmaster.com/luke-combs-my-kinda-saturday-night-foxborough-massachusetts-05-01-2027/event/0100650A23A974B2"
+    ],
+    "layouts": []
+  },
+  {
+    "site_host": "ticketmaster.com",
+    "name": "Oakland Arena",
+    "city": "Oakland, CA",
+    "country": "US",
+    "source_event_urls": [
+      "https://www.ticketmaster.com/gracie-abrams-the-look-at-my-oakland-california-12-06-2026/event/1C0064ADBB8886FE"
+    ],
+    "layouts": []
+  }
+]

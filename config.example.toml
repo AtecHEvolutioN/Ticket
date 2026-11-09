@@ -1,0 +1,46 @@
+# Copy to config.local.toml. No credentials belong in this file.
+# These initial rates are conservative engineering defaults, NOT a Ticketmaster rate allowance.
+database = "data/ticket.sqlite"
+request_timeout_secs = 20
+per_host_interval_secs = 60
+blocked_retry_secs = 900
+unknown_retry_secs = 120
+max_in_flight = 4
+max_body_bytes = 4194304
+alert_max_age_secs = 300
+
+[browser]
+node = "node"
+script = "browser/worker.cjs"
+render_wait_ms = 1500
+headed = false # Set true on a graphical desktop for ordinary visible Chromium.
+# executable_path = "/usr/bin/chromium"
+
+[discord]
+token_env = "DISCORD_BOT_TOKEN"
+# channel_id = "YOUR_NUMERIC_CHANNEL_ID"
+mention_user_ids = []
+mention_role_ids = []
+
+# Copy this block for each selected event, or use artist/location subscriptions
+# in examples/hybrid.example.toml. This placeholder does not poll until enabled.
+[[watches]]
+id = "selected-event"
+name = "Your selected event"
+artist = "Your selected artist"
+country = "PL" # Set the event's country.
+url = "https://www.ticketmaster.pl/event/123456789" # Replace with the actual public event URL.
+enabled = false
+mode = "browser"
+interval_secs = 60
+notify_initial = false
+notify_metadata = false
+notify_offer_changes = true
+# currency = "PLN" # Set when the displayed currency symbol is ambiguous, or to filter currency.
+# min_quantity = 2
+# max_price_minor = 100000 # Requires currency; applies only to exact per-ticket offer prices.
+
+[watches.parser]
+adapter = "ticketmaster" # Detect a supported layout; no event-specific selectors.
+# Unknown layouts, queues, and missing inventory remain unknown/blocked.
+# Use adapter = "selectors" only for a separately validated custom profile.
