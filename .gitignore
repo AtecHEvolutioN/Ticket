@@ -36,3 +36,7 @@
 !/dist/ticketmaster-coverage.json
 !/dist/venue-presets.json
 !/dist/venue-presets.json.sha256
+
+# Reviewed, empty-of-watch-data public starter database.
+!/downloads/venue-presets.sqlite
+!/downloads/venue-presets.sqlite.sha256

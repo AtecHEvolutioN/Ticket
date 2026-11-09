@@ -8,7 +8,7 @@ token.
 
 ## Install and try it
 
-1. Download [ticket-watch-android.apk](https://github.com/AtecHEvolutioN/Ticket/releases/download/v0.6.0-test/ticket-watch-android.apk) and open it on your
+1. Download [ticket-watch-android.apk](https://github.com/AtecHEvolutioN/Ticket/raw/refs/heads/main/downloads/ticket-watch-android.apk) and open it on your
    phone. If Android asks, allow installation from the browser or file manager
    you used to open the file.
 2. Open **Ticket Watch → Explore → Try local demo**. Simulate unavailable, then available.

@@ -9,9 +9,9 @@ Rust monitoring that combines **Ticketmaster Discovery API searches** with **web
 The [0.6.0-test release](https://github.com/AtecHEvolutioN/Ticket/releases/tag/v0.6.0-test)
 contains the tested builds and SHA-256 checksums:
 
-- [Android APK](https://github.com/AtecHEvolutioN/Ticket/releases/download/v0.6.0-test/ticket-watch-android.apk) — Android 8.0 or newer; manual page checks and venue presets.
-- [Linux x86_64 bot](https://github.com/AtecHEvolutioN/Ticket/releases/download/v0.6.0-test/ticket-watch-bot-linux-x86_64.tar.gz) — continuous monitoring after configuration; glibc 2.39 or newer.
-- [21-venue starter database](https://github.com/AtecHEvolutioN/Ticket/releases/download/v0.6.0-test/venue-presets.sqlite) — a fresh database with venue metadata and no saved watches. To add venues to an existing monitor, import [the JSON seed](examples/venue-presets.json) using [the venue commands](docs/venue-presets.md).
+- [Android APK](https://github.com/AtecHEvolutioN/Ticket/raw/refs/heads/main/downloads/ticket-watch-android.apk) — Android 8.0 or newer; manual page checks and venue presets.
+- [Linux x86_64 bot](https://github.com/AtecHEvolutioN/Ticket/raw/refs/heads/main/downloads/ticket-watch-bot-linux-x86_64.tar.gz) — continuous monitoring after configuration; glibc 2.39 or newer.
+- [21-venue starter database](https://github.com/AtecHEvolutioN/Ticket/raw/refs/heads/main/downloads/venue-presets.sqlite) — a fresh database with venue metadata and no saved watches. To add venues to an existing monitor, import [the JSON seed](examples/venue-presets.json) using [the venue commands](docs/venue-presets.md).
 
 Verification: 164 Rust tests, Clippy, 26 browser tests, and 291 offline Android
 assertions passed locally. Android verification used an API 28 emulator; see
