@@ -1,10 +1,11 @@
 'use strict';
 
-// A long-lived, ordinary Playwright browser. No stealth, CAPTCHA handling,
+// A long-lived, ordinary Playwright browser. No stealth, CAPTCHA solving,
 // checkout actions, login automation, or hidden-endpoint replay is performed.
 const readline = require('node:readline');
 const { captureRendered, sameEvent } = require('./rendered.cjs');
 const { prepareTicketmaster } = require('./ticketmaster.cjs');
+const { inspectChallenge } = require('./manual-intervention.cjs');
 const ALLOWED_DOMAINS = new Set([
   'ticketmaster.pl', 'ticketmaster.cz', 'ticketmaster.com', 'ticketmaster.co.uk',
   'ticketmaster.de', 'ticketmaster.at', 'ticketmaster.ch', 'ticketmaster.be',
@@ -82,11 +83,13 @@ async function capture(context, request) {
     let html = '';
     let adapterState;
     let adapterReason;
+    let manualIntervention;
     if (status >= 200 && status < 300) {
       const remaining = Math.max(0, request.timeout_ms - (performance.now() - started));
       const renderingWait = Math.min(request.render_wait_ms, remaining);
       if (renderingWait) await page.waitForTimeout(renderingWait);
-      if (request.adapter === 'ticketmaster') {
+      manualIntervention = await inspectChallenge(page);
+      if (!manualIntervention && request.adapter === 'ticketmaster') {
         const prepared = await prepareTicketmaster(page, target.href, request.timeout_ms - (performance.now() - started));
         adapterReason = prepared.state;
         adapterState = ['regional', 'listings'].includes(prepared.state) ? 'ready'
@@ -94,11 +97,17 @@ async function capture(context, request) {
             : prepared.state === 'no_visible_offers' ? 'no_offers' : 'unsupported';
       }
       html = await captureRendered(page, request.max_body_bytes);
+      manualIntervention ||= await inspectChallenge(page);
+      if (manualIntervention) {
+        adapterState = 'blocked';
+        adapterReason = 'manual_intervention';
+      }
     }
     const finalUrl = validateUrl(page.url());
     if (unsafeRedirect || finalUrl.hostname !== target.hostname) throw new Error('unsafe_redirect');
     return { id: request.id, status, html, final_url: finalUrl.href,
       ...(adapterState ? { adapter_state: adapterState, adapter_reason: adapterReason } : {}),
+      ...(manualIntervention ? { manual_intervention: manualIntervention } : {}),
       retry_after_secs: retryAfter(headers['retry-after']), elapsed_ms: Math.round(performance.now() - started),
       server: headers.server?.slice(0, 120), content_type: headers['content-type']?.slice(0, 120) };
   } catch (error) {

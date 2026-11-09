@@ -6,8 +6,9 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const readline = require('node:readline/promises');
 const { validateUrl, proxyOptions } = require('./worker.cjs');
-const { sameEvent, captureRendered, challengeText } = require('./rendered.cjs');
+const { sameEvent, captureRendered } = require('./rendered.cjs');
 const { prepareTicketmaster } = require('./ticketmaster.cjs');
+const { inspectChallenge, waitForManualClearance } = require('./manual-intervention.cjs');
 
 const MAX_BYTES = 8 * 1024 * 1024;
 const HELP = `Capture a public Ticketmaster event for local scraper setup.
@@ -194,13 +195,29 @@ async function captureSession(options, dependencies = {}) {
     output.write('Do not enter payment details. Captures remain private and do not verify a scraper profile.\n');
     terminal = readline.createInterface({ input, output });
     await bounded(terminal.question('', { signal: controller.signal }));
-    if (blockedNavigation) throw new Error('unsafe_redirect');
-    const final = validateUrl(page.url());
-    if (!sameEvent(target.href, final.href) || !latestResponse || !sameEvent(final.href, latestResponse.url)) throw new Error('unsafe_redirect');
-    if (latestResponse.status < 200 || latestResponse.status >= 300) throw new Error('page_access_refused');
-    const text = await bounded(page.evaluate(() => `${document.title}\n${document.body?.innerText || ''}`.slice(0, 40000)));
-    if (challengeText(text)) throw new Error('page_access_refused');
+    const validateCurrentPage = () => {
+      if (blockedNavigation) throw new Error('unsafe_redirect');
+      const final = validateUrl(page.url());
+      if (!sameEvent(target.href, final.href) || !latestResponse || !sameEvent(final.href, latestResponse.url)) throw new Error('unsafe_redirect');
+      if (latestResponse.status < 200 || latestResponse.status >= 300) throw new Error('page_access_refused');
+      return final;
+    };
+    const inspect = async () => {
+      validateCurrentPage();
+      const kind = await inspectChallenge(page);
+      validateCurrentPage();
+      return kind;
+    };
+    const requestHuman = dependencies.requestHuman || (async ({ message, attempt, signal }) => {
+      output.write(`Manual attention (${attempt}/3): ${message}\n`);
+      await terminal.question('When the public offers are visible, press Enter to recheck. Ctrl+C cancels.\n', { signal });
+    });
+    const clearance = await bounded(waitForManualClearance({ inspect, requestHuman, signal: controller.signal,
+      timeoutMs: options.timeoutSecs * 1000 }));
+    if (clearance.state !== 'clear') throw new Error('page_access_refused');
     const html = await bounded((dependencies.captureRendered || captureRendered)(page, MAX_BYTES));
+    if (await bounded(inspect())) throw new Error('page_access_refused');
+    const final = validateCurrentPage();
     return await bounded(writeCapture(options.output, html, {
       original_url: target.href, final_url: final.href, captured_at: new Date().toISOString(), status: latestResponse.status,
     }, { overwrite: options.overwrite }));

@@ -13,7 +13,7 @@ contains the tested builds and SHA-256 checksums:
 - [Linux x86_64 bot](https://github.com/AtecHEvolutioN/Ticket/raw/refs/heads/main/downloads/ticket-watch-bot-linux-x86_64.tar.gz) — continuous monitoring after configuration; glibc 2.39 or newer.
 - [21-venue starter database](https://github.com/AtecHEvolutioN/Ticket/raw/refs/heads/main/downloads/venue-presets.sqlite) — a fresh database with venue metadata and no saved watches. To add venues to an existing monitor, import [the JSON seed](examples/venue-presets.json) using [the venue commands](docs/venue-presets.md).
 
-Verification: 164 Rust tests, Clippy, 26 browser tests, and 291 offline Android
+Release verification: 164 Rust tests, Clippy, 26 browser tests, and 291 offline Android
 assertions passed locally. Android verification used an API 28 emulator; see
 [test details](android/TESTING.md). The released APK retains the certificate used
 for earlier local test builds; freshly built CI artifacts use ephemeral signing.
@@ -85,6 +85,7 @@ Catalog refreshes preserve matching cached watches through partial failures and 
 - Each offer requires a visible, enabled purchase signal. Browser captures preserve computed visibility and disabled controls, and fetched event IDs must match the watched event after redirects.
 - Prices carry currency, per-ticket/total/unknown basis, and fee scope. Quantities distinguish listing, reported remaining, selectable order capacity, and unknown; they are never added into an event-wide stock total.
 - A local browser capture command and offline `profile-check` report help validate event-specific extraction without sending messages or modifying monitoring state.
+- A [manual verification extension point](docs/manual-intervention.md) keeps interactive capture in the same browser while an operator handles a challenge. Background checks report a fixed blocked reason and back off. This source change is newer than the 0.6.0-test downloads.
 - Optional quantity and price filters, offer-change detection, and a quiet initial baseline by default.
 - Per-host pacing, bounded concurrency, backoff, and saved host cooldowns.
 - Atomic state/outbox persistence, restart deduplication, stale-alert expiry, and explicit Discord mentions.

@@ -289,6 +289,33 @@ struct BrowserRequest<'a> {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ManualIntervention {
+    Captcha,
+    Queue,
+    SessionExpired,
+    AuthenticationRequired,
+    AccessBlocked,
+    Verification,
+    #[serde(other)]
+    Unknown,
+}
+
+impl ManualIntervention {
+    fn detail(&self) -> &'static str {
+        match self {
+            Self::Captcha => "human verification",
+            Self::Queue => "website queue",
+            Self::SessionExpired => "expired session",
+            Self::AuthenticationRequired => "authentication required",
+            Self::AccessBlocked => "access blocked",
+            Self::Verification => "website access check",
+            Self::Unknown => "unrecognized browser restriction",
+        }
+    }
+}
+
+#[derive(Deserialize)]
 struct BrowserReply {
     id: Option<u64>,
     #[serde(default)]
@@ -302,6 +329,7 @@ struct BrowserReply {
     server: Option<String>,
     content_type: Option<String>,
     adapter_state: Option<String>,
+    manual_intervention: Option<ManualIntervention>,
 }
 
 struct BrowserProcess {
@@ -427,7 +455,7 @@ impl BrowserProcess {
                     .map(safe_header)
                     .unwrap_or_else(|| "not supplied".into())
             );
-            let adapter_state = match request.adapter {
+            let mut adapter_state = match request.adapter {
                 PageAdapter::Selectors => None,
                 PageAdapter::Ticketmaster => Some(match reply.adapter_state.as_deref() {
                     Some(state @ ("ready" | "unsupported" | "blocked" | "no_offers")) => {
@@ -436,9 +464,20 @@ impl BrowserProcess {
                     _ => "unsupported".to_string(),
                 }),
             };
+            // A verification page is never inventory evidence, including custom
+            // selector mode. Older workers may omit this optional protocol field.
+            let detail = if let Some(reason) = reply.manual_intervention {
+                adapter_state = Some("blocked".into());
+                format!(
+                    "{detail}; manual intervention required: {}; inventory unknown",
+                    reason.detail()
+                )
+            } else {
+                detail
+            };
             let detail = adapter_state
                 .as_ref()
-                .map(|state| format!("{detail}; ticketmaster adapter={state}"))
+                .map(|state| format!("{detail}; browser adapter={state}"))
                 .unwrap_or(detail);
             return Ok(FetchResult {
                 status,
@@ -616,6 +655,47 @@ mod tests {
         assert_eq!(second.html, "2");
         fetcher.shutdown().await;
         assert!(fetcher.browser.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn browser_manual_intervention_blocks_both_adapters_with_fixed_diagnostics() {
+        let mut script = tempfile::NamedTempFile::new().unwrap();
+        script
+            .write_all(
+                br#"
+            const readline = require('node:readline');
+            readline.createInterface({input:process.stdin}).on('line', line => {
+                const r = JSON.parse(line);
+                process.stdout.write(JSON.stringify({id:r.id,status:200,html:'<button>Tickets</button>',
+                    final_url:r.url,adapter_state:'ready',manual_intervention:
+                    r.id === 3 ? 'secret-untrusted-worker-value' : 'captcha'})+'\n');
+            });
+        "#,
+            )
+            .unwrap();
+        let mut config = Config::default();
+        config.browser.script = script.path().into();
+        let fetcher = Fetcher::new(&config).unwrap();
+        let mut watch = Watch {
+            url: "https://www.ticketmaster.cz/event/synthetic/12345678".into(),
+            mode: FetchMode::Browser,
+            ..Watch::default()
+        };
+        for adapter in [PageAdapter::Selectors, PageAdapter::Ticketmaster] {
+            watch.parser.adapter = adapter;
+            let result = fetcher.fetch(&watch).await.unwrap();
+            assert_eq!(result.adapter_state.as_deref(), Some("blocked"));
+            assert!(
+                result
+                    .detail
+                    .contains("manual intervention required: human verification")
+            );
+        }
+        let unknown = fetcher.fetch(&watch).await.unwrap();
+        assert_eq!(unknown.adapter_state.as_deref(), Some("blocked"));
+        assert!(unknown.detail.contains("unrecognized browser restriction"));
+        assert!(!unknown.detail.contains("secret-untrusted"));
+        fetcher.shutdown().await;
     }
 
     #[tokio::test]

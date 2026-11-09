@@ -103,6 +103,12 @@ For an installed Chromium, set `[browser].executable_path` to its absolute path 
 
 The browser respects inherited proxy settings and TLS verification. A 403 does not automatically switch transports. Challenges and incomplete pages are unknown/blocked observations, never proof of sold-out inventory.
 
+Recognized verification and queue messages include a fixed manual-intervention
+reason in browser diagnostics. Both the built-in adapter and custom selectors
+treat these pages as blocked. Background checks keep normal backoff and close the
+page; they do not wait for a person. See [manual verification](manual-intervention.md)
+for the operator interface extension point and its current limits.
+
 Browser mode serializes a clone of the rendered page with computed-hidden and disabled
 elements marked for the Rust parser; it leaves the live DOM unchanged. This makes CSS
 visibility and disabled fieldsets consistent with extraction. Successful page redirects
@@ -121,9 +127,11 @@ npm run capture -- --url https://www.ticketmaster.pl/event/korn-bilety/496543017
 ```
 
 It opens a fresh browser context. When the selected event's offers are visible,
-return to the terminal and press Enter. It does not select tickets, reserve seats,
-import personal sessions, or automate verification. A final HTTP error, challenge,
-or different event prevents capture. The browser closes on completion, cancellation,
+return to the terminal and press Enter. If a recognized verification or queue prompt
+remains, the tool lets you handle it in the same browser and press Enter to recheck,
+up to three times within the session timeout. It does not select tickets, reserve
+seats, import personal sessions, or automate verification. A final HTTP error,
+remaining challenge, or different event prevents capture. The browser closes on completion, cancellation,
 or timeout. An existing Chromium can be selected with `--executable-path`; use
 `--timeout-secs` for a bounded 30–1800 second session.
 

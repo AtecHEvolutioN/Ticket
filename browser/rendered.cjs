@@ -1,5 +1,7 @@
 'use strict';
 
+const { challengeKind } = require('./manual-intervention.cjs');
+
 // Shared by the background worker and the explicitly operator-driven capture tool.
 // These helpers preserve ordinary page behavior; they neither click nor change the live DOM.
 const BLOCKED_SEGMENTS = new Set([
@@ -47,16 +49,7 @@ function sameEvent(expected, actual) {
 }
 
 function challengeText(text) {
-  const visible = String(text || '').replace(/\s+/g, ' ').toLowerCase();
-  return [
-    'verify you are human', 'verify that you are human', "verify you're human",
-    'complete the captcha', 'solve the captcha', 'complete the recaptcha',
-    'your browsing activity has been paused', "we've paused activity", 'we’ve paused activity',
-    'access denied', 'request blocked', 'pardon the interruption',
-    'you are in the queue', "you're in the queue", 'you are now in line',
-    'your place in the queue', 'waiting room', 'checking your browser',
-    'enable cookies to continue', 'your session has expired',
-  ].some(marker => visible.includes(marker));
+  return challengeKind(text) !== null;
 }
 
 async function captureRendered(page, maximum) {
