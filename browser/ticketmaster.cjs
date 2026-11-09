@@ -11,7 +11,7 @@ const BEST_AVAILABLE = [
 ];
 const REJECT_COOKIES = [
   'Reject all', 'Reject All', 'Odrzuć wszystko', 'Reject non-essential cookies',
-  'Alles weigeren',
+  'Alles weigeren', 'Odmítnout vše',
 ];
 
 async function inspect(page) {

@@ -1,8 +1,16 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { validateUrl, validateRequest, retryAfter, proxyOptions, capture } = require('./worker.cjs');
+const { validateUrl, validateRequest, retryAfter, identificationRetryAllowed, proxyOptions, capture } = require('./worker.cjs');
 const { captureRendered, sameEvent, challengeText } = require('./rendered.cjs');
+const { EventEmitter } = require('node:events');
+
+function errorOnlyContext(page) {
+  const session = new EventEmitter();
+  session.send = async () => ({ frameTree: { frame: { id: 'main' } } });
+  session.detach = async () => {};
+  return { newPage: async () => page, newCDPSession: async () => session };
+}
 
 test('watch targets exclude payment sessions and foreign hosts', () => {
   assert.equal(validateUrl('https://www.ticketmaster.pl/event/korn/496543017').hostname, 'www.ticketmaster.pl');
@@ -19,6 +27,17 @@ test('Retry-After supports seconds and HTTP dates', () => {
   assert.equal(retryAfter('120', 0), 120);
   assert.equal(retryAfter('Thu, 01 Jan 1970 00:02:00 GMT', 30000), 90);
   assert.equal(retryAfter('bad'), null);
+});
+
+test('identification waiting requires an absent or strictly expired Retry-After value', () => {
+  assert.equal(identificationRetryAllowed({}, 120000), true);
+  for (const value of ['0', '00', 'Thu, 01 Jan 1970 00:02:00 GMT']) {
+    assert.equal(identificationRetryAllowed({ 'retry-after': value }, 120000), true, value);
+  }
+  for (const value of ['', '1', '0, 1', '0, 12', '0, 120', '-1', '+1', '0.5', 'invalid',
+    'Thu, 01 Jan 1970 00:02:01 GMT', 'Fri, 01 Jan 1970 00:02:00 GMT', 'Fri, 31 Feb 2023 00:00:00 GMT']) {
+    assert.equal(identificationRetryAllowed({ 'retry-after': value }, 120000), false, value);
+  }
 });
 
 test('proxy configuration preserves inherited server, credentials, and bypass', () => {
@@ -62,16 +81,48 @@ test('403 capture returns unknown transport status without extracting challenge 
   const url = 'https://www.ticketmaster.pl/event/korn/496543017';
   const page = {
     route: async () => {},
-    goto: async () => ({status:()=>403,headers:()=>({'retry-after':'90'})}),
+    goto: async () => ({status:()=>403,headers:()=>({'retry-after':'90'}),url:()=>url}),
     url:()=>url,
     content:()=>{ throw new Error('must not read challenge body'); },
     close:async()=>{closed=true;},
   };
-  const reply = await capture({newPage:async()=>page}, {id:1,url,timeout_ms:1000,max_body_bytes:1024,render_wait_ms:0});
+  const reply = await capture(errorOnlyContext(page), {id:1,url,timeout_ms:1000,max_body_bytes:1024,render_wait_ms:0});
   assert.equal(reply.status,403);
   assert.equal(reply.html,'');
   assert.equal(reply.retry_after_secs,90);
+  assert.equal(reply.manual_intervention,undefined);
   assert.ok(closed);
+});
+
+test('Ticketmaster protection headers explain 403 without reading or rendering its body', async () => {
+  const url = 'https://www.ticketmaster.cz/event/synthetic/12345678';
+  const forbidden = () => { throw new Error('must not inspect an error body or prepare its display'); };
+  for (const adapter of ['selectors', 'ticketmaster']) {
+    let closed = false;
+    const page = {
+      route: async () => {},
+      goto: async () => ({ status: () => 403,
+        headers: () => ({ 'tm-bl': '1', 'retry-after': '90', 'ebid': 'private-session-value' }),
+        url: () => url,
+        body: forbidden, text: forbidden, json: forbidden }),
+      url: () => url,
+      evaluate: forbidden,
+      content: forbidden,
+      waitForTimeout: forbidden,
+      close: async () => { closed = true; },
+    };
+    const reply = await capture(errorOnlyContext(page), {
+      id: 1, url, timeout_ms: 1000, max_body_bytes: 1024, render_wait_ms: 10, adapter,
+    });
+    assert.equal(reply.status, 403);
+    assert.equal(reply.html, '');
+    assert.equal(reply.manual_intervention, 'ticketmaster_protection');
+    assert.equal(reply.adapter_state, 'blocked');
+    assert.equal(reply.adapter_reason, 'manual_intervention');
+    assert.equal(reply.retry_after_secs, 90);
+    assert.equal(JSON.stringify(reply).includes('private-session-value'), false);
+    assert.equal(closed, true);
+  }
 });
 
 test('ordinary Chromium renders an offline fixture and preserves blocked status',

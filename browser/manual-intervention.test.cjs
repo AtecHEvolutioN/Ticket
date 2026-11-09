@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { challengeKind, inspectChallenge, waitForManualClearance } = require('./manual-intervention.cjs');
+const { challengeKind, responseIntervention, inspectChallenge, waitForManualClearance, MESSAGES } = require('./manual-intervention.cjs');
 const { capture } = require('./worker.cjs');
 
 test('challenge reasons recognize English and Czech prompts without treating attribution as a challenge', () => {
@@ -22,6 +22,21 @@ test('challenge reasons recognize English and Czech prompts without treating att
 test('without an operator handler a challenge returns immediately and an ordinary page is clear', async () => {
   assert.deepEqual(await waitForManualClearance({ inspect: async () => 'queue' }), { state: 'needs_human', kind: 'queue' });
   assert.deepEqual(await waitForManualClearance({ inspect: async () => null }), { state: 'clear' });
+});
+
+test('header diagnosis requires the observed 403 marker and never forwards arbitrary values', () => {
+  for (const value of ['1', ' 1 ']) {
+    const kind = responseIntervention(403, { 'tm-bl': value });
+    assert.equal(kind, 'ticketmaster_protection');
+    assert.equal(MESSAGES[kind], 'Ticketmaster access-protection block; exact trigger undisclosed');
+  }
+  for (const value of [undefined, '', '0', 'unknown-private-value', '1, 1', 1]) {
+    assert.equal(responseIntervention(403, { 'tm-bl': value }), null);
+  }
+  assert.equal(responseIntervention(403, undefined), null);
+  for (const status of [200, 401, 429, 500]) {
+    assert.equal(responseIntervention(status, { 'tm-bl': '1' }), null);
+  }
 });
 
 test('operator acknowledgement cannot override a challenge and repeated prompts are bounded', async () => {

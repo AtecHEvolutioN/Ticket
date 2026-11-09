@@ -198,16 +198,31 @@ async fn read_response(
     let final_url = response.url().to_string();
     // Error pages are never inventory evidence, and there is no need to download a large challenge body.
     if !status.is_success() {
+        let mut detail = format!(
+            "{}; server={server}; content-type={response_type}",
+            status_detail(status)
+        );
+        // Match only the observed status/header combination. The marker does not
+        // disclose the underlying risk rule and arbitrary header values stay private.
+        if status == StatusCode::FORBIDDEN
+            && response.headers().get_all("tm-bl").iter().count() == 1
+            && response
+                .headers()
+                .get("tm-bl")
+                .and_then(|value| value.to_str().ok())
+                .map(str::trim)
+                == Some("1")
+        {
+            detail.push_str("; manual intervention required: ");
+            detail.push_str(ManualIntervention::TicketmasterProtection.detail());
+        }
         return Ok(FetchResult {
             status: status.as_u16(),
             html: String::new(),
             retry_after_secs,
             elapsed_ms: started.elapsed().as_millis() as u64,
             final_url,
-            detail: format!(
-                "{}; server={server}; content-type={response_type}",
-                status_detail(status)
-            ),
+            detail,
             adapter_state: None,
         });
     }
@@ -297,6 +312,8 @@ enum ManualIntervention {
     AuthenticationRequired,
     AccessBlocked,
     Verification,
+    TicketmasterProtection,
+    IdentificationIncomplete,
     #[serde(other)]
     Unknown,
 }
@@ -310,6 +327,12 @@ impl ManualIntervention {
             Self::AuthenticationRequired => "authentication required",
             Self::AccessBlocked => "access blocked",
             Self::Verification => "website access check",
+            Self::TicketmasterProtection => {
+                "Ticketmaster access-protection block; exact trigger undisclosed"
+            }
+            Self::IdentificationIncomplete => {
+                "Ticketmaster identification incomplete; last confirmed error response retained"
+            }
             Self::Unknown => "unrecognized browser restriction",
         }
     }
@@ -613,6 +636,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ticketmaster_protection_header_explains_403_without_reading_error_body() {
+        // The declared body is oversized and missing. Reading it would fail;
+        // diagnosis must use only the status and response headers.
+        let response = response_from(
+            b"HTTP/1.1 403 Forbidden\r\nTM-BL: 1\r\nRetry-After: 120\r\nContent-Length: 100000000\r\n\r\n",
+        )
+        .await;
+        let result = read_response(response, 1, Instant::now()).await.unwrap();
+        assert_eq!(result.status, 403);
+        assert_eq!(result.retry_after_secs, Some(120));
+        assert!(result.html.is_empty());
+        assert!(result.detail.contains(
+            "manual intervention required: Ticketmaster access-protection block; exact trigger undisclosed"
+        ));
+    }
+
+    #[tokio::test]
+    async fn protection_diagnosis_does_not_reclassify_other_responses_or_echo_header_values() {
+        let cases: [&'static [u8]; 8] = [
+            b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n",
+            b"HTTP/1.1 403 Forbidden\r\nTM-BL: 0\r\nContent-Length: 0\r\n\r\n",
+            b"HTTP/1.1 403 Forbidden\r\nTM-BL: private-marker-value\r\nContent-Length: 0\r\n\r\n",
+            b"HTTP/1.1 403 Forbidden\r\nTM-BL: 1, 1\r\nContent-Length: 0\r\n\r\n",
+            b"HTTP/1.1 403 Forbidden\r\nTM-BL: 1\r\nTM-BL: 0\r\nContent-Length: 0\r\n\r\n",
+            b"HTTP/1.1 401 Unauthorized\r\nTM-BL: 1\r\nContent-Length: 0\r\n\r\n",
+            b"HTTP/1.1 429 Too Many Requests\r\nTM-BL: 1\r\nRetry-After: 90\r\nContent-Length: 0\r\n\r\n",
+            b"HTTP/1.1 500 Server Error\r\nTM-BL: 1\r\nContent-Length: 0\r\n\r\n",
+        ];
+        for raw in cases {
+            let response = response_from(raw).await;
+            let result = read_response(response, 100, Instant::now()).await.unwrap();
+            assert!(result.html.is_empty());
+            assert!(!result.detail.contains("access-protection"));
+            assert!(!result.detail.contains("private-marker-value"));
+            if result.status == 429 {
+                assert_eq!(result.retry_after_secs, Some(90));
+                assert!(result.detail.contains("Rate limited"));
+            }
+        }
+        let response = response_from(
+            b"HTTP/1.1 200 OK\r\nTM-BL: 1\r\nContent-Type: text/html\r\nContent-Length: 7\r\n\r\ntickets",
+        )
+        .await;
+        let result = read_response(response, 100, Instant::now()).await.unwrap();
+        assert_eq!(result.html, "tickets");
+        assert_eq!(result.detail, "HTTP page received");
+        assert_eq!(result.adapter_state, None);
+    }
+
+    #[tokio::test]
     async fn streaming_body_limit_is_enforced_without_content_length() {
         let response = response_from(b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nTransfer-Encoding: chunked\r\n\r\n6\r\nabcdef\r\n0\r\n\r\n").await;
         assert!(read_response(response, 5, Instant::now()).await.is_err());
@@ -666,8 +739,10 @@ mod tests {
             const readline = require('node:readline');
             readline.createInterface({input:process.stdin}).on('line', line => {
                 const r = JSON.parse(line);
-                process.stdout.write(JSON.stringify({id:r.id,status:200,html:'<button>Tickets</button>',
+                process.stdout.write(JSON.stringify({id:r.id,status:r.id >= 6 ? 401 : r.id >= 4 ? 403 : 200,
+                    html:r.id >= 4 ? '' : '<button>Tickets</button>',retry_after_secs:r.id >= 6 ? 0 : 90,
                     final_url:r.url,adapter_state:'ready',manual_intervention:
+                    r.id >= 6 ? 'identification_incomplete' : r.id >= 4 ? 'ticketmaster_protection' :
                     r.id === 3 ? 'secret-untrusted-worker-value' : 'captcha'})+'\n');
             });
         "#,
@@ -695,6 +770,29 @@ mod tests {
         assert_eq!(unknown.adapter_state.as_deref(), Some("blocked"));
         assert!(unknown.detail.contains("unrecognized browser restriction"));
         assert!(!unknown.detail.contains("secret-untrusted"));
+        for adapter in [PageAdapter::Selectors, PageAdapter::Ticketmaster] {
+            watch.parser.adapter = adapter;
+            let blocked = fetcher.fetch(&watch).await.unwrap();
+            assert_eq!(blocked.status, 403);
+            assert!(blocked.html.is_empty());
+            assert_eq!(blocked.retry_after_secs, Some(90));
+            assert_eq!(blocked.adapter_state.as_deref(), Some("blocked"));
+            assert!(blocked.detail.contains(
+                "manual intervention required: Ticketmaster access-protection block; exact trigger undisclosed"
+            ));
+        }
+        for adapter in [PageAdapter::Selectors, PageAdapter::Ticketmaster] {
+            watch.parser.adapter = adapter;
+            let blocked = fetcher.fetch(&watch).await.unwrap();
+            assert_eq!(blocked.status, 401);
+            assert!(blocked.html.is_empty());
+            assert_eq!(blocked.retry_after_secs, Some(0));
+            assert_eq!(blocked.final_url, watch.url);
+            assert_eq!(blocked.adapter_state.as_deref(), Some("blocked"));
+            assert!(blocked.detail.contains(
+                "Ticketmaster identification incomplete; last confirmed error response retained"
+            ));
+        }
         fetcher.shutdown().await;
     }
 

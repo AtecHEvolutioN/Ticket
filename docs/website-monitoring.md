@@ -2,6 +2,11 @@
 
 Date: 2026-11-09. Status: one successful live KoRn offer capture plus the website adapter design. The first implementation is available (see [running the monitor](running.md)); unattended access and alerts remain unverified, and no live monitoring service has been deployed.
 
+Later update: [Czech access diagnosis and price snapshot](czech-access.md) records
+successful headed Chromium access to the Prague event and the correction for its
+initial identification-page navigation. The observations below describe the
+earlier feasibility checks.
+
 Decision: this is the primary acquisition design. The user reports that the demonstrated service scrapes websites. Begin with KoRn Poland; implement additional markets after validating their page signals and access behavior. Website fetching does not require a Ticketmaster API key. The newly available Explorer key is used separately for Discovery artist/event searches. The reference service's exact requests, session handling, and polling frequency are not yet known.
 
 ## Conclusion

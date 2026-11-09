@@ -1,0 +1,78 @@
+{
+  "captured_at": "2026-11-09T22:04:55.095Z",
+  "event_url": "https://www.ticketmaster.cz/event/korn-vstupenky/1472650657",
+  "event_title": "KoRn | po 16. 11. 2026 19:30 | Zakoupit vstupenky u Ticketmaster.cz",
+  "browser": "Chromium 156, headed, fresh context, virtual display",
+  "network": "Same configured Cloud proxy as the prior headless test; identical exit IP was not established",
+  "document_status_sequence": [
+    401,
+    200
+  ],
+  "display_adapter": {
+    "state": "regional",
+    "opened": true
+  },
+  "ticket_categories": [
+    {
+      "ticket_type": "Omezený výhled",
+      "currency": "CZK",
+      "price_min_minor": 171200,
+      "price_max_minor": 212500,
+      "price_text": "1 712,00 Kč–2 125,00 Kč za kus"
+    },
+    {
+      "ticket_type": "Sezení",
+      "currency": "CZK",
+      "price_min_minor": 188900,
+      "price_max_minor": 236100,
+      "price_text": "1 889,00 Kč–2 361,00 Kč za kus"
+    },
+    {
+      "ticket_type": "Oficiální vstupenka Platinum",
+      "currency": "CZK",
+      "price_min_minor": 259000,
+      "price_max_minor": 559100,
+      "price_text": "2 590,00 Kč–5 591,00 Kč za kus"
+    },
+    {
+      "ticket_type": "Stání",
+      "currency": "CZK",
+      "price_min_minor": 212500,
+      "price_max_minor": 212500,
+      "price_text": "2 125,00 Kč za kus"
+    }
+  ],
+  "displayed_price_basis": "per ticket; page states service fee included; complete checkout fees not verified",
+  "remaining_ticket_count": null,
+  "adjacent_group_confirmed": false,
+  "tickets_reserved": 0,
+  "purchase_limit_displayed": 6,
+  "actions": [
+    "Open the selected public event",
+    "Wait for the website’s own page navigation",
+    "Open the recognized best-available display tab"
+  ],
+  "limitations": [
+    "Single-session snapshot, not sustained monitoring",
+    "Category ranges do not establish current purchasable stock",
+    "No ticket selection, reservation or CAPTCHA solver used",
+    "Exact access-protection rule remains undisclosed"
+  ],
+  "release_cli_validation": {
+    "checked_at": "2026-11-09T22:27:50+00:00",
+    "mode": "headed",
+    "source": "live_browser",
+    "http_status": 200,
+    "adapter": "ticketmaster-regional-v1",
+    "displayed_categories": 4,
+    "availability": "unknown",
+    "complete": false,
+    "matching_price_snapshot": true,
+    "tests": {
+      "rust": 167,
+      "browser": 45,
+      "clippy": "passed",
+      "format": "passed"
+    }
+  }
+}

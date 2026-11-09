@@ -42,7 +42,7 @@ test('captured Czech, Spanish and Dutch labels open only their display controls'
   try {
     const context = await browser.newContext({ serviceWorkers: 'block' });
     const cases = [
-      ['cz', 'Nejlepší dostupné', false],
+      ['cz', 'Nejlepší dostupné', 'Odmítnout vše'],
       ['es', 'Ver lo mejor disponible', false],
       ['nl', 'Best beschikbaar', 'Alles weigeren'],
     ];

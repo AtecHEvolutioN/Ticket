@@ -103,6 +103,17 @@ For an installed Chromium, set `[browser].executable_path` to its absolute path 
 
 The browser respects inherited proxy settings and TLS verification. A 403 does not automatically switch transports. Challenges and incomplete pages are unknown/blocked observations, never proof of sold-out inventory.
 
+The [Czech access investigation](czech-access.md) found an initial HTTP 401 HTML
+identification response that navigated normally to the same event with HTTP 200
+in headed Chromium. For this exact marked response, the worker allows a bounded
+five-second passive wait within the request deadline. A supplied `Retry-After`
+must parse as zero to permit this wait. It uses the final committed document and does not reload
+the page or retry a blocked request. Initial 403 and 429 responses retain backoff.
+The observed 403 protection marker now produces a specific access-protection
+diagnostic in both browser and direct HTTP modes. An unfinished identification
+navigation retains the initial blocked 401, with an explicit incomplete reason
+and no inventory HTML.
+
 Recognized verification and queue messages include a fixed manual-intervention
 reason in browser diagnostics. Both the built-in adapter and custom selectors
 treat these pages as blocked. Background checks keep normal backoff and close the

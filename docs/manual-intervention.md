@@ -12,7 +12,11 @@ or queue bypass is implemented.
   `manual_intervention` with a fixed reason and `adapter_state = "blocked"`.
   Rust treats this as unknown inventory, including when custom selectors would
   otherwise find ticket buttons. Normal blocked backoff and `Retry-After` handling
-  apply. HTTP errors keep their existing handling; error bodies are not extracted.
+  apply. An HTTP 403 with the observed `tm-bl: 1` marker reports the fixed
+  `ticketmaster_protection` reason without reading its body. Other error responses
+  keep their existing handling. The narrow initial-401 navigation wait described
+  in [Czech access](czech-access.md) lets the website finish its own loading flow;
+  it does not wait for a human or initiate verification actions.
 - **Interactive capture:** after the initial Enter, a recognized challenge pauses
   capture and prompts you to complete verification yourself in the same browser.
   Enter triggers a fresh check of the event URL, response status and visible text.

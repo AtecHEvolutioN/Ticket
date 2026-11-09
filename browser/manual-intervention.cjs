@@ -9,6 +9,8 @@ const MESSAGES = Object.freeze({
   authentication_required: 'The page requires authentication. Operator attention is needed.',
   access_blocked: 'The website has blocked access. Operator attention is needed.',
   verification: 'The website is checking access. Inspect the open browser.',
+  ticketmaster_protection: 'Ticketmaster access-protection block; exact trigger undisclosed',
+  identification_incomplete: 'Ticketmaster identification incomplete; last confirmed error response retained',
 });
 
 const MARKERS = [
@@ -27,6 +29,14 @@ const MARKERS = [
 function challengeKind(text) {
   const visible = String(text || '').normalize('NFC').replace(/\s+/g, ' ').toLowerCase();
   return MARKERS.find(([, markers]) => markers.some(marker => visible.includes(marker)))?.[0] || null;
+}
+
+// Only call for a validated Ticketmaster response. This observed header/status
+// pair identifies an access-protection response, not its underlying risk rule.
+// Playwright normalizes response header names to lowercase.
+function responseIntervention(status, headers) {
+  return status === 403 && typeof headers?.['tm-bl'] === 'string' && headers['tm-bl'].trim() === '1'
+    ? 'ticketmaster_protection' : null;
 }
 
 async function inspectChallenge(page) {
@@ -84,4 +94,4 @@ async function waitForManualClearance({ inspect, requestHuman, signal, timeoutMs
   }
 }
 
-module.exports = { challengeKind, inspectChallenge, waitForManualClearance, MESSAGES };
+module.exports = { challengeKind, responseIntervention, inspectChallenge, waitForManualClearance, MESSAGES };
