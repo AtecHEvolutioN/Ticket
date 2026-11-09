@@ -394,3 +394,66 @@ fn map_image_existing_output_is_not_overwritten_or_downloaded() {
     assert_eq!(std::fs::read(&image).unwrap(), b"keep original");
     assert!(!directory.path().join("data").exists());
 }
+
+#[test]
+fn map_geometry_export_is_bound_to_the_event_and_never_creates_stock() {
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("event.html");
+    let output_file = directory.path().join("sections.svg");
+    let base = include_str!("fixtures/seat-map-regional.html");
+    let geometry = include_str!("fixtures/map-geometry.html");
+    let start = geometry.find("<svg ").unwrap();
+    let end = geometry.find("</svg>").unwrap() + "</svg>".len();
+    std::fs::write(
+        &file,
+        base.replace("</aside>", &format!("{}</aside>", &geometry[start..end])),
+    )
+    .unwrap();
+    let run = || {
+        Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+            .current_dir(directory.path())
+            .args([
+                "map-inspect",
+                "--url",
+                "https://www.ticketmaster.cz/event/synthetic-concert/1234567890",
+                "--html",
+                file.to_str().unwrap(),
+                "--geometry-svg",
+                output_file.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap()
+    };
+    let result = run();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(
+        value["map"]["rendered_geometry"]["sections"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        value["map"]["rendered_geometry"]["individual_seats_verified"],
+        false
+    );
+    assert_eq!(value["map"]["stock_verified"], false);
+    assert_eq!(value["exported_geometry"]["format"], "sanitized_svg");
+    let svg = std::fs::read_to_string(&output_file).unwrap();
+    assert!(svg.contains("A1") && svg.contains("Floor"));
+    assert!(!svg.contains("<script") && !svg.contains("data-active"));
+    assert!(!run().status.success());
+    assert_eq!(std::fs::read_to_string(&output_file).unwrap(), svg);
+    assert!(!directory.path().join("data").exists());
+    std::fs::remove_file(&output_file).unwrap();
+    std::fs::write(&file, base).unwrap();
+    let missing = run();
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("No captured section geometry"));
+    assert!(!output_file.exists());
+}

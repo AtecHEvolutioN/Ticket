@@ -5,6 +5,7 @@
 const readline = require('node:readline');
 const { captureRendered, sameEvent } = require('./rendered.cjs');
 const { prepareTicketmaster } = require('./ticketmaster.cjs');
+const { prepareTicketmasterMap } = require('./ticketmaster-map.cjs');
 const { inspectChallenge, responseIntervention } = require('./manual-intervention.cjs');
 const { observeDocuments } = require('./document-lifecycle.cjs');
 const ALLOWED_DOMAINS = new Set([
@@ -65,6 +66,7 @@ function validateRequest(request) {
     throw new Error('invalid_request');
   }
   if (request.adapter !== undefined && !['ticketmaster', 'selectors'].includes(request.adapter)) throw new Error('invalid_request');
+  if (request.display !== undefined && (request.display !== 'map' || request.adapter !== 'ticketmaster')) throw new Error('invalid_request');
   if (request.adapter === 'ticketmaster' && !sameEvent(request.url, request.url)) throw new Error('invalid_request');
   return validateUrl(request.url);
 }
@@ -168,11 +170,26 @@ async function capture(context, request) {
       manualIntervention = await inspectChallenge(page);
       await guard();
       if (!manualIntervention && request.adapter === 'ticketmaster') {
-        const prepared = await prepareTicketmaster(page, target.href, remaining());
+        const mapGuard = async ({ afterMapDisplayAction }) => {
+          if (!afterMapDisplayAction) return guard();
+          await documents.synchronize();
+          const current = documents.current();
+          if (!current || current.loader !== snapshot.loader || current.status !== snapshot.status) {
+            throw new Error('navigation_failed');
+          }
+          // current() already rejects query/path/history changes and unfinished
+          // navigation. Only a known map click may rebind its fragment generation.
+          validateDocument(current);
+          validateDocument({ url: page.url() });
+          snapshot = current;
+        };
+        const prepared = request.display === 'map'
+          ? await prepareTicketmasterMap(page, target.href, remaining(), mapGuard)
+          : await prepareTicketmaster(page, target.href, remaining());
         await guard();
         adapterReason = prepared.state;
-        adapterState = ['regional', 'listings'].includes(prepared.state) ? 'ready'
-          : prepared.state === 'blocked' ? 'blocked'
+        adapterState = ['regional', 'listings', 'map_svg', 'map_static', 'map_canvas', 'map_iframe'].includes(prepared.state) ? 'ready'
+          : ['blocked', 'map_modal_blocked'].includes(prepared.state) ? 'blocked'
             : prepared.state === 'no_visible_offers' ? 'no_offers' : 'unsupported';
       }
       html = await captureRendered(page, request.max_body_bytes);

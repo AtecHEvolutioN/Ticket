@@ -74,8 +74,9 @@ available seats, and session/cart links never become shared venue data. Optional
 `map_url` references must use a recognized public static-image path and have a
 public source event. [Map inspection](seat-maps.md) can download these images and
 save separate draft layouts for different map/section configurations at one venue.
-Geometry and live seat extraction remain unimplemented. Inventory detection still
-requires a fresh check for each event.
+Supported rendered section outlines can be inspected and exported separately;
+they are not copied into these presets. Live individual-seat extraction remains
+unimplemented. Inventory detection still requires a fresh check for each event.
 
 ## Android
 

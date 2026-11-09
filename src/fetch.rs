@@ -72,7 +72,7 @@ impl Fetcher {
         let page = match watch.mode {
             FetchMode::Http => self.http(safe_url.as_str()).await?,
             FetchMode::Browser => {
-                self.browser(safe_url.as_str(), watch.parser.adapter)
+                self.browser(safe_url.as_str(), watch.parser.adapter, None)
                     .await?
             }
         };
@@ -90,10 +90,31 @@ impl Fetcher {
         match mode {
             FetchMode::Http => self.http(safe_url.as_str()).await,
             FetchMode::Browser => {
-                self.browser(safe_url.as_str(), PageAdapter::Selectors)
+                self.browser(safe_url.as_str(), PageAdapter::Selectors, None)
                     .await
             }
         }
+    }
+
+    /// Inspect the event's map display without switching to ticket offers.
+    pub async fn fetch_map(&self, url: &str) -> Result<FetchResult> {
+        let safe_url = validate_public_url(url)?;
+        if !crate::event_identity::same_event(url, url) {
+            bail!("Map inspection requires a supported public event URL");
+        }
+        let page = self
+            .browser(
+                safe_url.as_str(),
+                PageAdapter::Ticketmaster,
+                Some(BrowserDisplay::Map),
+            )
+            .await?;
+        if (200..300).contains(&page.status)
+            && !crate::event_identity::same_event(url, &page.final_url)
+        {
+            bail!("Fetched map does not match the requested event");
+        }
+        Ok(page)
     }
 
     async fn http(&self, url: &str) -> Result<FetchResult> {
@@ -107,7 +128,12 @@ impl Fetcher {
         read_response(response, self.max_body_bytes, started).await
     }
 
-    async fn browser(&self, url: &str, adapter: PageAdapter) -> Result<FetchResult> {
+    async fn browser(
+        &self,
+        url: &str,
+        adapter: PageAdapter,
+        display: Option<BrowserDisplay>,
+    ) -> Result<FetchResult> {
         // One context and child process are reused. The worker processes one navigation at a time.
         let mut guard = self.browser.lock().await;
         if guard.is_none() {
@@ -124,6 +150,7 @@ impl Fetcher {
             max_body_bytes: self.max_body_bytes,
             render_wait_ms: self.browser_config.render_wait_ms,
             adapter,
+            display,
         };
         worker.next_id += 1;
         // Include a bounded browser-startup allowance in addition to the navigation deadline.
@@ -294,6 +321,12 @@ pub fn parse_retry_after(value: &str, now: i64) -> Option<u64> {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum BrowserDisplay {
+    Map,
+}
+
+#[derive(Serialize)]
 struct BrowserRequest<'a> {
     id: u64,
     url: &'a str,
@@ -301,6 +334,8 @@ struct BrowserRequest<'a> {
     max_body_bytes: usize,
     render_wait_ms: u64,
     adapter: PageAdapter,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    display: Option<BrowserDisplay>,
 }
 
 #[derive(Deserialize)]
@@ -728,6 +763,61 @@ mod tests {
         assert_eq!(second.html, "2");
         fetcher.shutdown().await;
         assert!(fetcher.browser.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn map_capture_requests_its_own_display_and_still_binds_the_event() {
+        let mut script = tempfile::NamedTempFile::new().unwrap();
+        script
+            .write_all(
+                br#"
+            const lines=require('node:readline').createInterface({input:process.stdin});
+            lines.on('line',line=>{
+                const r=JSON.parse(line);
+                const mode=r.display||'default';
+                const final=r.url.includes('/wrong/')?r.url.replace('12345678','87654321'):r.url;
+                process.stdout.write(JSON.stringify({id:r.id,status:200,
+                    html:JSON.stringify({adapter:r.adapter,display:mode}),
+                    final_url:final,adapter_state:'ready'})+'\n');
+            });
+        "#,
+            )
+            .unwrap();
+        let mut config = Config::default();
+        config.browser.script = script.path().to_owned();
+        let fetcher = Fetcher::new(&config).unwrap();
+        let result = fetcher
+            .fetch_map("https://www.ticketmaster.cz/event/example/12345678")
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&result.html).unwrap(),
+            serde_json::json!({"adapter":"ticketmaster","display":"map"})
+        );
+        assert!(
+            fetcher
+                .fetch_map("https://www.ticketmaster.cz/artist/12345678")
+                .await
+                .is_err()
+        );
+        assert!(
+            fetcher
+                .fetch_map("https://www.ticketmaster.cz/event/wrong/12345678")
+                .await
+                .is_err()
+        );
+        let ordinary = fetcher
+            .fetch_url(
+                "https://www.ticketmaster.cz/event/example/12345678",
+                FetchMode::Browser,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&ordinary.html).unwrap(),
+            serde_json::json!({"adapter":"selectors","display":"default"})
+        );
+        fetcher.shutdown().await;
     }
 
     #[tokio::test]

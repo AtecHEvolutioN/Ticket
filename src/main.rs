@@ -34,7 +34,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Inspect a regional event's static map and section references; never infers live seats.
+    /// Inspect a regional map's references and rendered section outlines; never infers live seats.
     MapInspect {
         #[arg(long)]
         url: String,
@@ -49,6 +49,9 @@ enum Command {
         /// Download the referenced public map image to a new file (also uses network with --html).
         #[arg(long)]
         map_image: Option<PathBuf>,
+        /// Export observed section outlines as a rebuilt SVG; no source scripts or styling.
+        #[arg(long)]
+        geometry_svg: Option<PathBuf>,
     },
     /// Inspect configured Czech prices and quantity controls; never selects or reserves tickets.
     CartCatalog {
@@ -214,6 +217,27 @@ fn read_html(path: &Path, limit: usize) -> Result<String> {
         bail!("HTML fixture exceeds configured body limit");
     }
     String::from_utf8(input).context("HTML fixture must contain UTF-8 text")
+}
+
+fn write_new_artifact(path: &Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent).context("Create map output directory")?;
+    }
+    let mut output = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .context("Create new map output file")?;
+    if let Err(error) = output.write_all(bytes) {
+        drop(output);
+        let _ = std::fs::remove_file(path);
+        return Err(error).context("Write map output file");
+    }
+    Ok(())
 }
 
 fn map_preset(
@@ -682,6 +706,7 @@ async fn main() -> Result<()> {
             headed,
             save_layout,
             map_image,
+            geometry_svg,
         } => {
             config::validate_public_url(&url)?;
             if !ticket_watch::event_identity::same_event(&url, &url) {
@@ -699,18 +724,7 @@ async fn main() -> Result<()> {
                 browser_config.browser.headed = headed;
                 browser_config.request_timeout_secs = 45;
                 let fetcher = Fetcher::new(&browser_config)?;
-                let result = fetcher
-                    .fetch(&Watch {
-                        id: "map-inspection".into(),
-                        url: url.clone(),
-                        mode: FetchMode::Browser,
-                        parser: config::ParserConfig {
-                            adapter: config::PageAdapter::Ticketmaster,
-                            ..Default::default()
-                        },
-                        ..Watch::default()
-                    })
-                    .await;
+                let result = fetcher.fetch_map(&url).await;
                 fetcher.shutdown().await;
                 let page = result?;
                 if !(200..300).contains(&page.status)
@@ -728,6 +742,28 @@ async fn main() -> Result<()> {
             let snapshot = ticket_watch::seat_map::extract_seat_map(&url, &final_url, &body)?;
             // Validate a save candidate before attempting either optional output action.
             let preset = save_layout.then(|| map_preset(&snapshot)).transpose()?;
+            let svg = geometry_svg
+                .as_ref()
+                .map(|_| {
+                    ticket_watch::map_geometry::render_svg(
+                        snapshot
+                            .rendered_geometry
+                            .as_ref()
+                            .context("No captured section geometry to export")?,
+                    )
+                })
+                .transpose()?;
+            for path in [map_image.as_ref(), geometry_svg.as_ref()]
+                .into_iter()
+                .flatten()
+            {
+                if path.exists() {
+                    bail!("Map output already exists; choose a new path");
+                }
+            }
+            if map_image.is_some() && map_image == geometry_svg {
+                bail!("Map image and geometry SVG need different output paths");
+            }
             let image = if let Some(path) = map_image {
                 let reference = snapshot
                     .static_map
@@ -736,24 +772,8 @@ async fn main() -> Result<()> {
                 if path.exists() {
                     bail!("Map image output already exists; choose a new path");
                 }
-                if let Some(parent) = path
-                    .parent()
-                    .filter(|parent| !parent.as_os_str().is_empty())
-                {
-                    std::fs::create_dir_all(parent).context("Create map image directory")?;
-                }
                 let asset = ticket_watch::map_asset::download_map(&reference.url).await?;
-                use std::io::Write;
-                let mut output = std::fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(&path)
-                    .context("Create map image output")?;
-                if let Err(error) = output.write_all(&asset.bytes) {
-                    drop(output);
-                    let _ = std::fs::remove_file(&path);
-                    return Err(error).context("Write map image output");
-                }
+                write_new_artifact(&path, &asset.bytes)?;
                 Some(
                     serde_json::json!({"path":path, "bytes":asset.bytes.len(), "content_type":asset.content_type,
                     "sha256":asset.sha256, "validation":"mime_and_signature", "geometry_verified":false}),
@@ -761,17 +781,30 @@ async fn main() -> Result<()> {
             } else {
                 None
             };
+            let exported_geometry = if let (Some(path), Some(svg)) = (geometry_svg, svg) {
+                let result = write_new_artifact(&path, svg.as_bytes());
+                if image.is_some() {
+                    result.context("Map image was saved; geometry export failed")?;
+                } else {
+                    result?;
+                }
+                Some(
+                    serde_json::json!({"path":path,"format":"sanitized_svg","stock_verified":false,"adjacency_verified":false}),
+                )
+            } else {
+                None
+            };
             let saved = preset
                 .map(|preset| save_map_preset(&config, preset))
                 .transpose();
-            let saved = if image.is_some() {
-                saved.context("Map image was saved; venue layout save failed")?
+            let saved = if image.is_some() || exported_geometry.is_some() {
+                saved.context("Map output was saved; venue layout save failed")?
             } else {
                 saved?
             };
             print_json(
                 &serde_json::json!({"source":source, "transport_binding":transport_binding,
-                "map":snapshot, "saved_venue":saved, "downloaded_image":image}),
+                "map":snapshot, "saved_venue":saved, "downloaded_image":image, "exported_geometry":exported_geometry}),
             )?;
         }
         Command::CartPlan { file } => {

@@ -1,8 +1,10 @@
 # Map scraping and reusable layout references
 
-`map-inspect` extracts an event-bound static map reference, venue identity and
-configured selection zones from the recognized regional Ticketmaster page. It
-can download the referenced image and save a draft layout in the venue registry.
+`map-inspect` extracts an event-bound map reference, venue identity, configured
+selection zones and supported rendered SVG section outlines. Its browser mode
+keeps the native map display instead of switching to best available. It can
+export a clean section SVG, download a referenced image and save a draft static
+layout in the venue registry.
 These source features are newer than the 0.6.0-test downloads and Android APK.
 
 ```bash
@@ -10,7 +12,8 @@ cargo build --release --locked
 
 # Read the current page in ordinary Chromium on a graphical desktop.
 ./target/release/ticket-watch map-inspect --headed \
-  --url https://www.ticketmaster.cz/event/korn-vstupenky/1472650657
+  --url https://www.ticketmaster.cz/event/korn-vstupenky/1472650657 \
+  --geometry-svg captures/maps/korn-sections.svg
 
 # Inspect saved HTML, download its referenced image and save a draft layout.
 ./target/release/ticket-watch map-inspect \
@@ -22,8 +25,10 @@ Inspection needs no API key, Discord token or watch configuration. Saved HTML ha
 unverified transport and age. `--map-image` explicitly makes a network request,
 even when combined with `--html`; without that flag, saved-HTML inspection is
 offline. The destination must be a new file. Parent directories are created.
-If a later layout save fails, the successfully downloaded image remains available
-and the command reports that partial result in its error.
+`--geometry-svg` exports only observed section geometry; it fails if none was
+captured. Existing output files are never overwritten. If a later output or
+layout save fails, earlier completed files remain available and the command
+reports the partial result.
 
 `--save-layout` uses the configured database, or `data/ticket.sqlite` when the
 default configuration file is absent. As with `venues import`, it takes the
@@ -57,6 +62,30 @@ cart actions or Discord deliveries. See [venue presets](venue-presets.md).
 
 ## Images and limits
 
+Supported native SVG maps add `rendered_geometry` to the JSON report: section
+IDs/names, typed outline commands, label anchors/rotation, a view box and a
+geometry fingerprint. Coordinates are local to that SVG, not screen coordinates.
+They represent SVG attributes; external stylesheet geometry overrides are not
+resolved, so the export is not a pixel-perfect reproduction of every page style.
+Matching main-map/minimap copies are deduplicated; conflicting copies, unbound
+labels, unsupported transforms or malformed/unbounded paths fail inspection.
+Colors and `data-active` flags are ignored. Missing geometry stays `null`.
+
+The optional SVG export is rebuilt from validated coordinates and escaped labels.
+It contains no copied scripts, events, links, embedded images or source styling.
+It represents section outlines only: stage drawings and other decorative layers
+are not copied. `--save-layout` continues to save the static reference and
+configured zone labels; it does not store the rendered outline data in the venue
+preset.
+
+Some native maps hide their SVG from screen readers using `aria-hidden` while
+still painting it on screen. New browser captures attach a dedicated marker only
+after checking computed style, ancestors, viewport and clipping rectangles. That
+marker permits section-geometry extraction only; ordinary inventory visibility
+rules remain unchanged. Older HTML without this marker cannot supply geometry.
+Open native modal dialogs and inert/background controls remain unusable page
+evidence. The marker is not a pixel-level occlusion or image-decoding guarantee.
+
 Image downloads use narrowly validated observed Ticketmaster CDN paths, verified
 HTTPS, a 20-second deadline and an 8 MiB limit. Redirects and retries are disabled.
 HTTP status, MIME, PNG/JPEG/GIF/WebP headers and applicable size fields are
@@ -67,11 +96,12 @@ SVG and unfamiliar asset paths are unsupported.
 The page extractor reads captured HTML and bound page metadata. It does not read
 canvas pixels, cross-origin iframe contents or shadow-root seat data. Visible
 canvas/iframe counts within the map region are diagnostics, not coverage proof.
-Individual seats, aisle boundaries and adjacent groups remain unverified.
+Individual seats, physical aisle boundaries and adjacent groups remain unverified.
 
-A static drawing's colors and labels do not establish which tickets are on sale.
+A drawing's colors and labels do not establish which tickets are on sale.
 All map reports explicitly keep `stock_verified`, `geometry_verified` and
-`adjacency_verified` false. The ordinary inventory parser and cart planner remain
+`adjacency_verified` false: observed section paths do not verify permanent venue
+or individual-seat topology. The ordinary inventory parser and cart planner remain
 separate. An image URL can change its bytes later, so a saved reference is not a
 permanent seating-layout guarantee.
 
@@ -99,4 +129,14 @@ persistence, preservation of reviewed layouts and refusal to overwrite image fil
 These checks establish the supported extraction paths, not universal market
 coverage or continuous unattended access.
 
-The completed source change passed 221 Rust tests, Clippy and formatting checks.
+The next live Czech check opened the map display and exposed 52 SVG section paths
+with 52 matching labels. The map-specific worker returned HTTP 200 and
+`map_svg` in 7,170 ms in that check. The clean export rendered as 52 paths and 52
+labels with zero script elements. No seat, quantity, search or reservation action
+was taken. This is one successful observation, not a polling latency guarantee.
+
+The optimized `map-inspect` command subsequently exported the same 52 sections
+and labels as a 44,945-byte SVG. The [geometry evidence](evidence/map-geometry-2026-11-09.json)
+records both observations, the geometry fingerprint and the export hash. Local
+verification passed 231 Rust tests and 57 browser tests with none skipped, plus
+formatting, Clippy and the release build. The Android APK is unchanged.

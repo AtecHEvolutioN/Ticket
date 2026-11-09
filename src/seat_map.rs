@@ -47,7 +47,7 @@ pub struct PriceSectionMapping {
     pub section_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct SeatMapSnapshot {
     pub event_url: String,
     pub event_id: String,
@@ -67,6 +67,8 @@ pub struct SeatMapSnapshot {
     pub adjacency_verified: bool,
     pub image_content_verified: bool,
     pub displayed_reference_matched: bool,
+    /// Observed vector section outlines, not individual seats or live inventory.
+    pub rendered_geometry: Option<crate::map_geometry::MapGeometry>,
 }
 
 /// Inspect an already captured page. The caller owns transport/freshness validation.
@@ -306,6 +308,12 @@ pub fn extract_seat_map(
             displayed_reference_matched = true;
         }
     }
+    let rendered_geometry = crate::map_geometry::extract_svg_geometry(regions[0])?;
+    let evidence = if rendered_geometry.is_some() {
+        "rendered_svg_sections_and_configuration"
+    } else {
+        "static_reference_configuration"
+    };
     Ok(SeatMapSnapshot {
         event_url: canonical_event.to_string(),
         event_id,
@@ -317,12 +325,13 @@ pub fn extract_seat_map(
         price_section_mappings,
         visible_canvas_count,
         visible_iframe_count,
-        evidence: "static_reference_configuration",
+        evidence,
         geometry_verified: false,
         stock_verified: false,
         adjacency_verified: false,
         image_content_verified: false,
         displayed_reference_matched,
+        rendered_geometry,
     })
 }
 

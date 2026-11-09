@@ -80,7 +80,7 @@ Catalog refreshes preserve matching cached watches through partial failures and 
 ## Implemented behavior
 
 - Reusable venue presets in SQLite, with scoped venue identity and separate named layout references. Discovery catalog refreshes register venue metadata; [venue commands](docs/venue-presets.md) import, list, inspect, and match presets without network access. The starter catalog contains 21 venues with no invented seating layouts.
-- [Map scraping](docs/seat-maps.md): `map-inspect` extracts bound static map references and configured zones, downloads public images on request, and optionally saves separate draft layouts at a shared venue. Map drawings never become live seat or adjacency evidence. Available in current source; the APK is unchanged.
+- [Map scraping](docs/seat-maps.md): `map-inspect` preserves the native map view, extracts supported SVG section outlines, and exports a clean map with `--geometry-svg`. It also reads static references/configured zones, downloads public images and saves draft venue layouts on request. Neither outlines nor map colors establish live seats or adjacency. Available in current source; the APK is unchanged.
 - Built-in layout recognition for any selected event, plus verified custom CSS profiles. JSON-LD metadata is labeled separately and does not alert by default.
 - Displayed ticket categories and price ranges stay separate from confirmed resale listings; status includes the latest observation.
 - Each offer requires a visible, enabled purchase signal. Browser captures preserve computed visibility and disabled controls, and fetched event IDs must match the watched event after redirects.

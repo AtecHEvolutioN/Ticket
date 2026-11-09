@@ -9,6 +9,7 @@ pub mod event_identity;
 pub mod fetch;
 pub mod hybrid;
 pub mod map_asset;
+pub mod map_geometry;
 pub mod model;
 pub(crate) mod page_data;
 pub mod parser;

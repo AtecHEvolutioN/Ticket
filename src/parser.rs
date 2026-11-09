@@ -70,20 +70,28 @@ fn normalize(text: &str, limit: usize) -> String {
 }
 
 pub(crate) fn hidden_element(element: ElementRef<'_>) -> bool {
-    element
-        .ancestors()
-        .chain(std::iter::once(*element))
-        .any(|ancestor| {
-            ancestor.value().as_element().is_some_and(|e| {
-                matches!(e.name(), "script" | "style" | "template" | "noscript")
-                    || e.attr("hidden").is_some()
-                    || e.attr("aria-hidden") == Some("true")
-                    || e.attr("style").is_some_and(inline_hidden)
-            })
-        })
+    let mut body = false;
+    let mut modal = false;
+    for ancestor in element.ancestors().chain(std::iter::once(*element)) {
+        if let Some(e) = ancestor.value().as_element() {
+            if matches!(e.name(), "script" | "style" | "template" | "noscript")
+                || e.attr("hidden").is_some()
+                || e.attr("inert").is_some()
+                || e.attr("aria-hidden") == Some("true")
+                || e.attr("style").is_some_and(inline_hidden)
+            {
+                return true;
+            }
+            body |= e.name() == "body";
+            modal |= e.name() == "html" && e.attr("data-ticketwatch-native-modal") == Some("open");
+        }
+    }
+    // Negative-only browser marker: no page evidence through a native modal.
+    // Head metadata remains readable to identity validators.
+    body && modal
 }
 
-fn inline_hidden(style: &str) -> bool {
+pub(crate) fn inline_hidden(style: &str) -> bool {
     style.split(';').any(|declaration| {
         let Some((property, value)) = declaration.split_once(':') else {
             return false;
@@ -114,6 +122,7 @@ pub(crate) fn visible_text(element: ElementRef<'_>) -> String {
             ancestor.value().as_element().is_some_and(|e| {
                 matches!(e.name(), "script" | "style" | "template" | "noscript")
                     || e.attr("hidden").is_some()
+                    || e.attr("inert").is_some()
                     || e.attr("aria-hidden") == Some("true")
                     || e.attr("style").is_some_and(inline_hidden)
             })
@@ -198,8 +207,9 @@ pub(crate) fn disabled_element(element: ElementRef<'_>) -> bool {
         .chain(std::iter::once(*element))
         .any(|ancestor| {
             ancestor.value().as_element().is_some_and(|e| {
-                e.attr("aria-disabled")
-                    .is_some_and(|value| value.eq_ignore_ascii_case("true"))
+                e.attr("inert").is_some()
+                    || e.attr("aria-disabled")
+                        .is_some_and(|value| value.eq_ignore_ascii_case("true"))
                     || (e.attr("disabled").is_some()
                         && matches!(
                             e.name(),
@@ -297,6 +307,18 @@ pub fn parse(watch: &Watch, html: &str, observed_at: i64) -> Observation {
         let mut result = Observation::unknown(&watch.id, observed_at, reason);
         result.availability = Availability::Blocked;
         return result;
+    }
+    if doc
+        .root_element()
+        .value()
+        .attr("data-ticketwatch-native-modal")
+        == Some("open")
+    {
+        return Observation::unknown(
+            &watch.id,
+            observed_at,
+            "native modal open; page evidence unavailable",
+        );
     }
 
     if watch.parser.adapter == crate::config::PageAdapter::Ticketmaster {
@@ -1013,6 +1035,66 @@ price_decimal_separator = ","
         assert_eq!(
             parse(&watch(), &hidden, 100).availability,
             Availability::Unknown
+        );
+    }
+
+    #[test]
+    fn inert_content_cannot_supply_status_offers_or_challenge_text() {
+        for html in [
+            format!("<section inert>{OFFERS}</section>"),
+            "<p data-test=available inert>Available</p>".to_owned(),
+            "<section inert><p data-test=unavailable>Sold out</p></section>".to_owned(),
+            OFFERS.replace("class=\"buy\"", "class=\"buy\" inert"),
+        ] {
+            let observation = parse(&watch(), &html, 100);
+            assert_eq!(observation.availability, Availability::Unknown);
+            assert!(observation.offers.is_empty());
+        }
+        assert_eq!(
+            parse(
+                &watch(),
+                &format!("{OFFERS}<aside inert><h1>Verify you are human</h1></aside>"),
+                100
+            )
+            .availability,
+            Availability::Available
+        );
+    }
+
+    #[test]
+    fn native_modal_capture_marker_blocks_inventory_and_metadata_fallback_but_keeps_diagnostics() {
+        let modal = format!(
+            "<html data-ticketwatch-native-modal=open><body>{OFFERS}<dialog open>Filter choices</dialog></body></html>"
+        );
+        let observation = parse(&watch(), &modal, 100);
+        assert_eq!(observation.availability, Availability::Unknown);
+        assert!(observation.offers.is_empty());
+        assert!(observation.detail.contains("native modal open"));
+        let mut metadata_watch = watch();
+        metadata_watch.parser.selectors_verified = false;
+        let metadata = r#"<html data-ticketwatch-native-modal="open"><head><script type="application/ld+json">{"@type":"Event","url":"https://www.ticketmaster.pl/event/korn-bilety/496543017","offers":{"availability":"InStock"}}</script></head><body><dialog open>Filter</dialog></body></html>"#;
+        assert_eq!(
+            parse(&metadata_watch, metadata, 100).availability,
+            Availability::Unknown
+        );
+        assert_eq!(
+            parse(
+                &watch(),
+                &modal.replace("Filter choices", "Verify you are human"),
+                100
+            )
+            .availability,
+            Availability::Blocked
+        );
+        // Serialized dialog[open] does not establish native showModal() state.
+        assert_eq!(
+            parse(
+                &watch(),
+                &modal.replace(" data-ticketwatch-native-modal=open", ""),
+                100
+            )
+            .availability,
+            Availability::Available
         );
     }
 

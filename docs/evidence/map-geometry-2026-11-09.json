@@ -1,0 +1,60 @@
+{
+  "event_url": "https://www.ticketmaster.cz/event/korn-vstupenky/1472650657",
+  "market": "CZ",
+  "worker_observation": {
+    "checkedAt": "2026-11-09T23:24:46.934Z",
+    "status": 200,
+    "adapter_state": "ready",
+    "adapter_reason": "map_svg",
+    "elapsed_ms": 7170,
+    "paintedMarkers": 1,
+    "ticketSelectionAttempted": false,
+    "reservationAttempted": false
+  },
+  "release_cli_observation": {
+    "output_completed_at_utc": "2026-11-09T23:31:19.121791+00:00",
+    "completion_time_source": "local output file modification time",
+    "source": "live_browser",
+    "transport_binding": "observed_main_document",
+    "command": "ticket-watch map-inspect --headed --url https://www.ticketmaster.cz/event/korn-vstupenky/1472650657 --geometry-svg captures/maps/korn-sections.svg",
+    "sections": 52,
+    "labels": 52,
+    "rendered_copies": 1,
+    "view_box": {
+      "height": 7680.0,
+      "width": 10240.0,
+      "x": 0.0,
+      "y": 0.0
+    },
+    "geometry_fingerprint": "geometry-09e45b3b46dc85729ff3f8f5edfffad7a69b7c9e5ccd82440f066685418faf5b"
+  },
+  "export": {
+    "format": "sanitized_svg",
+    "bytes": 44945,
+    "sha256": "aa03541edbe97e15090e6baa8bb88b14f209c5862e5970e411c3ecd98875ceeb",
+    "paths": 52,
+    "labels": 52,
+    "scripts": 0,
+    "preview_visually_inspected": true
+  },
+  "verification": {
+    "rust_tests_passed": 231,
+    "browser_tests_passed": 57,
+    "browser_tests_skipped": 0,
+    "format_check": "passed",
+    "clippy": "passed",
+    "release_build": "passed"
+  },
+  "limitations": {
+    "stock_verified": false,
+    "individual_seats_verified": false,
+    "adjacency_verified": false,
+    "ticket_selection_attempted": false,
+    "reservation_attempted": false,
+    "geometry_is_svg_attribute_coordinates": true,
+    "external_stylesheet_geometry_resolved": false,
+    "continuous_polling_latency_verified": false,
+    "other_markets_live_svg_verified": false,
+    "android_apk_updated": false
+  }
+}
