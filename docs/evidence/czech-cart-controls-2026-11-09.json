@@ -1,0 +1,62 @@
+{
+  "checked_at": "2026-11-09T22:54:16.745Z",
+  "event_url": "https://www.ticketmaster.cz/event/korn-vstupenky/1472650657",
+  "inspection": "native_ui_with_network_disabled_before_form_changes",
+  "initial_event_http_status": 200,
+  "demo_quantity": 1,
+  "user_purchase_quantity": null,
+  "network_disabled_before_form_changes": true,
+  "search_submitted": false,
+  "reservation_attempted": false,
+  "payment_attempted": false,
+  "configured_seating_filter_choices": [
+    {"label": "1. kategorie", "per_ticket_minor": 236100},
+    {"label": "2. kategorie", "per_ticket_minor": 224300},
+    {"label": "4. kategorie", "per_ticket_minor": 212500},
+    {"label": "3. kategorie", "per_ticket_minor": 212500},
+    {"label": "5. kategorie", "per_ticket_minor": 188900}
+  ],
+  "configured_section_filter_choices": ["1. POSCHODÍ", "4. POSCHODÍ"],
+  "currency": "CZK",
+  "stock_verified": false,
+  "adjacent_group_verified": false,
+  "hold_verified": false,
+  "complete_checkout_fees_verified": false,
+  "catalog_replay_scope": "primary_configuration",
+  "catalog_replay_transport": "unverified_saved_html",
+  "catalog_replays": [
+    {
+      "event_url": "https://www.ticketmaster.cz/event/korn-vstupenky/1472650657",
+      "event_name": "KoRn",
+      "configured_types": 16,
+      "configured_price_rows": 22,
+      "rendered_categories": 4,
+      "ignored_resale_listing_rows": 0,
+      "selected_count": 0
+    },
+    {
+      "event_url": "https://www.ticketmaster.cz/event/ross-noble-vstupenky/1898352484",
+      "event_name": "Ross Noble",
+      "configured_types": 1,
+      "configured_price_rows": 2,
+      "rendered_categories": 1,
+      "ignored_resale_listing_rows": 0,
+      "selected_count": 0
+    },
+    {
+      "event_url": "https://www.ticketmaster.cz/event/andrea-bocelli-vstupenky/493115848",
+      "event_name": "Andrea Bocelli",
+      "configured_types": 27,
+      "configured_price_rows": 37,
+      "rendered_categories": 6,
+      "ignored_resale_listing_rows": 1,
+      "selected_count": 0
+    }
+  ],
+  "limits": [
+    "Configured filter prices are not quotes for available adjacent seats.",
+    "Offline demo quantity is not a purchase instruction or a hold.",
+    "Saved-capture catalog checks do not establish current inventory.",
+    "Native search, complete price comparison and cart hold verification remain unimplemented."
+  ]
+}

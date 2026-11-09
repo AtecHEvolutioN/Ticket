@@ -91,6 +91,7 @@ Catalog refreshes preserve matching cached watches through partial failures and 
 - Atomic state/outbox persistence, restart deduplication, stale-alert expiry, and explicit Discord mentions.
 - Direct HTTP or explicitly selected browser mode; HTTP 403 does not trigger an automatic browser retry.
 - [Czech access diagnosis](docs/czech-access.md): specific protection-block diagnostics and a bounded wait for the website's normal initial identification navigation. Headed Chromium reached the selected KoRn event and exposed four ticket categories in the recorded test.
+- [Czech cart preparation](docs/czech-carting.md): `cart-catalog` inspects configured prices and quantity controls; `cart-plan` evaluates supplied adjacent-group quotes offline. Neither command reserves tickets. These source commands are newer than the 0.6.0-test downloads.
 - Artist/location subscriptions, bounded Discovery pagination, a persisted generated watchlist, and background catalog refresh. Discovery request budgets and provider cooldowns are separate from website pacing.
 - Read-only API metadata stays separate from observed website inventory; generated watches cannot enable metadata-based stock alerts.
 

@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use std::{
     collections::{HashMap, HashSet},
+    io::Read,
     path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
@@ -33,6 +34,19 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Inspect configured Czech prices and quantity controls; never selects or reserves tickets.
+    CartCatalog {
+        #[arg(long)]
+        url: String,
+        /// Read a local capture; its transport and age remain unverified.
+        #[arg(long, conflicts_with = "headed")]
+        html: Option<PathBuf>,
+        /// Show ordinary Chromium on an available graphical display.
+        #[arg(long)]
+        headed: bool,
+    },
+    /// Evaluate supplied group quotes offline; a decision never authorizes a reservation.
+    CartPlan { file: PathBuf },
     /// Inspect any selected event using the built-in Ticketmaster adapter; no config or alerts.
     Inspect {
         #[arg(long)]
@@ -168,10 +182,22 @@ fn print_json(value: &impl serde::Serialize) -> Result<()> {
     Ok(())
 }
 fn read_html(path: &Path, limit: usize) -> Result<String> {
-    if std::fs::metadata(path)?.len() > limit as u64 {
+    let file = std::fs::File::open(path).context("Open HTML fixture")?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        bail!("HTML fixture must be a regular file");
+    }
+    if metadata.len() > limit as u64 {
         bail!("HTML fixture exceeds configured body limit");
     }
-    std::fs::read_to_string(path).context("Read HTML fixture")
+    let mut input = Vec::new();
+    file.take(limit as u64 + 1)
+        .read_to_end(&mut input)
+        .context("Read HTML fixture")?;
+    if input.len() > limit {
+        bail!("HTML fixture exceeds configured body limit");
+    }
+    String::from_utf8(input).context("HTML fixture must contain UTF-8 text")
 }
 
 /// Single-process ownership prevents duplicate polling and outbox delivery.
@@ -540,9 +566,11 @@ async fn run(config: Config, once: bool, send: bool) -> Result<()> {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     let config = match &cli.command {
-        Command::Artists { .. } | Command::Events { .. } | Command::Inspect { .. } => {
-            Config::default()
-        }
+        Command::Artists { .. }
+        | Command::Events { .. }
+        | Command::Inspect { .. }
+        | Command::CartCatalog { .. }
+        | Command::CartPlan { .. } => Config::default(),
         Command::Venues { .. }
             if cli.config == Path::new("config.toml") && !cli.config.exists() =>
         {
@@ -551,6 +579,79 @@ async fn main() -> Result<()> {
         _ => config::load(&cli.config)?,
     };
     match cli.command {
+        Command::CartPlan { file } => {
+            let mut input = Vec::new();
+            std::fs::File::open(file)
+                .context("Open cart quote request")?
+                .take(ticket_watch::cart::MAX_INPUT_BYTES as u64 + 1)
+                .read_to_end(&mut input)
+                .context("Read cart quote request")?;
+            print_json(&ticket_watch::cart::plan_json(
+                &input,
+                chrono::Utc::now().timestamp_millis(),
+            ))?;
+        }
+        Command::CartCatalog { url, html, headed } => {
+            let parsed = config::validate_public_url(&url)
+                .context("Use a public Ticketmaster Czech event URL")?;
+            if !matches!(
+                parsed.host_str(),
+                Some("ticketmaster.cz" | "www.ticketmaster.cz")
+            ) || !ticket_watch::event_identity::same_event(&url, &url)
+            {
+                bail!("Use a public Ticketmaster Czech event URL");
+            }
+            let (body, final_url, source, transport_binding) = if let Some(path) = html {
+                (
+                    read_html(&path, config.max_body_bytes)?,
+                    url.clone(),
+                    "saved_html",
+                    "unverified_saved_html",
+                )
+            } else {
+                let mut config = config;
+                config.browser.headed = headed;
+                config.request_timeout_secs = 45;
+                let fetcher = Fetcher::new(&config)?;
+                let result = fetcher
+                    .fetch(&Watch {
+                        id: "cart-catalog".into(),
+                        url: url.clone(),
+                        mode: FetchMode::Browser,
+                        parser: config::ParserConfig {
+                            adapter: config::PageAdapter::Ticketmaster,
+                            ..Default::default()
+                        },
+                        ..Watch::default()
+                    })
+                    .await;
+                fetcher.shutdown().await;
+                let page = result?;
+                if !(200..300).contains(&page.status)
+                    || page.adapter_state.as_deref() == Some("blocked")
+                {
+                    bail!(
+                        "HTTP {}; {}; no cart catalog extracted",
+                        page.status,
+                        page.detail
+                    );
+                }
+                (
+                    page.html,
+                    page.final_url,
+                    "live_browser",
+                    "observed_main_document",
+                )
+            };
+            let catalog =
+                ticket_watch::cart_catalog::extract_cz_cart_catalog(&url, &final_url, &body)?;
+            print_json(&serde_json::json!({
+                "source": source,
+                "transport_binding": transport_binding,
+                "reservation_attempted": false,
+                "catalog": catalog,
+            }))?;
+        }
         Command::Venues { action } => {
             let _lock = if matches!(action, VenueCommand::Import { .. }) {
                 Some(lock_database(&config.database)?)

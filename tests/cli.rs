@@ -171,3 +171,102 @@ fn hybrid_example_requires_explicit_setup_and_exposes_catalog_commands() {
     assert!(help.contains("sync"));
     assert!(help.contains("catalog"));
 }
+
+#[test]
+fn cart_catalog_is_explicitly_configuration_only_without_monitor_state() {
+    let directory = tempfile::tempdir().unwrap();
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/cart-catalog-cz.html");
+    let output = Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+        .current_dir(directory.path())
+        .env_remove("TICKETMASTER_API_KEY")
+        .env_remove("DISCORD_BOT_TOKEN")
+        .args([
+            "cart-catalog",
+            "--url",
+            "https://www.ticketmaster.cz/event/synthetic-vstupenky/1234567890",
+            "--html",
+            fixture.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["source"], "saved_html");
+    assert_eq!(value["transport_binding"], "unverified_saved_html");
+    assert_eq!(value["reservation_attempted"], false);
+    assert_eq!(value["catalog"]["evidence"], "configuration_only");
+    assert_eq!(value["catalog"]["stock_verified"], false);
+    assert_eq!(value["catalog"]["hold_verified"], false);
+    assert!(!directory.path().join("data").exists());
+}
+
+#[test]
+fn cart_catalog_rejects_unsupported_events_before_browser_start() {
+    let directory = tempfile::tempdir().unwrap();
+    for url in [
+        "https://www.ticketmaster.pl/event/synthetic/1234567890",
+        "https://www.ticketmaster.cz/artist/korn-vstupenky/1234567890",
+        "https://www.ticketmaster.cz/checkout/1234567890",
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+            .current_dir(directory.path())
+            .args(["cart-catalog", "--url", url])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        let detail = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            detail.contains("public Ticketmaster Czech event URL"),
+            "{detail}"
+        );
+    }
+    assert!(!directory.path().join("data").exists());
+}
+
+#[test]
+fn cart_plan_refuses_missing_quantity_and_oversized_input_without_side_effects() {
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("quotes.json");
+    let event_url = "https://www.ticketmaster.cz/event/synthetic/1234567890";
+    let at = chrono::Utc::now().timestamp_millis();
+    let request = serde_json::json!({
+        "intent": {"event_url": event_url},
+        "context": {"session_id":"synthetic-session", "document_id":"synthetic-document"},
+        "snapshot": {
+            "event_url":event_url, "session_id":"synthetic-session",
+            "document_id":"synthetic-document", "requested_quantity":2,
+            "observed_at_ms":at, "expires_at_ms":at + 5000,
+            "coverage":"complete_for_request", "groups":[]
+        }
+    });
+    let run = || {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+            .current_dir(directory.path())
+            .env_remove("TICKETMASTER_API_KEY")
+            .env_remove("DISCORD_BOT_TOKEN")
+            .args(["cart-plan", file.to_str().unwrap()])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    std::fs::write(&file, serde_json::to_vec(&request).unwrap()).unwrap();
+    let missing = run();
+    assert_eq!(missing["outcome"], "refused");
+    assert_eq!(missing["reason"], "missing_quantity");
+    assert_eq!(missing["reservation_performed"], false);
+    assert_eq!(missing["reservation_authorized"], false);
+    assert!(missing["selected"].is_null());
+    std::fs::write(&file, vec![b'x'; ticket_watch::cart::MAX_INPUT_BYTES + 1]).unwrap();
+    assert_eq!(run()["reason"], "input_too_large");
+    assert!(!directory.path().join("data").exists());
+}
