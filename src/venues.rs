@@ -44,6 +44,9 @@ pub struct VenueLayout {
     pub adapter: Option<String>,
     #[serde(default)]
     pub sections: Vec<String>,
+    /// Observed static map image reference; never a live seat or stock source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub map_url: Option<String>,
     #[serde(default)]
     pub source_event_urls: Vec<String>,
     /// Records an explicit layout review, not event availability verification.
@@ -94,6 +97,13 @@ impl VenuePreset {
             }
             layout.sections = normalized_sections;
             normalize_sources(&mut layout.source_event_urls, &value.site_host)?;
+            if let Some(map_url) = &layout.map_url {
+                layout.map_url = Some(crate::seat_map::validated_static_map_url(map_url)?);
+                ensure!(
+                    !layout.source_event_urls.is_empty(),
+                    "A map reference needs a public source event"
+                );
+            }
             if let Some(at) = layout.verified_at {
                 ensure!(
                     at > 0 && !layout.source_event_urls.is_empty(),

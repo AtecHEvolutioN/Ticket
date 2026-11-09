@@ -22,6 +22,7 @@ fn layout(id: &str, sections: &[&str]) -> VenueLayout {
         name: id.replace('-', " "),
         adapter: Some("ticketmaster-regional-v1".into()),
         sections: sections.iter().map(|s| s.to_string()).collect(),
+        map_url: None,
         source_event_urls: venue().source_event_urls,
         verified_at: Some(1_793_995_200),
     }
@@ -277,4 +278,166 @@ fn observed_venue_seed_is_valid_reference_metadata_only() {
             .all(|p| p.layouts.is_empty() && p.provider_venue_id.is_none())
     );
     assert_eq!(db.venue_list().unwrap().len(), 21);
+}
+
+fn map_layout(fingerprint: char, map_url: &str, sections: &[&str]) -> VenueLayout {
+    VenueLayout {
+        id: format!("map-{}", fingerprint.to_string().repeat(64)),
+        name: "Observed map reference".into(),
+        adapter: None,
+        sections: sections.iter().map(|s| s.to_string()).collect(),
+        map_url: Some(map_url.into()),
+        source_event_urls: venue().source_event_urls,
+        verified_at: None,
+    }
+}
+
+#[test]
+fn map_variants_survive_restart_without_replacing_manual_layouts() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("ticket.sqlite");
+    let mut db = Store::open(&path).unwrap();
+    let mut original = venue();
+    original.layouts = vec![layout("reviewed-manual", &["101", "102"])];
+    let saved = db.venue_upsert(&original).unwrap();
+    let manual = saved.layouts[0].clone();
+
+    let first_map = map_layout(
+        'a',
+        "https://media.ticketmaster.eu/czechrepublic/venue-map-a.png",
+        &["1P", "4P"],
+    );
+    let changed_asset = map_layout(
+        'b',
+        "https://media.ticketmaster.eu/czechrepublic/venue-map-b.jpg",
+        &["1P", "4P"],
+    );
+    // The same image can accompany different event-specific section configuration.
+    let changed_configuration = map_layout(
+        'c',
+        first_map.map_url.as_deref().unwrap(),
+        &["1P", "4P", "PL"],
+    );
+    for variant in [&first_map, &changed_asset, &changed_configuration] {
+        let mut update = venue();
+        update.layouts = vec![variant.clone()];
+        let result = db.venue_upsert(&update).unwrap();
+        assert_eq!(result.id, saved.id);
+        assert_eq!(result.layouts[0], manual);
+    }
+    // Reimporting the identical observed variant does not create another layout.
+    let mut repeat = venue();
+    repeat.layouts = vec![first_map.clone()];
+    let result = db.venue_upsert(&repeat).unwrap();
+    assert_eq!(result.layouts.len(), 4);
+    assert!(
+        result.layouts[1..]
+            .iter()
+            .all(|entry| entry.verified_at.is_none() && entry.adapter.is_none())
+    );
+    drop(db);
+
+    let db = Store::open(&path).unwrap();
+    let restored = db.venue_get(&saved.id).unwrap().unwrap();
+    assert_eq!(restored, result);
+    assert_eq!(restored.layouts[0], manual);
+    assert_eq!(db.venue_list().unwrap().len(), 1);
+    let serialized = serde_json::to_value(&restored).unwrap();
+    assert!(serialized["layouts"][0].get("map_url").is_none());
+    assert_eq!(
+        serialized["layouts"][1]["map_url"],
+        first_map.map_url.unwrap()
+    );
+    for entry in serialized["layouts"].as_array().unwrap() {
+        for field in [
+            "availability",
+            "quantity",
+            "capacity",
+            "seats",
+            "adjacency",
+            "offers",
+        ] {
+            assert!(entry.get(field).is_none());
+        }
+    }
+}
+
+#[test]
+fn map_reference_normalization_requires_safe_asset_and_event_provenance() {
+    let mut preset = venue();
+    preset.layouts = vec![map_layout(
+        'a',
+        "//media.ticketmaster.eu/czechrepublic/venue-map-a.png",
+        &["1P"],
+    )];
+    let normalized = preset.normalized().unwrap();
+    assert_eq!(
+        normalized.layouts[0].map_url.as_deref(),
+        Some("https://media.ticketmaster.eu/czechrepublic/venue-map-a.png")
+    );
+    assert_eq!(normalized.layouts[0].verified_at, None);
+    preset.layouts[0].source_event_urls.clear();
+    assert!(preset.normalized().is_err());
+    preset.layouts[0].source_event_urls = vec!["https://ticketmaster.pl/event/493115848".into()];
+    assert!(preset.normalized().is_err());
+}
+
+#[test]
+fn unsafe_map_reference_imports_roll_back_without_erasing_saved_layouts() {
+    let mut db = Store::open(Path::new(":memory:")).unwrap();
+    let mut original = venue();
+    original.layouts = vec![layout("manual", &["101"])];
+    let saved = db.venue_upsert(&original).unwrap();
+    for url in [
+        "http://media.ticketmaster.eu/czechrepublic/venue-map-a.png",
+        "https://media.ticketmaster.eu/czechrepublic/venue-map-a.png?token=secret",
+        "https://user:secret@media.ticketmaster.eu/czechrepublic/venue-map-a.png",
+        "https://media.ticketmaster.eu/czechrepublic/venue-map-a.png#session",
+        "https://media.ticketmaster.eu.attacker.example/czechrepublic/venue-map-a.png",
+        "https://127.0.0.1/czechrepublic/venue-map-a.png",
+        "file:///tmp/venue-map-a.png",
+        "https://www.ticketmaster.cz/checkout/venue-map-a.png",
+        "https://media.ticketmaster.eu/czechrepublic/venue-map-a.svg",
+    ] {
+        let mut invalid = venue();
+        invalid.layouts = vec![map_layout('a', url, &["1P"])];
+        let mut valid_new = venue();
+        valid_new.city = "Another city".into();
+        assert!(db.venue_import(&[valid_new, invalid]).is_err());
+        assert_eq!(db.venue_get(&saved.id).unwrap(), Some(saved.clone()));
+        assert_eq!(db.venue_list().unwrap().len(), 1);
+    }
+}
+
+#[test]
+fn old_layout_json_defaults_to_no_map_and_rejects_inventory_extensions() {
+    let legacy = json!({
+        "id":"concert-end-stage", "name":"Concert", "sections":["101"],
+        "source_event_urls":["https://ticketmaster.cz/event/493115848"],
+        "verified_at":1793995200
+    });
+    let parsed: VenueLayout = serde_json::from_value(legacy.clone()).unwrap();
+    assert_eq!(parsed.map_url, None);
+    assert!(
+        serde_json::to_value(&parsed)
+            .unwrap()
+            .get("map_url")
+            .is_none()
+    );
+    let mut preset = venue();
+    preset.layouts = vec![parsed];
+    assert!(preset.normalized().is_ok());
+    for field in [
+        "availability",
+        "remaining",
+        "quantity",
+        "capacity",
+        "seats",
+        "adjacency",
+    ] {
+        let mut invalid = legacy.clone();
+        invalid["map_url"] = json!("https://media.ticketmaster.eu/czechrepublic/venue-map-a.png");
+        invalid[field] = json!("untrusted stock claim");
+        assert!(serde_json::from_value::<VenueLayout>(invalid).is_err());
+    }
 }

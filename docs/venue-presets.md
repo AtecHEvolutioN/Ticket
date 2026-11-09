@@ -70,9 +70,12 @@ layouts survive metadata refreshes. An adapter hint is descriptive and does not
 activate extraction or bypass page-layout verification.
 
 Presets reject inventory fields. Prices, remaining quantities, ticket categories,
-available seats, and session/cart links never become shared venue data. Geometry
-and map downloads are not implemented. The benefit is quicker setup and local
-metadata reuse; inventory detection still requires a fresh check for each event.
+available seats, and session/cart links never become shared venue data. Optional
+`map_url` references must use a recognized public static-image path and have a
+public source event. [Map inspection](seat-maps.md) can download these images and
+save separate draft layouts for different map/section configurations at one venue.
+Geometry and live seat extraction remain unimplemented. Inventory detection still
+requires a fresh check for each event.
 
 ## Android
 

@@ -270,3 +270,127 @@ fn cart_plan_refuses_missing_quantity_and_oversized_input_without_side_effects()
     assert_eq!(run()["reason"], "input_too_large");
     assert!(!directory.path().join("data").exists());
 }
+
+#[test]
+fn map_inspection_and_saved_layouts_keep_events_and_inventory_separate() {
+    let directory = tempfile::tempdir().unwrap();
+    let fixture = include_str!("fixtures/seat-map-regional.html");
+    let file = directory.path().join("event.html");
+    let url = "https://www.ticketmaster.cz/event/synthetic-concert/1234567890";
+    std::fs::write(&file, fixture).unwrap();
+    let run = |extra: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+            .current_dir(directory.path())
+            .env_remove("TICKETMASTER_API_KEY")
+            .env_remove("DISCORD_BOT_TOKEN")
+            .args([
+                "map-inspect",
+                "--url",
+                url,
+                "--html",
+                file.to_str().unwrap(),
+            ])
+            .args(extra)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    let preview = run(&[]);
+    assert_eq!(preview["transport_binding"], "unverified_saved_html");
+    assert_eq!(preview["map"]["geometry_verified"], false);
+    assert_eq!(preview["map"]["stock_verified"], false);
+    assert_eq!(preview["map"]["adjacency_verified"], false);
+    assert!(preview["saved_venue"].is_null());
+    assert!(!directory.path().join("data").exists());
+    let first = run(&["--save-layout"]);
+    let repeated = run(&["--save-layout"]);
+    assert_eq!(first["saved_venue"], repeated["saved_venue"]);
+    assert_eq!(first["saved_venue"]["layouts"].as_array().unwrap().len(), 1);
+    assert!(first["saved_venue"]["layouts"][0]["verified_at"].is_null());
+    assert_eq!(
+        first["saved_venue"]["provider_venue_id"],
+        "Z598xSyntheticVenue"
+    );
+    {
+        let mut store =
+            ticket_watch::store::Store::open(&directory.path().join("data/ticket.sqlite")).unwrap();
+        let mut preset = store.venue_list().unwrap().remove(0);
+        preset.layouts[0].name = "My reviewed arrangement".into();
+        preset.layouts[0].verified_at = Some(1_800_000_000);
+        store.venue_upsert(&preset).unwrap();
+    }
+    let refreshed = run(&["--save-layout"]);
+    assert_eq!(
+        refreshed["saved_venue"]["layouts"][0]["name"],
+        "My reviewed arrangement"
+    );
+    assert_eq!(
+        refreshed["saved_venue"]["layouts"][0]["verified_at"],
+        1_800_000_000
+    );
+    std::fs::write(
+        &file,
+        fixture.replace("synthetic-concert", "renamed-concert"),
+    )
+    .unwrap();
+    let renamed = run(&["--save-layout"]);
+    assert_eq!(
+        renamed["saved_venue"]["layouts"][0]["source_event_urls"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    std::fs::write(&file, fixture.replace("map-a.png", "map-b.png")).unwrap();
+    let second = run(&["--save-layout"]);
+    assert_eq!(first["saved_venue"]["id"], second["saved_venue"]["id"]);
+    assert_eq!(
+        second["saved_venue"]["layouts"].as_array().unwrap().len(),
+        2
+    );
+    assert_ne!(
+        first["map"]["static_map"]["layout_fingerprint"],
+        second["map"]["static_map"]["layout_fingerprint"]
+    );
+    let connection =
+        rusqlite::Connection::open(directory.path().join("data/ticket.sqlite")).unwrap();
+    for table in ["watches", "watch_observations", "outbox"] {
+        let count: i64 = connection
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+}
+
+#[test]
+fn map_image_existing_output_is_not_overwritten_or_downloaded() {
+    let directory = tempfile::tempdir().unwrap();
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/seat-map-regional.html");
+    let image = directory.path().join("map.png");
+    std::fs::write(&image, b"keep original").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+        .current_dir(directory.path())
+        .args([
+            "map-inspect",
+            "--url",
+            "https://www.ticketmaster.cz/event/synthetic-concert/1234567890",
+            "--html",
+            fixture.to_str().unwrap(),
+            "--map-image",
+            image.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("already exists"));
+    assert_eq!(std::fs::read(&image).unwrap(), b"keep original");
+    assert!(!directory.path().join("data").exists());
+}

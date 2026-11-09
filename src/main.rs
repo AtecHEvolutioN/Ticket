@@ -34,6 +34,22 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Inspect a regional event's static map and section references; never infers live seats.
+    MapInspect {
+        #[arg(long)]
+        url: String,
+        /// Read a saved capture; its transport and age remain unverified.
+        #[arg(long, conflicts_with = "headed")]
+        html: Option<PathBuf>,
+        #[arg(long)]
+        headed: bool,
+        /// Save this map as a separate draft layout in the venue registry.
+        #[arg(long)]
+        save_layout: bool,
+        /// Download the referenced public map image to a new file (also uses network with --html).
+        #[arg(long)]
+        map_image: Option<PathBuf>,
+    },
     /// Inspect configured Czech prices and quantity controls; never selects or reserves tickets.
     CartCatalog {
         #[arg(long)]
@@ -198,6 +214,82 @@ fn read_html(path: &Path, limit: usize) -> Result<String> {
         bail!("HTML fixture exceeds configured body limit");
     }
     String::from_utf8(input).context("HTML fixture must contain UTF-8 text")
+}
+
+fn map_preset(
+    snapshot: &ticket_watch::seat_map::SeatMapSnapshot,
+) -> Result<ticket_watch::venues::VenuePreset> {
+    let reference = snapshot
+        .static_map
+        .as_ref()
+        .context("No static map reference to save")?;
+    let preset = ticket_watch::venues::VenuePreset {
+        site_host: snapshot.site_host.clone(),
+        provider_venue_id: snapshot.venue.discovery_id.clone(),
+        name: snapshot.venue.name.clone(),
+        city: snapshot.venue.city.clone(),
+        country: snapshot.venue.country.clone(),
+        source_event_urls: vec![snapshot.event_url.clone()],
+        layouts: vec![ticket_watch::venues::VenueLayout {
+            id: reference.layout_fingerprint.clone(),
+            name: "Observed static map".into(),
+            adapter: Some("ticketmaster-static-map-v1".into()),
+            map_url: Some(reference.url.clone()),
+            sections: snapshot
+                .configured_sections
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .map(|section| section.title.clone())
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect(),
+            source_event_urls: vec![snapshot.event_url.clone()],
+            verified_at: None,
+        }],
+        ..Default::default()
+    };
+    preset.normalized()
+}
+
+fn save_map_preset(
+    config: &Config,
+    mut preset: ticket_watch::venues::VenuePreset,
+) -> Result<ticket_watch::venues::VenuePreset> {
+    let _lock = lock_database(&config.database)?;
+    let mut store = Store::open(&config.database)?;
+    if let Some(saved) = store.venue_lookup(&preset)? {
+        preset.id = saved.id;
+        if let Some(previous) = saved
+            .layouts
+            .iter()
+            .find(|layout| layout.id == preset.layouts[0].id)
+        {
+            let next = &preset.layouts[0];
+            if previous.map_url != next.map_url
+                || previous.sections.iter().collect::<HashSet<_>>()
+                    != next.sections.iter().collect::<HashSet<_>>()
+            {
+                bail!("Saved map layout conflicts with this observation; review the venue preset");
+            }
+            // Refreshing observed metadata must preserve an existing review and chosen name.
+            let mut merged = previous.clone();
+            for source in &next.source_event_urls {
+                if !merged
+                    .source_event_urls
+                    .iter()
+                    .any(|existing| ticket_watch::event_identity::same_event(existing, source))
+                {
+                    if merged.source_event_urls.len() >= 100 {
+                        bail!("Saved map source history is full; review the venue preset");
+                    }
+                    merged.source_event_urls.push(source.clone());
+                }
+            }
+            preset.layouts[0] = merged;
+        }
+    }
+    store.venue_upsert(&preset)
 }
 
 /// Single-process ownership prevents duplicate polling and outbox delivery.
@@ -566,6 +658,11 @@ async fn run(config: Config, once: bool, send: bool) -> Result<()> {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     let config = match &cli.command {
+        Command::MapInspect { save_layout, .. }
+            if !save_layout || (cli.config == Path::new("config.toml") && !cli.config.exists()) =>
+        {
+            Config::default()
+        }
         Command::Artists { .. }
         | Command::Events { .. }
         | Command::Inspect { .. }
@@ -579,6 +676,104 @@ async fn main() -> Result<()> {
         _ => config::load(&cli.config)?,
     };
     match cli.command {
+        Command::MapInspect {
+            url,
+            html,
+            headed,
+            save_layout,
+            map_image,
+        } => {
+            config::validate_public_url(&url)?;
+            if !ticket_watch::event_identity::same_event(&url, &url) {
+                bail!("Use a supported public Ticketmaster event URL");
+            }
+            let (body, final_url, source, transport_binding) = if let Some(path) = html {
+                (
+                    read_html(&path, config.max_body_bytes)?,
+                    url.clone(),
+                    "saved_html",
+                    "unverified_saved_html",
+                )
+            } else {
+                let mut browser_config = config.clone();
+                browser_config.browser.headed = headed;
+                browser_config.request_timeout_secs = 45;
+                let fetcher = Fetcher::new(&browser_config)?;
+                let result = fetcher
+                    .fetch(&Watch {
+                        id: "map-inspection".into(),
+                        url: url.clone(),
+                        mode: FetchMode::Browser,
+                        parser: config::ParserConfig {
+                            adapter: config::PageAdapter::Ticketmaster,
+                            ..Default::default()
+                        },
+                        ..Watch::default()
+                    })
+                    .await;
+                fetcher.shutdown().await;
+                let page = result?;
+                if !(200..300).contains(&page.status)
+                    || page.adapter_state.as_deref() == Some("blocked")
+                {
+                    bail!("HTTP {}; {}; no map extracted", page.status, page.detail);
+                }
+                (
+                    page.html,
+                    page.final_url,
+                    "live_browser",
+                    "observed_main_document",
+                )
+            };
+            let snapshot = ticket_watch::seat_map::extract_seat_map(&url, &final_url, &body)?;
+            // Validate a save candidate before attempting either optional output action.
+            let preset = save_layout.then(|| map_preset(&snapshot)).transpose()?;
+            let image = if let Some(path) = map_image {
+                let reference = snapshot
+                    .static_map
+                    .as_ref()
+                    .context("No static map image to download")?;
+                if path.exists() {
+                    bail!("Map image output already exists; choose a new path");
+                }
+                if let Some(parent) = path
+                    .parent()
+                    .filter(|parent| !parent.as_os_str().is_empty())
+                {
+                    std::fs::create_dir_all(parent).context("Create map image directory")?;
+                }
+                let asset = ticket_watch::map_asset::download_map(&reference.url).await?;
+                use std::io::Write;
+                let mut output = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&path)
+                    .context("Create map image output")?;
+                if let Err(error) = output.write_all(&asset.bytes) {
+                    drop(output);
+                    let _ = std::fs::remove_file(&path);
+                    return Err(error).context("Write map image output");
+                }
+                Some(
+                    serde_json::json!({"path":path, "bytes":asset.bytes.len(), "content_type":asset.content_type,
+                    "sha256":asset.sha256, "validation":"mime_and_signature", "geometry_verified":false}),
+                )
+            } else {
+                None
+            };
+            let saved = preset
+                .map(|preset| save_map_preset(&config, preset))
+                .transpose();
+            let saved = if image.is_some() {
+                saved.context("Map image was saved; venue layout save failed")?
+            } else {
+                saved?
+            };
+            print_json(
+                &serde_json::json!({"source":source, "transport_binding":transport_binding,
+                "map":snapshot, "saved_venue":saved, "downloaded_image":image}),
+            )?;
+        }
         Command::CartPlan { file } => {
             let mut input = Vec::new();
             std::fs::File::open(file)

@@ -1,0 +1,247 @@
+{
+  "scope": "static_map_references_and_selection_configuration",
+  "offline_capture_replays": [
+    {
+      "event_url": "https://www.ticketmaster.cz/event/korn-vstupenky/1472650657",
+      "site_host": "ticketmaster.cz",
+      "event": "KoRn",
+      "venue": "O2 arena",
+      "asset": "https://media.ticketmaster.eu/czechrepublic/ac262666f26aa200571c6089d43d4661.png",
+      "layout_fingerprint": "map-8db8308b161d9926077031b82d3843c8a31d86207247711e59ec4cbfd4c7f697",
+      "sections": 3,
+      "mappings": 9,
+      "canvas": 0,
+      "iframe": 0,
+      "stock_verified": false,
+      "geometry_verified": false
+    },
+    {
+      "event_url": "https://www.ticketmaster.pl/event/hollywood-undead-eu-uk-2027-bilety/224274430",
+      "site_host": "ticketmaster.pl",
+      "event": "Hollywood Undead: EU/UK 2027",
+      "venue": "COS Torwar",
+      "asset": "https://media.ticketmaster.eu/poland/ac241fd83dc2e8ed415fed4e2f6605ea.png",
+      "layout_fingerprint": "map-333b51704b98ead1da71a898f1269b6774f2641e4216ddf57f7f6babbc28e749",
+      "sections": 2,
+      "mappings": 4,
+      "canvas": 0,
+      "iframe": 0,
+      "stock_verified": false,
+      "geometry_verified": false
+    },
+    {
+      "event_url": "https://www.ticketmaster.com.au/sevendust-brisbane-17-02-2027/event/130065628C7B2F46",
+      "site_host": "ticketmaster.com.au",
+      "event": "SEVENDUST",
+      "venue": "The Tivoli",
+      "asset": "https://s1.ticketm.net/tm/en-au/tmimages/venue/maps/aus/98132s.gif",
+      "layout_fingerprint": "map-7c8e79141dd248b56906539160026fbc10a2ff063255ad1d438df90b3f7f94e6",
+      "sections": 1,
+      "mappings": 1,
+      "canvas": 0,
+      "iframe": 0,
+      "stock_verified": false,
+      "geometry_verified": false
+    },
+    {
+      "event_url": "https://www.ticketmaster.be/event/mon-laferte-tickets/622908318",
+      "site_host": "ticketmaster.be",
+      "event": "Mon Laferte",
+      "venue": "Cirque Royal - Koninklijk Circus",
+      "asset": "https://media.ticketmaster.eu/belgium/9db68c002597babb23576ccdd16610fe.jpg",
+      "layout_fingerprint": "map-b863fdd99a61c1543b6aa13090a18af4d02a6c2bec51630a5ac738d6336b8469",
+      "sections": 6,
+      "mappings": 7,
+      "canvas": 0,
+      "iframe": 0,
+      "stock_verified": false,
+      "geometry_verified": false
+    },
+    {
+      "event_url": "https://www.ticketmaster.cz/event/ross-noble-vstupenky/1898352484",
+      "site_host": "ticketmaster.cz",
+      "event": "Ross Noble",
+      "venue": "Divadlo U Hasičů",
+      "asset": "https://media.ticketmaster.eu/czechrepublic/182445746855f1f53b9324df05cb7cfd.jpg",
+      "layout_fingerprint": "map-62803e42b0ed4642d93555ca7b08d5542288ebdb6f59a0c220ef99e7a5ff4658",
+      "sections": 1,
+      "mappings": 2,
+      "canvas": 0,
+      "iframe": 0,
+      "stock_verified": false,
+      "geometry_verified": false
+    },
+    {
+      "event_url": "https://www.ticketmaster.cz/event/andrea-bocelli-vstupenky/493115848",
+      "site_host": "ticketmaster.cz",
+      "event": "Andrea Bocelli",
+      "venue": "O2 arena",
+      "asset": "https://media.ticketmaster.eu/czechrepublic/c04986bc8e7fd6a90187a73e8016e5b3.png",
+      "layout_fingerprint": "map-7e066a072db82263c8216c8da2650b4c7eb83771a2643cb025b0711abf37470d",
+      "sections": 3,
+      "mappings": 15,
+      "canvas": 0,
+      "iframe": 0,
+      "stock_verified": false,
+      "geometry_verified": false
+    },
+    {
+      "event_url": "https://www.ticketmaster.co.uk/u2-the-greatest-show-on-earth-world-tour-london-18-06-2027/event/3500655683001AA0",
+      "site_host": "ticketmaster.co.uk",
+      "event": "U2: The Greatest Show On Earth World Tour",
+      "venue": "Tottenham Hotspur Stadium",
+      "asset": "https://media.ticketmaster.co.uk/tm/en-gb/tmimages/venue/maps/uk1/34556s.gif",
+      "layout_fingerprint": "map-89103e6df68bd44c7c8261fed424c1455dad30aa1476d10c866cbd326466dbc2",
+      "sections": 12,
+      "mappings": 49,
+      "canvas": 0,
+      "iframe": 0,
+      "stock_verified": false,
+      "geometry_verified": false
+    },
+    {
+      "event_url": "https://www.ticketmaster.se/event/dirty-honey-biljetter/1940251376",
+      "site_host": "ticketmaster.se",
+      "event": "Dirty Honey",
+      "venue": "Debaser Strand",
+      "asset": null,
+      "layout_fingerprint": null,
+      "sections": 1,
+      "mappings": 1,
+      "canvas": 0,
+      "iframe": 0,
+      "stock_verified": false,
+      "geometry_verified": false
+    },
+    {
+      "event_url": "https://www.ticketmaster.co.uk/from-the-jam-london-04-09-2027/event/3E00654CFB936CA4",
+      "site_host": "ticketmaster.co.uk",
+      "event": "From the Jam",
+      "venue": "O2 Academy Islington",
+      "asset": "https://media.ticketmaster.co.uk/tm/en-gb/tmimages/venue/maps/uk5/16822s.gif",
+      "layout_fingerprint": "map-9d0adb9edb0e115aadba32f6a8e7d58f3bb4146191f6aad1260a9e41212ae2b4",
+      "sections": 1,
+      "mappings": 1,
+      "canvas": 0,
+      "iframe": 0,
+      "stock_verified": false,
+      "geometry_verified": false
+    },
+    {
+      "event_url": "https://www.ticketmaster.be/event/john-summit-europe-ctrl-escape-arena-tour-tickets/206059935",
+      "site_host": "ticketmaster.be",
+      "event": "JOHN SUMMIT – EUROPE CTRL ESCAPE ARENA TOUR",
+      "venue": "Vorst Nationaal/Forest National",
+      "asset": "https://media.ticketmaster.eu/belgium/198da502e87a73aaac802358659d776f.jpg",
+      "layout_fingerprint": "map-a165c11b9af40cff7ebda82827e5b236982a502195e340f7d9e4f79baef8f5b7",
+      "sections": 4,
+      "mappings": 6,
+      "canvas": 0,
+      "iframe": 0,
+      "stock_verified": false,
+      "geometry_verified": false
+    },
+    {
+      "event_url": "https://www.ticketmaster.pl/event/sting-3-0-tour-bilety/1047384207",
+      "site_host": "ticketmaster.pl",
+      "event": "Sting 3.0 TOUR",
+      "venue": "ERGO ARENA",
+      "asset": "https://media.ticketmaster.eu/poland/9c5b34c0584096d463e3c222f45ba008.png",
+      "layout_fingerprint": "map-1b6e28d02a88af23df6e10fc269bac19ed9251ba06bd7da7682f5b0c484649b0",
+      "sections": 2,
+      "mappings": 6,
+      "canvas": 0,
+      "iframe": 0,
+      "stock_verified": false,
+      "geometry_verified": false
+    },
+    {
+      "event_url": "https://www.ticketmaster.es/event/mon-laferte-entradas/1776378129",
+      "site_host": "ticketmaster.es",
+      "event": "Mon Laferte",
+      "venue": "Movistar Arena",
+      "asset": null,
+      "layout_fingerprint": null,
+      "sections": 12,
+      "mappings": 13,
+      "canvas": 0,
+      "iframe": 0,
+      "stock_verified": false,
+      "geometry_verified": false
+    },
+    {
+      "event_url": "https://www.ticketmaster.de/event/meltt-tickets/2066123927",
+      "site_host": "ticketmaster.de",
+      "event": "Meltt",
+      "venue": "Kranhalle",
+      "asset": "https://media.ticketmaster.eu/germany/d6fe01f98e695530efd90bfcab8c749b.png",
+      "layout_fingerprint": "map-5e5636a8adfe16eba49317788175b53683eacfc64aa87ecba8700cd9951a66cd",
+      "sections": 1,
+      "mappings": 1,
+      "canvas": 0,
+      "iframe": 0,
+      "stock_verified": false,
+      "geometry_verified": false
+    },
+    {
+      "event_url": "https://www.ticketmaster.nl/event/10cc-tickets/593318371",
+      "site_host": "ticketmaster.nl",
+      "event": "10cc",
+      "venue": "TivoliVredenburg",
+      "asset": "https://media.ticketmaster.eu/netherlands/b3da81f0fbc3cffde394bd9fe9265de8.jpg",
+      "layout_fingerprint": "map-5c962a58a4a115a2fea65f9600c34658d1d9424517bd9853f96819a47c910d12",
+      "sections": 1,
+      "mappings": 3,
+      "canvas": 0,
+      "iframe": 0,
+      "stock_verified": false,
+      "geometry_verified": false
+    }
+  ],
+  "offline_capture_age_verified": false,
+  "live_check": {
+    "completed_at": "2026-11-09T23:09:43.058903+00:00",
+    "source": "live_browser",
+    "transport_binding": "observed_main_document",
+    "event_url": "https://www.ticketmaster.cz/event/korn-vstupenky/1472650657",
+    "static_map": {
+      "layout_fingerprint": "map-8db8308b161d9926077031b82d3843c8a31d86207247711e59ec4cbfd4c7f697",
+      "url": "https://media.ticketmaster.eu/czechrepublic/ac262666f26aa200571c6089d43d4661.png"
+    },
+    "configured_sections": [
+      {
+        "id": "1P",
+        "raw_id": "1P",
+        "title": "1. POSCHODÍ"
+      },
+      {
+        "id": "4P",
+        "raw_id": "4P",
+        "title": "4. POSCHODÍ"
+      },
+      {
+        "id": "PL",
+        "raw_id": "PL",
+        "title": "Plocha"
+      }
+    ],
+    "stock_verified": false,
+    "geometry_verified": false,
+    "adjacency_verified": false,
+    "ticket_selection_attempted": false,
+    "reservation_attempted": false
+  },
+  "public_image_download": {
+    "bytes": 178291,
+    "content_type": "image/png",
+    "sha256": "e78a68c9a2e9cee0c3b0618c370772bcc9758d409a7061b588997a248a0fd023",
+    "validation": "mime_and_signature",
+    "geometry_verified": false
+  },
+  "limits": [
+    "Image fingerprints are hashes of reference metadata, not geometry or downloaded bytes.",
+    "Selection zones are distinct from physical numbered seating blocks.",
+    "No live availability, seat adjacency, or hold is inferred from static maps.",
+    "Saved-capture replay does not establish current access across all markets."
+  ]
+}
