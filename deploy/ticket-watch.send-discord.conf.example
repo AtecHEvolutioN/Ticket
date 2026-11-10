@@ -1,0 +1,5 @@
+# Copy to /etc/systemd/system/ticket-watch.service.d/send-discord.conf
+# after configuring the channel and token and verifying a setup test.
+[Service]
+ExecStart=
+ExecStart=/opt/ticket-watch/target/release/ticket-watch --config /opt/ticket-watch/config.local.toml run --send-discord

@@ -35,6 +35,19 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Generate an offline bot invite and redacted Discord configuration report.
+    DiscordSetup {
+        #[arg(long)]
+        application_id: String,
+        #[arg(long)]
+        guild_id: Option<String>,
+    },
+    /// Preview a synthetic connectivity message; never fetches tickets or opens monitoring state.
+    DiscordTest {
+        /// Send one synthetic message, including configured mentions; never retries automatically.
+        #[arg(long)]
+        send: bool,
+    },
     /// Monitor configured Czech sections; preview Discord messages unless sending is enabled.
     MapRun {
         #[arg(long)]
@@ -841,7 +854,7 @@ async fn main() -> Result<()> {
         | Command::CartPreferences { .. }
         | Command::CartPreferencesSave { .. }
         | Command::CartPlan { .. } => Config::default(),
-        Command::Venues { .. }
+        Command::Venues { .. } | Command::DiscordSetup { .. } | Command::DiscordTest { .. }
             if cli.config == Path::new("config.toml") && !cli.config.exists() =>
         {
             Config::default()
@@ -849,6 +862,22 @@ async fn main() -> Result<()> {
         _ => config::load(&cli.config)?,
     };
     match cli.command {
+        Command::DiscordSetup {
+            application_id,
+            guild_id,
+        } => print_json(&ticket_watch::discord_setup::setup_report(
+            &config.discord,
+            &application_id,
+            guild_id.as_deref(),
+        )?)?,
+        Command::DiscordTest { send } => {
+            let report =
+                ticket_watch::discord_setup::connectivity_test(&config.discord, send).await?;
+            print_json(&report)?;
+            if send && !report.confirmed() {
+                bail!("Discord test delivery was not confirmed; see the diagnostic above");
+            }
+        }
         Command::MapRun { once, send_discord } => {
             ticket_watch::map_monitor::run(config, once, send_discord).await?;
         }

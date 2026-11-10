@@ -1,0 +1,13 @@
+{
+  "name": "ticket-watch-discord",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Signed Discord HTTP commands; the persistent ticket watcher runs separately",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js scripts/*.test.mjs"
+  }
+}

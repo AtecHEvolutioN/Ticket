@@ -6,6 +6,12 @@
 /.env
 /.env.*
 !/.env.example
+# Local Discord/Vercel settings and dependencies must stay out of Git.
+**/.env
+**/.env.*
+!**/.env.example
+**/.vercel/
+**/node_modules/
 *.sqlite*
 *.log
 /.browser-profile/

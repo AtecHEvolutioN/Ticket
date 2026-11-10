@@ -114,7 +114,7 @@ Catalog refreshes preserve matching cached watches through partial failures and 
 - Artist/location subscriptions, bounded Discovery pagination, a persisted generated watchlist, and background catalog refresh. Discovery request budgets and provider cooldowns are separate from website pacing.
 - Read-only API metadata stays separate from observed website inventory; generated watches cannot enable metadata-based stock alerts.
 
-Server watch selection currently uses TOML and the CLI. Android preferences can be exported to the offline planner but are not synchronized with the server. Discord slash commands, scheduled-sale timers, monitor-triggered carting, and multi-node operation are not implemented. Successful parsing of one market does not establish worldwide coverage or a latency guarantee.
+Server watch selection currently uses TOML and the CLI. Android preferences can be exported to the offline planner but are not synchronized with the server. The optional [Discord command endpoint](docs/discord-setup.md) runs on Vercel and provides signed `/ticket ping` and `/ticket help`; it is separate from the persistent watcher. Remote watch/settings controls, scheduled-sale timers, monitor-triggered carting, and multi-node operation are not implemented. Successful parsing of one market does not establish worldwide coverage or a latency guarantee.
 
 The [production roadmap](docs/production-roadmap.md) tracks the remaining Discord,
 cart receipt, automation and deployment work, followed by the planned MCP market

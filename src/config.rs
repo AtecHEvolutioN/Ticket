@@ -203,6 +203,44 @@ impl Default for DiscordConfig {
     }
 }
 
+impl DiscordConfig {
+    pub fn validate(&self) -> Result<()> {
+        if self
+            .channel_id
+            .as_deref()
+            .is_some_and(|id| !discord_snowflake(id))
+            || self
+                .mention_user_ids
+                .iter()
+                .chain(&self.mention_role_ids)
+                .any(|id| !discord_snowflake(id))
+        {
+            bail!(
+                "Discord channel/user/role IDs must be positive numeric snowflakes fitting in 64 bits"
+            );
+        }
+        if self.mention_user_ids.len() + self.mention_role_ids.len() > 50 {
+            bail!("Configure at most 50 Discord mention targets");
+        }
+        if self.token_env.is_empty()
+            || !self
+                .token_env
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        {
+            bail!("Discord token_env must be an environment variable name, never the token itself");
+        }
+        Ok(())
+    }
+}
+
+pub(crate) fn discord_snowflake(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 20
+        && value.bytes().all(|b| b.is_ascii_digit())
+        && value.parse::<u64>().is_ok_and(|n| n > 0)
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum FetchMode {
@@ -388,34 +426,7 @@ pub fn validate(config: &Config) -> Result<()> {
             "Invalid limits: use bounded timeouts, positive intervals, 1–32 workers, 1KB–16MB pages, and blocked cooldown >=60s"
         );
     }
-    let snowflake =
-        |id: &str| !id.is_empty() && id.len() <= 20 && id.bytes().all(|b| b.is_ascii_digit());
-    if config
-        .discord
-        .channel_id
-        .as_ref()
-        .is_some_and(|s| !snowflake(s))
-        || config
-            .discord
-            .mention_user_ids
-            .iter()
-            .chain(&config.discord.mention_role_ids)
-            .any(|s| !snowflake(s))
-    {
-        bail!("Discord channel/user/role IDs must be numeric snowflakes");
-    }
-    if config.discord.mention_user_ids.len() + config.discord.mention_role_ids.len() > 50 {
-        bail!("Configure at most 50 Discord mention targets");
-    }
-    if config.discord.token_env.is_empty()
-        || !config
-            .discord
-            .token_env
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'_')
-    {
-        bail!("Discord token_env must be an environment variable name, never the token itself");
-    }
+    config.discord.validate()?;
     if config.map_watches.len() > 1000 {
         bail!("Configure at most 1000 map watches");
     }

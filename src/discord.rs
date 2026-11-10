@@ -1,6 +1,6 @@
 //! Discord REST delivery. No browser cookies or Ticketmaster credentials enter this module.
 use crate::{
-    config::DiscordConfig,
+    config::{DiscordConfig, discord_snowflake as is_snowflake},
     model::{FeeScope, PendingAlert, PriceScope, QuantityKind},
 };
 use anyhow::{Context, Result, bail};
@@ -58,6 +58,7 @@ impl Discord {
 
     /// Construct only when live sending was explicitly enabled. `preview` needs no token.
     pub fn new(config: &DiscordConfig) -> Result<Self> {
+        config.validate()?;
         let channel = config
             .channel_id
             .as_deref()
@@ -97,6 +98,17 @@ impl Discord {
     /// One caller owns the bot limiter. Parent persists retries in its durable outbox.
     /// A timeout can mean Discord accepted a message: retries reuse its nonce.
     pub async fn send(&mut self, pending: &PendingAlert) -> Result<Delivery> {
+        self.send_payload(&preview(pending, &self.config), pending.attempts)
+            .await
+    }
+
+    /// The setup command uses the same bounded transport, but never the inventory outbox.
+    pub(crate) async fn send_connectivity_test(&mut self, test_id: &str) -> Result<Delivery> {
+        self.send_payload(&connectivity_preview(&self.config, test_id), 0)
+            .await
+    }
+
+    async fn send_payload(&mut self, payload: &Value, attempts: u32) -> Result<Delivery> {
         let now = Instant::now();
         if self.next_send > now {
             return Ok(Delivery::Retry {
@@ -104,17 +116,11 @@ impl Discord {
                 reason: "Discord rate-limit cooldown".into(),
             });
         }
-        let mut response = match self
-            .client
-            .post(&self.endpoint)
-            .json(&preview(pending, &self.config))
-            .send()
-            .await
-        {
+        let mut response = match self.client.post(&self.endpoint).json(payload).send().await {
             Ok(response) => response,
             Err(_) => {
                 return Ok(self.retry(
-                    pending,
+                    attempts,
                     "Discord transport failure; delivery may be ambiguous",
                 ));
             }
@@ -186,13 +192,13 @@ impl Discord {
                 });
             }
             return Ok(self.retry(
-                pending,
+                attempts,
                 "Discord acceptance could not be confirmed; retry keeps the same nonce",
             ));
         }
         if status.is_server_error() || status == StatusCode::REQUEST_TIMEOUT {
             return Ok(self.retry(
-                pending,
+                attempts,
                 "Discord temporarily unavailable; delivery may be ambiguous",
             ));
         }
@@ -228,8 +234,8 @@ impl Discord {
         }
     }
 
-    fn retry(&mut self, pending: &PendingAlert, reason: &str) -> Delivery {
-        let delay = Duration::from_secs(2_u64.pow(pending.attempts.min(7)).max(2));
+    fn retry(&mut self, attempts: u32, reason: &str) -> Delivery {
+        let delay = Duration::from_secs(2_u64.pow(attempts.min(7)).max(2));
         self.set_cooldown(delay);
         Delivery::Retry {
             after_secs: ceil_seconds(self.next_send.saturating_duration_since(Instant::now())),
@@ -360,6 +366,22 @@ pub fn preview(pending: &PendingAlert, cfg: &DiscordConfig) -> Value {
     })
 }
 
+/// A synthetic setup message has no event, stock, prices, or purchase links.
+pub(crate) fn connectivity_preview(cfg: &DiscordConfig, test_id: &str) -> Value {
+    let (content, users, roles) = mentions(cfg);
+    json!({
+        "content": content,
+        "embeds": [{
+            "title": "Ticket Watch — synthetic connectivity test",
+            "description": "Setup test only. This is not a ticket availability alert. No event was checked and no tickets were selected or reserved.",
+            "footer": {"text": "Checks Discord message delivery only; ticket monitoring is tested separately."}
+        }],
+        "allowed_mentions": {"parse": [], "users": users, "roles": roles, "replied_user": false},
+        "nonce": nonce(&format!("connectivity-test:{test_id}")),
+        "enforce_nonce": true,
+    })
+}
+
 fn mentions(cfg: &DiscordConfig) -> (String, Vec<String>, Vec<String>) {
     let mut content = String::new();
     let mut users = Vec::new();
@@ -392,13 +414,6 @@ fn mentions(cfg: &DiscordConfig) -> (String, Vec<String>, Vec<String>) {
         content.push_str("Some mention targets omitted because of Discord message limits.");
     }
     (content.trim_end().into(), users, roles)
-}
-
-fn is_snowflake(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 20
-        && value.bytes().all(|b| b.is_ascii_digit())
-        && value.parse::<u64>().is_ok_and(|n| n > 0)
 }
 
 fn nonce(value: &str) -> String {

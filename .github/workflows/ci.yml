@@ -7,6 +7,19 @@ permissions:
   contents: read
 
 jobs:
+  discord:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: apps/discord/package-lock.json
+      - run: npm ci --ignore-scripts
+        working-directory: apps/discord
+      - run: npm test
+        working-directory: apps/discord
   test:
     runs-on: ubuntu-latest
     steps:

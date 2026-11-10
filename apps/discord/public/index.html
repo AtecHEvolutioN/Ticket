@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ticket Watch · Discord</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #10141d; color: #e8eef8; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; }
+    main { max-width: 44rem; margin: 2rem; line-height: 1.7; }
+    .eyebrow { color: #90a2c1; letter-spacing: .12em; text-transform: uppercase; font-size: .8rem; }
+    h1 { font-size: clamp(2rem, 6vw, 3.5rem); line-height: 1.1; }
+    a { color: #a7c3ff; }
+    code { color: #b6f0d1; }
+    .card { border: 1px solid #344054; border-radius: 1rem; padding: 1.4rem; margin: 1.5rem 0; }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">Ticket Watch / Discord</p>
+    <h1>Ticket alerts, in your server.</h1>
+    <p>This service receives signed Discord commands. The continuous ticket watcher runs on a separate persistent host and delivers alerts directly to your configured channel.</p>
+    <div class="card">
+      <strong>Commands available after setup</strong>
+      <p><code>/ticket ping</code> checks the command connection.<br><code>/ticket help</code> explains the current setup.</p>
+      <p>These commands do not verify watcher health, reserve tickets, or change your settings.</p>
+    </div>
+    <p><a href="/api/health">Check command service configuration</a> · <a href="https://github.com/AtecHEvolutioN/Ticket/blob/main/docs/discord-setup.md">Setup guide</a></p>
+  </main>
+</body>
+</html>

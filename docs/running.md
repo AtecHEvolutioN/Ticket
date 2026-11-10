@@ -216,7 +216,13 @@ rate-limit bucket. The normal monitor records that deadline before acknowledging
 delivery, even when the sent message was the only queued alert. A restarted
 monitor checks the stored deadline before sending a later alert.
 
-There are no Discord slash commands, scheduled-sale timers, or cart/checkout automation in this version. Manage watches through TOML and restart after edits.
+For an offline invite/configuration report and a standalone connectivity test,
+use `discord-setup` and `discord-test`; the latter requires `--send` to send a real
+message. Neither command polls Ticketmaster or opens a database. The optional
+Vercel endpoint provides `/ticket ping` and `/ticket help`. Follow the
+[Discord setup guide](discord-setup.md) for these commands, permissions and hosting.
+Remote watch/settings commands, scheduled-sale timers and automatic cart/checkout
+remain unfinished. Manage watches through TOML and restart after edits.
 
 ## Optional Linux service
 

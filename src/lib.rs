@@ -11,6 +11,7 @@ pub mod catalog;
 pub mod config;
 pub mod database;
 pub mod discord;
+pub mod discord_setup;
 pub mod discovery;
 pub mod event_identity;
 pub mod fetch;
