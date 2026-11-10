@@ -59,6 +59,34 @@ fn setup_and_preview_work_without_configuration_credentials_or_created_state() {
 }
 
 #[test]
+fn manage_channels_invite_is_opt_in_and_never_requests_administrator() {
+    let dir = tempfile::tempdir().unwrap();
+    for manage_channels in [false, true] {
+        let mut args = vec!["discord-setup", "--application-id", "123456789012345678"];
+        if manage_channels {
+            args.push("--manage-channels");
+        }
+        let report = success(run(dir.path(), &args, None));
+        let invite = url::Url::parse(report["invite_url"].as_str().unwrap()).unwrap();
+        let query: std::collections::HashMap<_, _> = invite.query_pairs().into_owned().collect();
+        let bits: u64 = query["permissions"].parse().unwrap();
+        assert_eq!(bits, if manage_channels { 19472 } else { 19456 });
+        assert_eq!(bits & 16 != 0, manage_channels);
+        assert_eq!(bits & 8, 0, "Administrator must never be requested");
+        assert_eq!(report["permissions"]["value"], query["permissions"]);
+        assert_eq!(
+            report["permissions"]["names"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|name| name == "Manage Channels"),
+            manage_channels,
+        );
+    }
+    assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none());
+}
+
+#[test]
 fn configured_setup_redacts_credentials_and_locks_the_requested_guild() {
     let dir = tempfile::tempdir().unwrap();
     let config = dir.path().join("config.toml");

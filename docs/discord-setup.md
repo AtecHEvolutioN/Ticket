@@ -42,6 +42,8 @@ the same token does not coordinate Discord's global limits.
    and **Embed Links** in the destination text channel. Administrator and
    privileged Gateway intents are unnecessary. Channel overrides can still deny
    access. Use a normal text channel for the first test.
+   To let the bot create channels, also grant **Manage Channels**, using the
+   `discord-setup --manage-channels` invite option below.
 4. Configure the worker's `config.local.toml`:
 
    ```toml
@@ -65,6 +67,11 @@ the destination without network requests or credentials:
   --application-id YOUR_APPLICATION_ID --guild-id YOUR_SERVER_ID
 ./target/release/ticket-watch --config config.local.toml discord-test
 ```
+
+For channel creation, add `--manage-channels` to `discord-setup` and authorize the
+resulting invite for the same application/server. This requests permission bit
+`16` in addition to the alert permissions (`19472` total), without Administrator.
+The invite itself creates no channels.
 
 Set `DISCORD_BOT_TOKEN` privately on the worker. On Bash, a hidden prompt avoids
 putting the token in shell history or command arguments:
@@ -154,6 +161,38 @@ the application. The endpoint's user allowlist still applies to administrators.
 Try `/ticket ping` and `/ticket help` in the configured server. A successful ping
 verifies the command endpoint only. Watch controls, remote status and preference
 sync still require a worker connection and are not exposed yet.
+
+## Let the bot create a channel
+
+The bot can create normal text channels using the operator helper below. It runs
+on the operator's computer or persistent host with the same private bot token;
+the Vercel command endpoint does not need that token. The first alert channel can
+remain the existing one. Creation does not automatically change its configured
+destination.
+
+```bash
+# Preview: verifies the application and searches existing channels if a token is set.
+node --env-file=.env.discord.local apps/discord/scripts/provision-channel.mjs \
+  --name ticket-alerts
+# Apply once after reviewing the plan:
+node --env-file=.env.discord.local apps/discord/scripts/provision-channel.mjs \
+  --name ticket-alerts --apply
+```
+
+Without a token, the preview describes an unverified intention only. With a token,
+it checks that the token belongs to the configured application and lists the
+configured server's channels before acting. `--parent CATEGORY_ID` places the
+channel in an existing category. An exact existing name/type/parent match is
+reused; duplicate matches are rejected for manual review. The helper leaves
+permissions to the server/category defaults and does not delete, move or rename
+anything. Review those defaults if the channel must be private.
+
+An apply makes at most one channel-creation request and never retries an
+uncertain response. Inspect the server before another invocation after an
+ambiguous failure. Run one provisioner at a time: the helper has no distributed
+lock and concurrent invocations can race. Copy the confirmed channel ID into the
+worker's `[discord].channel_id` if you want future alerts sent there. Channel
+creation is an operator tool; `/ticket` currently exposes only ping/help.
 
 ## Start real alerts
 

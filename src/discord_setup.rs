@@ -10,6 +10,7 @@ use serde_json::{Value, json};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 const PERMISSIONS: &str = "19456"; // View Channel | Send Messages | Embed Links
+const CHANNEL_MANAGEMENT_PERMISSIONS: &str = "19472"; // Base permissions | Manage Channels
 const SENDER_NOTE: &str = "run, map-run and discord-test use independent rate limiters with the same bot token. Use one sender initially: stop monitors before the standalone test and wait any reported cooldown before restarting them. This test does not read or update their durable cooldowns.";
 const NOTIFICATION_NOTE: &str = "Discord acceptance does not verify a device notification. Channel permissions, notification preferences and role mentionability still apply.";
 static NEXT_TEST: AtomicU64 = AtomicU64::new(0);
@@ -19,6 +20,7 @@ pub fn setup_report(
     config: &DiscordConfig,
     application_id: &str,
     guild_id: Option<&str>,
+    manage_channels: bool,
 ) -> Result<Value> {
     config.validate()?;
     if !discord_snowflake(application_id) {
@@ -27,13 +29,22 @@ pub fn setup_report(
     if guild_id.is_some_and(|id| !discord_snowflake(id)) {
         bail!("Discord guild_id must be a positive numeric ID fitting in 64 bits");
     }
+    let permissions = if manage_channels {
+        CHANNEL_MANAGEMENT_PERMISSIONS
+    } else {
+        PERMISSIONS
+    };
+    let mut permission_names = vec!["View Channel", "Send Messages", "Embed Links"];
+    if manage_channels {
+        permission_names.push("Manage Channels");
+    }
     let mut invite = url::Url::parse("https://discord.com/oauth2/authorize")?;
     {
         let mut query = invite.query_pairs_mut();
         query
             .append_pair("client_id", application_id)
             .append_pair("scope", "bot applications.commands")
-            .append_pair("permissions", PERMISSIONS);
+            .append_pair("permissions", permissions);
         if let Some(guild) = guild_id {
             query
                 .append_pair("guild_id", guild)
@@ -47,7 +58,7 @@ pub fn setup_report(
         "guild_id": guild_id,
         "invite_url": invite.as_str(),
         "scopes": ["bot", "applications.commands"],
-        "permissions": {"value": PERMISSIONS, "names": ["View Channel", "Send Messages", "Embed Links"]},
+        "permissions": {"value": permissions, "names": permission_names},
         "configuration": {
             "channel_id": config.channel_id,
             "token_env": config.token_env,

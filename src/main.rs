@@ -41,6 +41,9 @@ enum Command {
         application_id: String,
         #[arg(long)]
         guild_id: Option<String>,
+        /// Include Manage Channels in the invite for optional channel provisioning.
+        #[arg(long)]
+        manage_channels: bool,
     },
     /// Preview a synthetic connectivity message; never fetches tickets or opens monitoring state.
     DiscordTest {
@@ -865,10 +868,12 @@ async fn main() -> Result<()> {
         Command::DiscordSetup {
             application_id,
             guild_id,
+            manage_channels,
         } => print_json(&ticket_watch::discord_setup::setup_report(
             &config.discord,
             &application_id,
             guild_id.as_deref(),
+            manage_channels,
         )?)?,
         Command::DiscordTest { send } => {
             let report =
