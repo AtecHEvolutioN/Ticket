@@ -16,8 +16,10 @@ experiment. This roadmap does not enable purchases, resale listings or repricing
 - [Discord setup tools](discord-setup.md): offline installation/configuration
   report, explicit standalone test message, and a Vercel HTTP command app with
   signed `/ticket ping` and `/ticket help`, server/operator restrictions and
-  ephemeral replies. Command health is separate from watcher/delivery health;
-  remote watch/settings controls and the persistent host remain to be connected.
+  ephemeral replies. An operator helper can create/reuse normal text channels
+  with optional Manage Channels permission. Command health is separate from
+  watcher/delivery health; remote watch/settings controls and the persistent
+  host remain to be connected.
 - Configurable ticket preferences: two adjacent tickets and cheapest eligible
   group by default. Android saves and exports preferences. A separate revisioned
   server registry and [read-only trigger preview](monitor-trigger-preview.md)
