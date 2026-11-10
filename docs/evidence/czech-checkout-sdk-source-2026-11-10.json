@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "observed_on": "2026-11-10",
+  "evidence_kind": "public_javascript_source_review",
+  "actual_checkout_observed": false,
+  "reservation_attempted": false,
+  "provider_cart_api_called": false,
+  "public_asset": {
+    "url": "https://checkout.ticketmaster.cz/js/sdk.js",
+    "configured_at": "initialReduxState.config.checkout.sdkSrc in saved Czech event documents",
+    "downloaded_bytes": 35548,
+    "downloaded_sha256": "a68a9cf9837ca43fc3fcb90fec7bbf9df68a4ce8602e8d046751a26129559081",
+    "downloaded_format": "gzip",
+    "decoded_bytes": 143783,
+    "decoded_sha256": "f6b71a587f22512ec5f76e118172d5154dd92ee406b457f9185c8dad497bb73e",
+    "scope": "Downloaded and inspected the public asset only; no SDK methods were invoked."
+  },
+  "reviewed_event_source": "czech-reservation-flow-2026-11-10.json",
+  "source_configured_czech_origins": {
+    "checkout": "https://checkout.ticketmaster.cz",
+    "gco_data": "https://checkout.prod.ticketmaster.cz",
+    "identity": "https://identity.ticketmaster.cz",
+    "legacy": "https://www.ticketmaster.cz",
+    "resale": "https://secure.ticketmaster.cz"
+  },
+  "source_navigation_contracts": [
+    {
+      "branch": "SDK buildCheckoutUrl",
+      "origin": "https://checkout.ticketmaster.cz",
+      "source_path_template": "/{requestId}",
+      "query_keys": [
+        "ccp_src", "ccp_channel", "edp", "f_appview", "f_appview_ln",
+        "f_appview_version", "f_layout", "venue_owner"
+      ],
+      "query_binding": {
+        "edp": "encodeURIComponent of the originating event URL",
+        "venue_owner": "Optional fixed LN value"
+      },
+      "recommended_validation": "Exact HTTPS origin, one nonempty opaque path segment, known query keys, and originating event URL binding. Bind requestId to the same-attempt observed response when available. Reject credentials, unexpected ports, fragments, duplicate query keys, encoded path separators and unrecognized routes.",
+      "limitation": "This is a source-generated URL template, not a live navigation or verified checkout receipt. The source does not define a validated requestId grammar."
+    },
+    {
+      "branch": "SDK loadCheckout with accessTokenValid false outside app view",
+      "origin": "https://identity.ticketmaster.cz",
+      "path": "/sign-in",
+      "query_keys": [
+        "lang", "integratorId", "placementId", "showHeader", "headerTitle",
+        "hideLeftPanel", "redirectUri", "timerData"
+      ],
+      "fixed_query_values": {
+        "showHeader": "true",
+        "headerTitle": "Checkout",
+        "hideLeftPanel": "true"
+      },
+      "integrator_placement_pairs": [
+        ["prd1741.iccp", "cart.reserve"],
+        ["prd1741.iccp", "mytmlogin"],
+        ["prd1908.CCPCheckout", "checkout.v2"]
+      ],
+      "redirect_uri_binding": "The decoded redirectUri must independently satisfy the checkout navigation policy.",
+      "timer_data_source_shape": {
+        "artistName": "empty string",
+        "remainingTime": "integer seconds computed from remainingTimestamp minus Date.now()",
+        "timesOutRedirectURL": "originating event URL"
+      },
+      "diagnostic": "login_needed",
+      "action": "Pause for human login; do not authenticate automatically or treat this as CAPTCHA, no-hold, release or a verified cart receipt."
+    },
+    {
+      "branch": "SDK successful response checkoutUrl",
+      "source_field": "data.reserve.checkoutUrl",
+      "recommended_validation": "Validate the response-supplied URL against the fixed navigation policy. Do not trust arbitrary hosts or expand the allowlist from response data alone.",
+      "limitation": "The source accepts a dynamic checkoutUrl and therefore cannot prove its live origin/path. An unsupported route remains an uncertain outcome."
+    },
+    {
+      "branch": "Legacy checkout redirect configuration",
+      "origin": "https://www.ticketmaster.cz",
+      "path": "/checkout/controller/addTickets.php",
+      "source_query_keys": ["v", "responsive", "brand", "app_type"],
+      "limitation": "The source also merges a query helper from the event URL; its complete forwarding contract is not validated here. Legacy MFOL reservation success separately provides links[0].href, whose live path remains unobserved."
+    }
+  ],
+  "passive_network_capture_candidates": [
+    {
+      "origin": "https://checkout.ticketmaster.cz",
+      "path": "/api/rules",
+      "method": "GET",
+      "purpose": "SDK chooses checkout system using eventId; not ticket availability."
+    },
+    {
+      "origin": "https://checkout.prod.ticketmaster.cz",
+      "path": "/graphql",
+      "method": "POST",
+      "purpose": "Site-generated GCO reserve/poll/finalize operations, captured only if the normal UI emits them."
+    },
+    {
+      "origin": "https://www.ticketmaster.cz",
+      "path_templates": [
+        "/event/{eventId}/api/reserve",
+        "/event/{eventId}/api/reserve_ism"
+      ],
+      "method": "POST",
+      "purpose": "Legacy site-generated reservation branches; success handoff is not a complete receipt."
+    }
+  ],
+  "candidate_source_receipt_shapes": {
+    "gco_successful_reservation": [
+      "accessTokenValid", "checkoutUrl", "expiresAt", "sessionId"
+    ],
+    "gco_successful_provisional_reservation": [
+      "sessionId", "expiresAt", "tickets[].id", "tickets[].ids",
+      "tickets[].eventId", "tickets[].description", "tickets[].isExactMatch",
+      "tickets[].ticketUnitPrice.amount", "tickets[].ticketUnitPrice.currencyCode",
+      "tickets[].quantity", "tickets[].seats[].section", "tickets[].seats[].row",
+      "tickets[].seats[].seat", "tickets[].seats[].isGeneralAdmission",
+      "tickets[].seats[].seatInfos[].type", "tickets[].seats[].seatInfos[].info"
+    ],
+    "legacy_mfol_handoff": [
+      "statusCode", "links[].href", "info.code", "info.ticketTypeId"
+    ],
+    "expiry_semantics_in_source": [
+      "GCO uses new Date(expiresAt || 0).getTime().",
+      "CO2 uses the minimum of ticketOrderItems[].expirationTime multiplied by 1000, with Infinity when absent.",
+      "The presence of separate expiry contracts is not proof that either applies to a live Czech receipt."
+    ]
+  },
+  "source_error_diagnostics": {
+    "U002": "price_mismatch",
+    "U003": "insufficient_seats_ui",
+    "U402": "insufficient_seats_ui_and_ntf_stage",
+    "U102": "member_or_ticket_limit",
+    "U401": "nonadjacent_acceptance_dialog",
+    "U303_to_U307": "invalid_queue_token",
+    "SDK_LOAD_ERROR": "sdk_load_failure",
+    "SDK_INIT_ERROR": "sdk_initialization_failure"
+  },
+  "limitations": [
+    "Source review has not authenticated, parsed or observed an actual Czech held-ticket receipt.",
+    "Checkout SDK success can precede a legacy MFOL reservation. Capture the entire same-attempt normal UI sequence.",
+    "No listed error code independently proves absence of a hold after dispatch.",
+    "Neither successful SDK response shape establishes complete checkout fees, performance date, affirmative adjacency or exhaustive cheapest-group coverage.",
+    "isExactMatch, acceptNonAdjacent=false and consecutive-looking labels do not prove adjacency.",
+    "A checkout URL, selection basket counter, HTTP success or login page does not prove a hold or no-hold outcome.",
+    "A countdown must not extend an originally bound hold expiry when reparsed; missing or ambiguous expiry remains unsupported.",
+    "Raw session IDs, native cart/hold references, checkout query values and response bodies remain private; only local digests belong in shareable evidence."
+  ]
+}

@@ -1,8 +1,10 @@
 # Czech ticket selection and cart readiness
 
-The monitor can inspect event pages. The new source commands below add a
+The monitor can inspect event pages. The source commands below add a
 read-only Czech price catalog and an offline group planner. They do not
-reserve tickets or run automatically from a watch. Android 0.7.0-test can save and
+reserve tickets or run automatically from a watch. A separate experimental
+[native cart command](native-cart-attempt.md) now connects one Find tickets action
+to the durable journal; receipt verification remains unfinished. Android 0.7.0-test can save and
 export [ticket preferences](ticket-preferences.md) for this planner.
 
 ## Inspect the configured selection choices
@@ -117,8 +119,8 @@ Raw HTML and session data remain private. Earlier headed access evidence is in
 these observations nor the 198 passing Rust tests establish unattended production
 readiness. Format checks and Clippy also passed for this source change.
 
-The next browser adapter needs a persistent session separate from the monitor's
-short-lived page checks. In that session, it must:
+The native adapter now uses a persistent session separate from the monitor's
+short-lived page checks. The full cart flow requires:
 
 1. Apply the explicitly requested quantity and validate the native exact-price
    filter and search order. Category minima overlap and cannot prove the cheapest
@@ -138,8 +140,8 @@ short-lived page checks. In that session, it must:
 The cart runner needs narrowly validated navigation rules for observed Czech cart
 routes; the existing monitor's public-event policy remains in place. The
 [durable attempt journal](cart-journal.md) now supplies separate storage, a
-dispatch marker, idempotent outcomes and restart reconciliation. It is not yet
-connected to a native cart adapter and does not authenticate supplied receipts.
+dispatch marker, idempotent outcomes and restart reconciliation. Its native
+controller commits before Find tickets, but does not yet authenticate hold receipts.
 The journal's `native_search` workflow now records requested filters before a
 search that may reserve, keeping later seat/price/ranking evidence separate.
 Recorded uncertain outcomes remain locked pending a separate reconciliation flow.
@@ -152,4 +154,5 @@ Before production, validate this flow on more Czech layouts, exercise crash and
 timeout recovery, and measure successful-check age, quote-to-action time, verified
 hold time, and Discord acceptance latency. Source freshness, access restrictions,
 and polling cadence prevent a guarantee of notification in the exact second stock
-changes. The requested ticket quantity is still needed for the first live hold.
+changes. Saved preferences now default to two adjacent tickets and allow an edited
+quantity; no additional quantity answer is needed for the agreed first test.

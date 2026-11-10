@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-11-10T11:37:48.534Z",
+  "method": "ordinary_headed_chromium_native_ui",
+  "event": {
+    "url": "https://www.ticketmaster.cz/event/korn-vstupenky/1472650657",
+    "event_start": "2026-11-16T18:30:00Z"
+  },
+  "requested_selection": {
+    "quantity": 2,
+    "adjacent_required": true,
+    "max_total_minor": null,
+    "currency": "CZK",
+    "category_id": "23",
+    "category_title": "Omezený výhled",
+    "price_id": "11",
+    "native_section_ids": ["4P"],
+    "configured_unit_price_minor": 171200,
+    "configured_group_subtotal_minor": 342400,
+    "complete_fees_verified": false,
+    "cheapest_available_verified": false
+  },
+  "native_action": {
+    "find_click_attempted_count": 1,
+    "find_click_returned_count": 1,
+    "journal_dispatch_committed_before_click": true,
+    "automatic_reservation_retries": 0,
+    "payment_actions": 0
+  },
+  "observed_response": {
+    "origin": "https://checkout.prod.ticketmaster.cz",
+    "operation": "reserveTickets",
+    "http_status": 200,
+    "graphql_error_code": "U402",
+    "graphql_error_classification": "UNPROCESSABLE_CONTENT",
+    "reserve_tickets_result": null,
+    "same_event_ui_selector": "[data-testid=reserveView] [data-testid=reserveError]",
+    "same_event_ui_text": "Pro provedení vašeho požadavku není k dispozici dostatek vstupenek. Pro zobrazení dostupných vstupenek upravte množství nebo typ vstupenek.",
+    "interpretation": "insufficient_tickets_reported_for_requested_selection",
+    "event_sold_out_verified": false,
+    "hold_verified": false,
+    "hold_absence_verified": false
+  },
+  "journal": {
+    "state": "needs_reconciliation",
+    "event_lock_retained": true,
+    "same_attempt_restart_started_browser": false,
+    "same_attempt_restart_dispatched": false
+  },
+  "measured_intervals_ms": {
+    "journal_dispatch_to_click_attempt": 1434,
+    "click_attempt_to_click_return": 92,
+    "click_attempt_to_rejection_body_capture": 1830,
+    "click_attempt_to_error_document_capture": 2665
+  },
+  "measurement_limits": [
+    "One attempt after browser preparation, not an availability-detection benchmark or latency guarantee.",
+    "Body and document timestamps measure local capture, not the instant Ticketmaster inventory changed.",
+    "The live run stopped passive observation early when a second uncertain receipt with missing event/date claims was rejected. A subsequent local regression-tested change permits same-lineage uncertain updates without unlocking the event; no second native submission was made.",
+    "The native adapter's insufficient-tickets diagnostic was added and replay-tested after this capture. The original durable uncertain record was not rewritten using stale evidence."
+  ],
+  "privacy": "Raw DOM, response bodies, checkout/session values and the actual journal remain private and excluded from Git."
+}

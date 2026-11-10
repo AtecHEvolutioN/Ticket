@@ -33,8 +33,9 @@ request, and obtained no actual checkout receipt.
 A timeout or navigation after the click is an uncertain outcome. Reconcile the
 same session before considering another attempt. A return to selection does not
 by itself prove that previously held tickets were released. The
-[attempt journal](cart-journal.md) records this boundary; it does not authenticate
-a receipt or supply the missing browser adapter.
+[attempt journal](cart-journal.md) records this boundary. The experimental
+[native cart command](native-cart-attempt.md) now connects the dispatch boundary
+to one ordinary UI action; it does not yet authenticate a hold receipt.
 
 ## Evidence still required for the adapter
 
@@ -64,10 +65,11 @@ earlier saved panel. Its result remains configuration only.
 
 The [journal's native-search workflow](cart-journal.md#a-native-search-that-may-reserve)
 can now persist the requested quantity and filters before Find tickets without
-pretending that the later quote already existed. Actual submission, native
-receipt extraction remain unconnected. Durable reconciliation of supplied native
-outcome evidence is available in the journal; obtaining authenticated browser
-evidence for that recovery still requires the native adapter.
+pretending that the later quote already existed. Actual submission now runs in a
+separate retained browser. Native receipt extraction remains incomplete, so its
+observations retain uncertainty. Durable reconciliation of supplied native outcome
+evidence is available; accepting a confirmed hold still requires a validated
+receipt contract.
 
 The [native preparation rehearsal](native-preparation.md) applies an explicit
 configured price and compatible native area filters with the saved quantity,

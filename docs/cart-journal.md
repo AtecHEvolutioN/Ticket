@@ -1,8 +1,9 @@
 # Durable cart-attempt journal
 
-The journal is a foundation for a future Czech cart adapter. It records a plan
-and its outcome across restarts; it performs no browser actions or requests.
-There is no live reservation command connected to it.
+The journal records a plan and its outcome across restarts; it performs no browser
+actions or requests itself. The experimental [native cart command](native-cart-attempt.md)
+now commits its dispatch marker before one native Find tickets action. Native
+receipt extraction is still incomplete, so that adapter retains uncertain outcomes.
 
 Inspect an existing journal without creating or modifying it:
 
@@ -49,8 +50,7 @@ dates permit only provisional offline diagnostics. New receipts must supply
 All of this validates **caller-supplied evidence**, not its authenticity. Reports
 keep `reservation_authorized=false`, `source_authenticated=false` and `date_verified=false`, while
 `event_start_claims_match` reports consistency of the supplied date claims. A
-native receipt parser is still required before connecting the journal to real
-cart actions.
+native receipt parser is still required to accept an actual verified cart outcome.
 
 Version 1, 2 and 3 journals migrate to version 4 without rewriting historical evidence.
 Undated prepared attempts may be abandoned but cannot dispatch. Existing confirmed
@@ -98,8 +98,9 @@ expired configuration never proves release.
 
 Inspection JSON includes `workflow`; native bindings appear under
 `binding.request`. Old quoted binding fields retain their previous JSON shape.
-Both workflows validate caller-supplied claims only. Neither is connected to a
-live browser submission or an authenticated native receipt parser yet.
+Both workflows validate caller-supplied claims only. The native workflow is now
+connected to one browser submission through `cart_controller`; an authenticated
+native receipt parser is still needed to confirm a hold.
 
 Use application correlation IDs or digests in journal records. Do not supply
 cookies, authentication tokens, checkout URLs or private cart identifiers.
@@ -130,6 +131,11 @@ that case, while the invalid original receipt remains visible in history.
 
 - An uncertain attempt with no observed hold may become terminal `NoHold` only
   with matching, fresh evidence that the request finished and no hold exists.
+- Continuing `Uncertain` observations may still lack event/date claims. They
+  must be fresh, newer and bound to the same attempt, session, source document
+  and configuration. Concrete claims must match the request and cannot be
+  erased or contradicted. Missing-evidence review reasons remain visible and
+  the event stays locked; this exception does not relax any hold or release check.
 - An observed hold cannot become a generic `NoHold` or `Uncertain` outcome.
   Recovery may fill missing evidence for the same hold, including its seating,
   fee or ranking evidence, but cannot change known seat identities, total, price,

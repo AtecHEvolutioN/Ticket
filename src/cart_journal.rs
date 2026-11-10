@@ -760,18 +760,26 @@ impl CartJournal {
             "reconciliation requires a newer, fresh native observation"
         );
         validate_search_reconciliation(&stored.record, previous, &reconciliation.outcome, now_ms)?;
+        let uncertainty_only = matches!(
+            (&previous.outcome, &reconciliation.outcome),
+            (
+                NativeSearchOutcome::Uncertain(_),
+                NativeSearchOutcome::Uncertain(_)
+            )
+        );
         let recorded = assess_search_outcome(&stored.record, reconciliation.outcome, now_ms)?;
-        // A recovery observation must come from the bound session and event.
-        // Unknown stock/fees/ranking may remain unresolved, but a different page
-        // cannot replace the evidence from the attempted reservation.
+        // A recovery observation must come from the bound session. Known event
+        // and date claims cannot change. Continuing uncertainty may still lack
+        // these claims; it retains its review reasons and cannot unlock the event.
         ensure!(
-            !recorded.review_reasons.iter().any(|reason| matches!(
-                reason,
-                SearchReviewReason::ContextMismatch
-                    | SearchReviewReason::EventOrDateMismatch
-                    | SearchReviewReason::InvalidObservationTime
-                    | SearchReviewReason::ReleaseNotFinal
-            )),
+            !recorded.review_reasons.iter().any(|reason| {
+                matches!(
+                    reason,
+                    SearchReviewReason::ContextMismatch
+                        | SearchReviewReason::InvalidObservationTime
+                        | SearchReviewReason::ReleaseNotFinal
+                ) || (*reason == SearchReviewReason::EventOrDateMismatch && !uncertainty_only)
+            }),
             "reconciliation evidence is not bound to the original request or terminal release"
         );
         let state = search_outcome_state(&recorded);
@@ -1833,6 +1841,41 @@ fn validate_search_reconciliation(
         );
     }
     match (&previous.outcome, next) {
+        (NativeSearchOutcome::Uncertain(old), NativeSearchOutcome::Uncertain(new)) => {
+            // A passive page may still expose no authenticated event/date or
+            // hold receipt. Record that continuing uncertainty without inventing
+            // missing claims or weakening validation of a hold/terminal absence.
+            let binding = record
+                .search_binding()
+                .context("native request binding missing")?;
+            for context in [&old.context, &new.context] {
+                ensure!(
+                    same_search_lineage(record, context)
+                        && !context.alternate_event_or_date_reported
+                        && context.event_url.as_ref().is_none_or(|url| {
+                            crate::event_identity::same_event(url, &binding.request.event_url)
+                        })
+                        && context
+                            .event_start
+                            .as_ref()
+                            .is_none_or(|start| start == &binding.request.expected_event_start),
+                    "uncertain observation has conflicting request lineage or concrete event/date claims"
+                );
+            }
+            ensure!(
+                old.context.event_url.as_ref().is_none_or(|url| new
+                    .context
+                    .event_url
+                    .as_ref()
+                    .is_some_and(|next| crate::event_identity::same_event(url, next)))
+                    && old.context.event_start.as_ref().is_none_or(|start| new
+                        .context
+                        .event_start
+                        .as_ref()
+                        == Some(start)),
+                "uncertain observation cannot erase concrete event or date claims"
+            );
+        }
         (NativeSearchOutcome::Hold(old), NativeSearchOutcome::Hold(new)) => {
             ensure!(
                 same_search_lineage(record, &old.context),

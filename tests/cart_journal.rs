@@ -875,6 +875,186 @@ fn reconciliation(
     }
 }
 
+fn unknown_context_outcome(at: i64) -> NativeSearchOutcome {
+    let NativeSearchOutcome::Uncertain(mut value) = uncertain_outcome(at) else {
+        unreachable!()
+    };
+    value.context.event_url = None;
+    value.context.event_start = None;
+    NativeSearchOutcome::Uncertain(value)
+}
+
+fn outcome_context_mut(outcome: &mut NativeSearchOutcome) -> &mut NativeSearchReceiptContext {
+    match outcome {
+        NativeSearchOutcome::Hold(value) => &mut value.context,
+        NativeSearchOutcome::NoHold(value) => &mut value.context,
+        NativeSearchOutcome::Uncertain(value) => &mut value.context,
+        NativeSearchOutcome::Released(value) => &mut value.context,
+    }
+}
+
+#[test]
+fn continuing_uncertainty_without_event_claims_retains_history_and_event_lock() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cart.sqlite");
+    let mut journal = search_dispatched(&path);
+    let mut current = journal
+        .record_search_outcome("attempt-1", &unknown_context_outcome(NOW + 200), NOW + 300)
+        .unwrap();
+    for index in 1..=3 {
+        let at = NOW + 300 + index * 200;
+        current = journal
+            .reconcile_search(
+                "attempt-1",
+                &reconciliation(
+                    &format!("observe-{index}"),
+                    &current,
+                    unknown_context_outcome(at),
+                ),
+                at + 100,
+            )
+            .unwrap();
+        assert_eq!(current.state, AttemptState::NeedsReconciliation);
+        assert!(
+            recorded_search(&current)
+                .review_reasons
+                .contains(&SearchReviewReason::EventOrDateMismatch)
+        );
+        assert!(
+            recorded_search(&current)
+                .review_reasons
+                .contains(&SearchReviewReason::OutcomeUncertain)
+        );
+        assert!(!recorded_search(&current).hold_identity_confirmed);
+        assert!(!current.event_start_claims_match);
+    }
+    assert_eq!(inspect_search_history(&path, "attempt-1").unwrap().len(), 4);
+    assert!(
+        journal
+            .begin_search(
+                "second-attempt",
+                &current.search_binding().unwrap().request,
+                NOW + 1000
+            )
+            .is_err()
+    );
+}
+
+#[test]
+fn uncertainty_without_event_claims_can_gain_matching_claims_without_unlocking() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cart.sqlite");
+    let mut journal = search_dispatched(&path);
+    let initial = journal
+        .record_search_outcome("attempt-1", &unknown_context_outcome(NOW + 200), NOW + 300)
+        .unwrap();
+    let updated = journal
+        .reconcile_search(
+            "attempt-1",
+            &reconciliation("observe", &initial, uncertain_outcome(NOW + 500)),
+            NOW + 600,
+        )
+        .unwrap();
+    assert_eq!(updated.state, AttemptState::NeedsReconciliation);
+    assert_eq!(
+        recorded_search(&updated).review_reasons,
+        [SearchReviewReason::OutcomeUncertain]
+    );
+}
+
+#[test]
+fn unknown_uncertainty_cannot_erase_conflicts_change_lineage_or_bypass_freshness() {
+    for case in 0..15 {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("cart.sqlite");
+        let mut journal = search_dispatched(&path);
+        let mut previous = unknown_context_outcome(NOW + 200);
+        let mut next = unknown_context_outcome(NOW + 500);
+        let mut now = NOW + 600;
+        match case {
+            0 => outcome_context_mut(&mut next).session_id = "wrong-session".into(),
+            1 => outcome_context_mut(&mut next).source_document_id = "wrong-document".into(),
+            2 => outcome_context_mut(&mut next).config_id = "wrong-config".into(),
+            3 => outcome_context_mut(&mut next).attempt_id = "wrong-attempt".into(),
+            4 => {
+                outcome_context_mut(&mut next).event_url =
+                    Some("https://ticketmaster.cz/event/1472650658".into())
+            }
+            5 => outcome_context_mut(&mut next).event_start = Some("2026-11-17T17:00:00Z".into()),
+            6 => outcome_context_mut(&mut next).alternate_event_or_date_reported = true,
+            7 => {
+                outcome_context_mut(&mut previous).event_url =
+                    Some("https://ticketmaster.cz/event/1472650658".into())
+            }
+            8 => {
+                outcome_context_mut(&mut previous).event_start = Some("2026-11-17T17:00:00Z".into())
+            }
+            9 => outcome_context_mut(&mut previous).alternate_event_or_date_reported = true,
+            10 => outcome_context_mut(&mut previous).event_url = Some(EVENT.into()),
+            11 => outcome_context_mut(&mut previous).event_start = Some(START.into()),
+            12 => outcome_context_mut(&mut next).observed_at_ms = NOW + 300,
+            13 => outcome_context_mut(&mut next).observed_at_ms = NOW + 601,
+            _ => now = NOW + 5500,
+        }
+        let initial = journal
+            .record_search_outcome("attempt-1", &previous, NOW + 300)
+            .unwrap();
+        assert!(
+            journal
+                .reconcile_search("attempt-1", &reconciliation("observe", &initial, next), now)
+                .is_err(),
+            "case {case}"
+        );
+        assert_eq!(
+            inspect_file(&path).unwrap().remove(0),
+            initial,
+            "case {case}"
+        );
+        assert_eq!(
+            inspect_search_history(&path, "attempt-1").unwrap().len(),
+            1,
+            "case {case}"
+        );
+    }
+}
+
+#[test]
+fn missing_event_claims_are_still_rejected_for_hold_absence_and_release() {
+    for case in 0..3 {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("cart.sqlite");
+        let mut journal = search_dispatched(&path);
+        let previous = if case == 2 {
+            fresh_hold(NOW + 200)
+        } else {
+            unknown_context_outcome(NOW + 200)
+        };
+        let initial = journal
+            .record_search_outcome("attempt-1", &previous, NOW + 300)
+            .unwrap();
+        let mut next = match case {
+            0 => fresh_hold(NOW + 500),
+            1 => no_hold_outcome(NOW + 500),
+            _ => released_outcome(NOW + 500),
+        };
+        let context = outcome_context_mut(&mut next);
+        context.event_url = None;
+        context.event_start = None;
+        assert!(
+            journal
+                .reconcile_search(
+                    "attempt-1",
+                    &reconciliation("observe", &initial, next),
+                    NOW + 600
+                )
+                .is_err(),
+            "case {case}"
+        );
+        assert_eq!(inspect_file(&path).unwrap().remove(0), initial);
+        assert_eq!(inspect_search_history(&path, "attempt-1").unwrap().len(), 1);
+    }
+}
+
 #[test]
 fn native_reconciliation_recovers_terminal_absence_after_restart_and_retains_history() {
     let dir = tempdir().unwrap();

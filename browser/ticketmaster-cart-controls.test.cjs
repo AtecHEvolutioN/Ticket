@@ -99,8 +99,9 @@ function fixture({ merged = false, mergedOther = false, initialQuantity = 0, oth
 // Synthetic implementation of the observed native temporary/apply filter model.
 // It deliberately remounts checkbox IDs and toolbar buttons between opens.
 function preparationFixture({ preselected = false, missingApply = false, brokenApply = false,
-  lostPriceAfterSection = false, multiplePriceSections = false, onCheckbox = '', discountType = 'STANDARD' } = {}) {
-  let html = fixture();
+  lostPriceAfterSection = false, multiplePriceSections = false, onCheckbox = '', discountType = 'STANDARD', reorderAfterIncrement = false } = {}) {
+  let html = fixture({ mutate: reorderAfterIncrement
+    ? `if(count===1 && spin.closest('li').id==='row-2'){document.getElementById('row-1')?.remove();spin.closest('ul').prepend(spin.closest('li'))}` : '' });
   const match = /<script id="__NEXT_DATA__" type="application\/json">([^<]+)<\/script>/.exec(html);
   const metadata = JSON.parse(match[1]);
   const state = metadata.props.pageProps.initialReduxState;
@@ -482,5 +483,22 @@ test('native preparation stops when the network fence is lost during a checkbox 
     assert.equal(result.inspection, undefined);
     assert.equal((await counters(page)).checkboxChanges, '1');
     await noPurchaseDuringPreparation(page, networkAttempts);
+  });
+});
+
+test('offline quantity changes rebind category identity after a row disappears and restore zero', { skip: !enabled }, async () => {
+  await browserTest(async context => {
+    const { page, networkAttempts } = await open(context, preparationFixture({ reorderAfterIncrement: true }));
+    const result = await inspectTicketmasterCartControls(page, target,
+      { ...options(), selection: { priceId: '6', sectionIds: ['4P'] } }, 15000, current);
+    assert.equal(result.state, 'cart_controls_ready');
+    assert.equal(result.inspection.final_quantity, 0);
+    assert.equal(result.inspection.form_restored, true);
+    assert.equal(await page.locator('#row-1').count(), 0);
+    assert.equal(await page.locator('#row-2 [role="spinbutton"]').getAttribute('aria-valuenow'), '0');
+    assert.equal((await counters(page)).increments, '2');
+    assert.equal((await counters(page)).decrements, '2');
+    await noPurchaseDuringPreparation(page, networkAttempts);
+    await assertCartControlsCurrent(page, target, result.inspection);
   });
 });

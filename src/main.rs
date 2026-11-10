@@ -86,6 +86,44 @@ enum Command {
         #[arg(long)]
         headed: bool,
     },
+    /// Submit one Czech native search, which may reserve tickets; never pays or retries.
+    CartAttempt {
+        #[arg(long)]
+        url: String,
+        /// Intended performance time, with an explicit RFC3339 UTC offset.
+        #[arg(long)]
+        event_start: String,
+        #[arg(long)]
+        category_id: String,
+        #[arg(long)]
+        price_id: String,
+        /// Expected configured per-ticket price in CZK minor units, rechecked in the browser.
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..=10_000_000_000))]
+        unit_price_minor: u64,
+        /// Native area IDs from cart-catalog; omit to use all compatible areas.
+        #[arg(long)]
+        native_section_id: Vec<String>,
+        /// Android export or validated preferences; defaults to two adjacent tickets.
+        #[arg(long)]
+        preferences: Option<PathBuf>,
+        /// Use the same journal for every attempt; unresolved events stay locked.
+        #[arg(long, default_value = "data/cart-attempts.sqlite")]
+        journal: PathBuf,
+        /// Unique application ID. Reusing an existing attempt never submits it again.
+        #[arg(long)]
+        attempt_id: String,
+        /// Private browser evidence; may contain checkout tokens and session data.
+        #[arg(long, default_value = "data/cart-evidence")]
+        evidence_dir: PathBuf,
+        /// Required for this live action; cart-prepare is the separate offline rehearsal.
+        #[arg(long)]
+        execute: bool,
+        #[arg(long)]
+        headed: bool,
+        /// Keep the same browser open for passive observation after submission.
+        #[arg(long, default_value_t = 120, value_parser = clap::value_parser!(u64).range(1..=1800))]
+        observe_secs: u64,
+    },
     /// Scan displayed resale prices in one Czech map section; never selects tickets.
     MapScan {
         #[arg(long)]
@@ -800,6 +838,7 @@ async fn main() -> Result<()> {
         | Command::CartCatalog { .. }
         | Command::CartControls { .. }
         | Command::CartPrepare { .. }
+        | Command::CartAttempt { .. }
         | Command::CartJournal { .. }
         | Command::CartPreferences { .. }
         | Command::CartPlan { .. } => Config::default(),
@@ -851,6 +890,163 @@ async fn main() -> Result<()> {
             } else {
                 print_json(&ticket_watch::cart_journal::inspect_file(&file)?)?;
             }
+        }
+        Command::CartAttempt {
+            url,
+            event_start,
+            category_id,
+            price_id,
+            unit_price_minor,
+            native_section_id,
+            preferences,
+            journal,
+            attempt_id,
+            evidence_dir,
+            execute,
+            headed,
+            observe_secs,
+        } => {
+            use ticket_watch::cart_controller::{
+                NativeBrowserOptions, NativeBrowserSession, NativeCartController,
+                SessionPrepareRequest, SessionState,
+            };
+            use ticket_watch::cart_journal::{AttemptBinding, AttemptState, CartJournal};
+
+            if !execute {
+                bail!(
+                    "cart-attempt requires --execute because Find tickets may reserve immediately; use cart-prepare for an offline rehearsal"
+                );
+            }
+            if attempt_id.is_empty()
+                || attempt_id.len() > 128
+                || !attempt_id
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_' | b'.' | b':'))
+            {
+                bail!("Invalid application attempt ID");
+            }
+            let document = match preferences {
+                Some(path) => read_cart_preferences(&path)?,
+                None => ticket_watch::cart_preferences::PreferencesDocument::default(),
+            };
+            let effective = ticket_watch::cart_preferences::resolve(&document, &url)?;
+            let selection = SessionPrepareRequest {
+                event_url: url,
+                expected_event_start: ticket_watch::cart::normalize_event_start(&event_start)
+                    .context(
+                        "Native attempt requires an exact RFC3339 performance time with timezone",
+                    )?,
+                category_id,
+                price_id,
+                section_ids: native_section_id,
+                quantity: effective.preferences.quantity,
+                configured_unit_price_minor: unit_price_minor,
+            };
+            selection.validate()?;
+            if effective.preferences.currency != "CZK" {
+                bail!("Native cart attempts currently support CZK only");
+            }
+            if !effective.preferences.allowed_category_ids.is_empty()
+                && !effective
+                    .preferences
+                    .allowed_category_ids
+                    .contains(&selection.category_id)
+            {
+                bail!("Selected category does not match saved preferences");
+            }
+            if journal.exists() {
+                let records = ticket_watch::cart_journal::inspect_file(&journal)?;
+                if let Some(existing) = records.iter().find(|r| r.attempt_id == attempt_id) {
+                    print_json(&serde_json::json!({
+                        "source":"existing_attempt_journal",
+                        "dispatched_this_run":false,
+                        "browser_started":false,
+                        "attempt":existing
+                    }))?;
+                    return Ok(());
+                }
+                if records.iter().any(|record| {
+                    let event_url = match &record.binding {
+                        AttemptBinding::QuotedPlan(binding) => &binding.event_url,
+                        AttemptBinding::NativeSearch(binding) => &binding.request.event_url,
+                    };
+                    ticket_watch::event_identity::same_event(&selection.event_url, event_url)
+                        && matches!(
+                            record.state,
+                            AttemptState::Prepared
+                                | AttemptState::NeedsReconciliation
+                                | AttemptState::Held
+                        )
+                }) {
+                    bail!(
+                        "This event already has an active attempt; inspect the same journal and reconcile it before another search"
+                    );
+                }
+            }
+            if let Some(parent) = journal.parent().filter(|p| !p.as_os_str().is_empty()) {
+                std::fs::create_dir_all(parent).context("create cart journal directory")?;
+            }
+            let storage = CartJournal::open(&journal)?;
+            let evidence_dir = std::path::absolute(evidence_dir)
+                .context("resolve private native evidence directory")?;
+            if let Some(parent) = evidence_dir.parent() {
+                std::fs::create_dir_all(parent)
+                    .context("create native evidence parent directory")?;
+            }
+            let session = NativeBrowserSession::spawn(&NativeBrowserOptions {
+                node: config.browser.node,
+                script: PathBuf::from("browser/native-cart-session.cjs"),
+                executable_path: std::env::var("CHROMIUM_PATH").ok(),
+                headed,
+                evidence_dir,
+                timeout: Duration::from_secs(90),
+            })?;
+            let mut controller = NativeCartController::new(storage, session);
+            let operation = async {
+                let prepared = controller.prepare(&selection).await?;
+                if prepared.state != SessionState::Prepared {
+                    print_json(&serde_json::json!({
+                        "source":"native_cart_session",
+                        "dispatched_this_run":false,
+                        "session_state":prepared.state,
+                        "manual_intervention":prepared.manual_intervention,
+                        "manual_intervention_required":true
+                    }))?;
+                    bail!("Native preparation stopped for manual intervention; no Find tickets action was submitted");
+                }
+                let mut result = controller.dispatch_once(&attempt_id, &document, true).await?;
+                let dispatched_this_run = result.dispatched_this_call;
+                if dispatched_this_run {
+                    eprintln!("Native dispatch recorded. Observing the same session; no automatic retry or payment.");
+                    let deadline = tokio::time::Instant::now() + Duration::from_secs(observe_secs);
+                    let mut sequence = 0_u64;
+                    while tokio::time::Instant::now() < deadline {
+                        tokio::select! {
+                            _ = tokio::signal::ctrl_c() => break,
+                            _ = tokio::time::sleep_until(std::cmp::min(
+                                deadline, tokio::time::Instant::now() + Duration::from_secs(2))) => {}
+                        }
+                        sequence += 1;
+                        result = controller.observe(&format!("observation-{sequence}")).await?;
+                        if result.observation_error.is_some()
+                            || matches!(result.attempt.state, AttemptState::Held | AttemptState::NoHoldConfirmed | AttemptState::Expired)
+                        {
+                            break;
+                        }
+                    }
+                }
+                Ok::<_, anyhow::Error>((dispatched_this_run, result))
+            }.await;
+            // Browser closure does not release a provider hold or unlock the journal.
+            let browser_closed = controller.close().await.is_ok();
+            let (dispatched_this_run, result) = operation?;
+            print_json(&serde_json::json!({
+                "source":"native_cart_session",
+                "dispatched_this_run":dispatched_this_run,
+                "browser_closed":browser_closed,
+                "effective_preferences":effective,
+                "result":result
+            }))?;
         }
         Command::CartControls {
             url,

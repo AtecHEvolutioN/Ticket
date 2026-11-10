@@ -1,6 +1,130 @@
 use std::process::Command;
 
 #[test]
+fn native_attempt_requires_execution_flag_and_validates_preferences_before_state() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut args = vec![
+        "cart-attempt",
+        "--url",
+        "https://www.ticketmaster.cz/event/synthetic/1234567890",
+        "--event-start",
+        "2027-01-02T19:00:00+01:00",
+        "--category-id",
+        "2",
+        "--price-id",
+        "6",
+        "--unit-price-minor",
+        "188900",
+        "--attempt-id",
+        "synthetic-1",
+    ];
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+            .current_dir(directory.path())
+            .env_remove("TICKETMASTER_API_KEY")
+            .env_remove("DISCORD_BOT_TOKEN")
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let output = run(&args);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("--execute"));
+    assert!(!directory.path().join("data").exists());
+
+    let preferences = directory.path().join("preferences.json");
+    std::fs::write(
+        &preferences,
+        br#"{"schema_version":999,"private":"synthetic-private-marker"}"#,
+    )
+    .unwrap();
+    args.extend(["--execute", "--preferences", preferences.to_str().unwrap()]);
+    let output = run(&args);
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("synthetic-private-marker"));
+    assert!(!directory.path().join("data").exists());
+}
+
+#[test]
+fn native_attempt_restart_never_opens_another_browser_for_an_unresolved_event() {
+    use ticket_watch::cart_journal::{CartJournal, NativeSearchRequest};
+    let directory = tempfile::tempdir().unwrap();
+    let journal_path = directory.path().join("attempts.sqlite");
+    let mut journal = CartJournal::open(&journal_path).unwrap();
+    let now = chrono::Utc::now().timestamp_millis();
+    let request = NativeSearchRequest {
+        event_url: "https://www.ticketmaster.cz/event/1234567890".into(),
+        expected_event_start: "2027-01-02T18:00:00Z".into(),
+        source_event_start: "2027-01-02T18:00:00Z".into(),
+        quantity: 2,
+        session_id: "test-session".into(),
+        document_id: "test-document".into(),
+        config_id: "test-config".into(),
+        config_observed_at_ms: now,
+        config_expires_at_ms: now + 5_000,
+        category_id: "2".into(),
+        category_title: Some("Sezení".into()),
+        filters: Default::default(),
+        price_id: "6".into(),
+        configured_unit_price_minor: 188900,
+        currency: "CZK".into(),
+        max_total_minor: None,
+        adjacent_required: true,
+        cheapest_required: true,
+    };
+    journal.begin_search("existing-1", &request, now).unwrap();
+    journal
+        .mark_search_dispatch_started("existing-1", now)
+        .unwrap();
+    drop(journal);
+    let run = |attempt_id: &str| {
+        Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+            .current_dir(directory.path())
+            .args([
+                "cart-attempt",
+                "--execute",
+                "--url",
+                "https://www.ticketmaster.cz/event/synthetic/1234567890",
+                "--event-start",
+                "2027-01-02T19:00:00+01:00",
+                "--category-id",
+                "2",
+                "--price-id",
+                "6",
+                "--unit-price-minor",
+                "188900",
+                "--attempt-id",
+                attempt_id,
+                "--journal",
+                journal_path.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap()
+    };
+    let output = run("existing-1");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["browser_started"], false);
+    assert_eq!(report["dispatched_this_run"], false);
+    assert_eq!(report["attempt"]["state"], "needs_reconciliation");
+    let output = run("another-2");
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("active attempt"));
+    assert!(!directory.path().join("data").exists());
+    assert_eq!(
+        ticket_watch::cart_journal::inspect_file(&journal_path)
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
 fn cart_catalog_applies_preferences_without_treating_configured_prices_as_stock() {
     let directory = tempfile::tempdir().unwrap();
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
