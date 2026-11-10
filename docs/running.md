@@ -211,6 +211,11 @@ Set numeric `[discord].channel_id`, `mention_user_ids`, and/or `mention_role_ids
 
 This flag sends real external messages. The sender uses explicit mentions, bounded payloads, persisted Discord cooldowns, and stable retry nonces. Discord's deduplication window is limited, so ambiguous timeouts do not have an exactly-once guarantee. Stale alerts expire and confirmed newer negative evidence can cancel unsent alerts. Changing delivery configuration cancels existing pending alerts on restart. Permanent credential/channel errors stop the monitor so configuration can be corrected.
 
+Cooldown persistence also covers successful responses that exhaust Discord's
+rate-limit bucket. The normal monitor records that deadline before acknowledging
+delivery, even when the sent message was the only queued alert. A restarted
+monitor checks the stored deadline before sending a later alert.
+
 There are no Discord slash commands, scheduled-sale timers, or cart/checkout automation in this version. Manage watches through TOML and restart after edits.
 
 ## Optional Linux service

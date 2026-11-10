@@ -24,6 +24,7 @@ pub mod map_monitor_store;
 pub mod map_scan;
 pub mod map_scan_store;
 pub mod model;
+pub mod notification_delivery;
 pub mod operator_terminal;
 pub(crate) mod page_data;
 pub mod parser;

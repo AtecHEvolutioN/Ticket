@@ -11,10 +11,11 @@ use ticket_watch::{
     catalog::{self, Snapshot},
     config::{self, Config, FetchMode, Watch},
     database::Db,
-    discord::{self, Delivery, Discord},
+    discord::{self, Discord},
     discovery::Discovery,
     fetch::Fetcher,
     model::{Availability, Observation},
+    notification_delivery::dispatch_batch,
     parser, profile,
     store::Store,
 };
@@ -555,73 +556,6 @@ fn page_observation(
         );
     }
     parser::parse(watch, &page.html, at)
-}
-
-async fn dispatch_batch(
-    db: &Db,
-    config: &Config,
-    sender: &mut Option<Discord>,
-    shown: &mut HashSet<i64>,
-) -> Result<()> {
-    let cutoff = now() - config.alert_max_age_secs as i64;
-    db.call(move |s| s.expire_before(cutoff)).await?;
-    if let Some(sender) = sender.as_mut() {
-        for _ in 0..32 {
-            // Polling may cancel an older alert while Discord is busy. Re-read each send candidate.
-            let at = now();
-            let max_age = config.alert_max_age_secs as i64;
-            let pending = db
-                .call(move |s| {
-                    s.expire_before(at - max_age)?;
-                    if s.cooldown("discord:delivery")?
-                        .is_some_and(|until| until > at)
-                    {
-                        return Ok(Vec::new());
-                    }
-                    s.pending(at, 1)
-                })
-                .await?;
-            let Some(alert) = pending.into_iter().next() else {
-                break;
-            };
-            let id = alert.id;
-            match sender.send(&alert).await? {
-                Delivery::Sent { message_id } => {
-                    db.call(move |s| s.delivered(id, &message_id)).await?;
-                    eprintln!("Discord accepted alert {id}");
-                }
-                Delivery::Retry { after_secs, reason } => {
-                    let until = now().saturating_add(after_secs.max(1).min(i64::MAX as u64) as i64);
-                    db.call(move |s| {
-                        s.set_cooldown("discord:delivery", until)?;
-                        s.retry(id, until, &reason)
-                    })
-                    .await?;
-                    break;
-                }
-                Delivery::Permanent { reason } => {
-                    let diagnostic = reason.clone();
-                    let until = now() + 60;
-                    db.call(move |s| s.retry(id, until, &reason)).await?;
-                    bail!("Discord delivery stopped: {diagnostic}");
-                }
-            }
-        }
-    } else {
-        let at = now();
-        let pending = db.call(move |s| s.pending(at, 10_000)).await?;
-        let still_pending: HashSet<i64> = pending.iter().map(|a| a.id).collect();
-        shown.retain(|id| still_pending.contains(id));
-        for alert in pending {
-            if shown.insert(alert.id) {
-                print_json(
-                    &serde_json::json!({"mode":"preview_only", "outbox_id":alert.id,
-                    "payload":discord::preview(&alert, &config.discord)}),
-                )?;
-            }
-        }
-    }
-    Ok(())
 }
 
 async fn refresh_catalog(

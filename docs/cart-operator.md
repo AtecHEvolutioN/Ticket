@@ -66,6 +66,12 @@ to stdout. `dispatch_recorded` means the durable dispatch marker exists, not
 that the provider confirmed a cart. No terminal command contents, credentials,
 raw browser errors or checkout tokens are included in these status events.
 
+If the local clock moves behind the last journal update or becomes invalid,
+observation reports `native_clock_needs_review` and preserves the existing
+attempt and event lock. It cannot accept a future receipt by advancing the local
+time artificially. After correcting the clock, a fresh passive observation in
+the retained session can continue reconciliation without another Find action.
+
 This is local browser ownership. Android synchronization, remote browser access,
 portable checkout links and verified cart receipts remain separate unfinished
 work. The navigation policy still covers only the reviewed Czech routes.
@@ -90,6 +96,12 @@ An elapsed recorded hold deadline is reported as eligible for the existing
 journal's expiry rules only when the retained evidence qualifies. Inspection does
 not execute expiry or independently prove provider-side release. Unknown or
 mismatched holds do not acquire a guessed expiry.
+
+Recovery also checks the persisted timeline: creation, dispatch, receipt
+observation (when present), latest update and inspection time must be in order.
+Invalid or inconsistent timestamps produce `journal_clock_needs_review`, retain
+the evidence and existing lock state, and suppress expiry or fresh-intent
+recommendations. Inspection does not repair the journal automatically.
 
 For a plan that was recorded but **never dispatched**, the explicit cleanup command
 is:

@@ -389,6 +389,69 @@ fn inconsistent_hold_without_dispatch_marker_never_offers_expiry_eligibility() {
 }
 
 #[test]
+fn invalid_dispatch_times_prevent_expiry_and_fresh_intent_recommendations() {
+    for has_hold in [false, true] {
+        for dispatch_at in [
+            -1,
+            ticket_watch::cart::MAX_EXACT_INTEGER as i64 + 1,
+            NOW - 1,
+            NOW + 250,
+            NOW + 301,
+            NOW + 700001,
+        ] {
+            let dir = tempdir().unwrap();
+            let path = dir.path().join("cart.sqlite");
+            let mut journal = dispatched(&path);
+            let outcome = if has_hold {
+                NativeSearchOutcome::Hold(Box::new(held()))
+            } else {
+                NativeSearchOutcome::NoHold(NativeSearchNoHoldReceipt {
+                    context: context(),
+                    receipt_correlation_id: "terminal-absence".into(),
+                    absence_explicitly_confirmed: true,
+                    request_finished_without_hold: true,
+                })
+            };
+            journal
+                .record_search_outcome("attempt-1", &outcome, NOW + 300)
+                .unwrap();
+            drop(journal);
+            let connection = Connection::open(&path).unwrap();
+            // Simulate a damaged timestamp while preserving the actual receipt.
+            connection
+                .execute(
+                    "UPDATE cart_attempts SET dispatch_at_ms=?1 WHERE attempt_id='attempt-1'",
+                    [dispatch_at],
+                )
+                .unwrap();
+            drop(connection);
+            let before = inspect_file(&path).unwrap();
+            let entry = cart_recovery::inspect(&path, None, NOW + 700000)
+                .unwrap()
+                .attempts
+                .remove(0);
+            assert_eq!(entry.reason, RecoveryReason::JournalClockNeedsReview);
+            assert_eq!(
+                entry.actions,
+                [
+                    RecoveryAction::InspectJournal,
+                    RecoveryAction::InspectNativeHistory
+                ]
+            );
+            assert!(entry.dispatch_recorded && !entry.retry_authorized);
+            assert_eq!(entry.attempt_retains_event_lock, has_hold);
+            if has_hold {
+                let expiry = entry.recorded_hold_expiry.unwrap();
+                assert!(expiry.elapsed && !expiry.journal_expiry_eligible);
+            } else {
+                assert!(entry.recorded_hold_expiry.is_none());
+            }
+            assert_eq!(inspect_file(&path).unwrap(), before);
+        }
+    }
+}
+
+#[test]
 fn terminal_attempt_does_not_authorize_retry_or_hide_a_newer_event_lock() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("cart.sqlite");
@@ -540,6 +603,14 @@ fn clock_anomalies_do_not_offer_mutations_or_turn_invalid_observations_into_fres
         .unwrap()
         .attempts
         .remove(0);
+    assert_eq!(entry.reason, RecoveryReason::JournalClockNeedsReview);
+    assert_eq!(
+        entry.actions,
+        [
+            RecoveryAction::InspectJournal,
+            RecoveryAction::InspectNativeHistory
+        ]
+    );
     let observation = entry.retained_observation.unwrap();
     assert_eq!(observation.clock, ObservationClock::Future);
     assert!(observation.age_ms.is_none());
@@ -549,4 +620,47 @@ fn clock_anomalies_do_not_offer_mutations_or_turn_invalid_observations_into_fres
             .contains(&SearchReviewReason::InvalidObservationTime)
     );
     assert!(entry.attempt_retains_event_lock && !entry.retry_authorized);
+}
+
+#[test]
+fn pre_dispatch_observation_retains_evidence_but_requires_clock_review() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cart.sqlite");
+    let mut journal = dispatched(&path);
+    let mut early = context();
+    early.observed_at_ms = NOW + 99;
+    journal
+        .record_search_outcome(
+            "attempt-1",
+            &NativeSearchOutcome::Uncertain(NativeSearchUncertainReceipt {
+                context: early,
+                reason: NativeSearchUncertainty::UnrecognizedResponse,
+            }),
+            NOW + 300,
+        )
+        .unwrap();
+    drop(journal);
+    let before = inspect_file(&path).unwrap();
+    let entry = cart_recovery::inspect(&path, None, NOW + 700000)
+        .unwrap()
+        .attempts
+        .remove(0);
+    assert_eq!(entry.reason, RecoveryReason::JournalClockNeedsReview);
+    assert_eq!(
+        entry.actions,
+        [
+            RecoveryAction::InspectJournal,
+            RecoveryAction::InspectNativeHistory
+        ]
+    );
+    let retained = entry.retained_observation.unwrap();
+    assert_eq!(retained.observed_at_ms, NOW + 99);
+    assert!(
+        retained
+            .review_reasons
+            .contains(&SearchReviewReason::InvalidObservationTime)
+    );
+    assert!(entry.attempt_retains_event_lock && !entry.retry_authorized);
+    assert!(entry.recorded_hold_expiry.is_none());
+    assert_eq!(inspect_file(&path).unwrap(), before);
 }

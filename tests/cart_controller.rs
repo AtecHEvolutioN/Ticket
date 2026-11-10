@@ -291,6 +291,77 @@ async fn fresh_same_session_terminal_observation_reconciles_without_submission()
 }
 
 #[tokio::test]
+async fn invalid_or_rolled_back_clock_cannot_accept_terminal_absence_after_a_lost_reply() {
+    for invalid_now in [
+        NOW - 1,
+        -1,
+        ticket_watch::cart::MAX_EXACT_INTEGER as i64 + 1,
+    ] {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("cart.sqlite");
+        let mut terminal = no_hold(NOW);
+        terminal.state = SessionState::NeedsHuman;
+        terminal.manual_intervention = Some("captcha".into());
+        terminal.native_signal = Some(NativeSignal::InsufficientTicketsReported);
+        let (mut control, commands, clock) = controller(
+            path.clone(),
+            vec![
+                Ok(prepared()),
+                Ok(prepared()),
+                Err(anyhow::anyhow!("lost commit reply")),
+                Ok(terminal),
+                Ok(no_hold(NOW + 100)),
+            ],
+        );
+        control.prepare(&selection()).await.unwrap();
+        let initial = control
+            .dispatch_once("attempt-1", &PreferencesDocument::default(), true)
+            .await
+            .unwrap();
+        assert!(initial.attempt.native_outcome_hash.is_none());
+        clock.0.store(invalid_now, Ordering::SeqCst);
+        let rejected = control.observe("clock-conflict").await.unwrap();
+        assert_eq!(
+            rejected.observation_error,
+            Some("native_clock_needs_review")
+        );
+        assert_eq!(rejected.attempt, initial.attempt);
+        assert_eq!(inspect_file(&path).unwrap(), vec![initial.attempt.clone()]);
+        assert!(
+            inspect_search_history(&path, "attempt-1")
+                .unwrap()
+                .is_empty()
+        );
+        assert!(!rejected.dispatched_this_call);
+        assert_eq!(rejected.session_state, SessionState::Uncertain);
+        assert!(rejected.manual_intervention.is_none());
+        assert!(rejected.native_signal.is_none());
+        assert!(
+            CartJournal::open(&path)
+                .unwrap()
+                .begin_search(
+                    "another-attempt",
+                    &initial.attempt.search_binding().unwrap().request,
+                    NOW
+                )
+                .is_err()
+        );
+        // Restoring the clock permits a new passive observation of the same
+        // attempt; it does not resubmit the native request or reuse the rejected
+        // terminal receipt.
+        clock.0.store(NOW + 100, Ordering::SeqCst);
+        let recovered = control.observe("fresh-after-clock-review").await.unwrap();
+        assert!(recovered.observation_error.is_none());
+        assert_eq!(recovered.attempt.state, AttemptState::NoHoldConfirmed);
+        assert_eq!(inspect_search_history(&path, "attempt-1").unwrap().len(), 1);
+        assert_eq!(
+            *commands.lock().unwrap(),
+            ["prepare", "refresh", "commit", "observe", "observe"]
+        );
+    }
+}
+
+#[tokio::test]
 async fn preference_quantity_mismatch_fails_before_dispatch() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("cart.sqlite");

@@ -382,7 +382,20 @@ impl<S: NativeCartSession, C: Clock> NativeCartController<S, C> {
             .as_ref()
             .context("native attempt missing")?
             .clone();
-        let now = self.clock.now_ms().max(previous.updated_at_ms);
+        let now = self.clock.now_ms();
+        // Advancing a rolled-back clock to the persisted timestamp could make
+        // a future terminal receipt look current and release the event lock.
+        // Keep the existing record until a trustworthy clock and a fresh
+        // observation are available; this path must not rewrite the journal.
+        if now < 0 || now as u64 > cart::MAX_EXACT_INTEGER || now < previous.updated_at_ms {
+            return Ok(result(
+                previous,
+                dispatched_this_call,
+                SessionState::Uncertain,
+                None,
+                Some("native_clock_needs_review"),
+            ));
+        }
         let (state, intervention, signal, outcome, mut error) = match response {
             Ok(reply)
                 if matches!(

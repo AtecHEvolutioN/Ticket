@@ -229,10 +229,23 @@ fn summarize(
         let (event_url, expected_start, quantity) = binding(record);
         let key = event_identity::identity(event_url).context("invalid retained event identity")?;
         let owner = owners.get(&key).cloned();
+        let retained_observation = observation(record, now_ms);
         let clock_ok = valid_time(record.created_at_ms)
             && valid_time(record.updated_at_ms)
             && record.created_at_ms <= record.updated_at_ms
-            && record.updated_at_ms <= now_ms;
+            && record.updated_at_ms <= now_ms
+            && record.dispatch_at_ms.is_none_or(|dispatch| {
+                valid_time(dispatch)
+                    && record.created_at_ms <= dispatch
+                    && dispatch <= record.updated_at_ms
+            })
+            && retained_observation.as_ref().is_none_or(|observed| {
+                observed.clock == ObservationClock::Valid
+                    && record
+                        .dispatch_at_ms
+                        .is_some_and(|dispatch| dispatch <= observed.observed_at_ms)
+                    && observed.observed_at_ms <= record.updated_at_ms
+            });
         let expected_dispatch = !matches!(
             record.state,
             AttemptState::Prepared | AttemptState::AbandonedBeforeDispatch
@@ -305,7 +318,7 @@ fn summarize(
             original_session_required_for_reconciliation: record.dispatch_at_ms.is_some()
                 && active(&record.state),
             updated_at_ms: record.updated_at_ms,
-            retained_observation: observation(record, now_ms),
+            retained_observation,
             recorded_hold_expiry: expiry,
             retry_authorized: false,
         });
