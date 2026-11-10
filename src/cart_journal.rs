@@ -406,15 +406,37 @@ impl CartJournal {
     /// Open a dedicated cart journal. Existing unrelated databases are rejected
     /// before changing journal mode, creating tables, or writing metadata.
     pub fn open(path: &Path) -> Result<Self> {
+        Self::open_with_creation(path, true)
+    }
+
+    /// Open an already initialized journal for an explicit recovery operation.
+    /// Missing files are never created, including if the path disappears after
+    /// validation. Read-only inspection should continue to use `inspect_file`.
+    pub fn open_existing(path: &Path) -> Result<Self> {
+        ensure!(
+            path.is_file(),
+            "cart journal does not exist or is not a file"
+        );
+        {
+            let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+            validate_schema(&connection)?;
+        }
+        Self::open_with_creation(path, false)
+    }
+
+    fn open_with_creation(path: &Path, allow_create: bool) -> Result<Self> {
         ensure!(
             !path.as_os_str().is_empty() && path != Path::new(":memory:"),
             "cart journal must be durable on disk"
         );
-        let mut connection = Connection::open_with_flags(
-            path,
-            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE,
-        )
-        .context("open dedicated cart journal")?;
+        let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
+            | if allow_create {
+                OpenFlags::SQLITE_OPEN_CREATE
+            } else {
+                OpenFlags::empty()
+            };
+        let mut connection =
+            Connection::open_with_flags(path, flags).context("open dedicated cart journal")?;
         connection.busy_timeout(Duration::from_secs(5))?;
         {
             let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -427,6 +449,10 @@ impl CartJournal {
                 |r| r.get(0),
             )?;
             if application_id == 0 && version == 0 && table_count == 0 {
+                ensure!(
+                    allow_create,
+                    "existing file is not an initialized cart journal"
+                );
                 tx.execute_batch(SCHEMA)?;
                 tx.execute_batch(SEARCH_HISTORY_SCHEMA)?;
                 tx.execute_batch(ACTIVE_INDEX_SQL)?;

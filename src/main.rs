@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use std::{
     collections::{HashMap, HashSet},
-    io::Read,
+    io::{IsTerminal, Read},
     path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
@@ -56,6 +56,20 @@ enum Command {
         /// Read the append-only native outcome history for one attempt.
         #[arg(long)]
         history_attempt: Option<String>,
+    },
+    /// Explain recovery options from an existing journal; never opens a browser or unlocks an event.
+    CartRecovery {
+        #[arg(long)]
+        file: PathBuf,
+        #[arg(long)]
+        attempt_id: Option<String>,
+    },
+    /// Abandon an existing attempt only if dispatch never started; never releases a provider hold.
+    CartAbandonPrepared {
+        #[arg(long)]
+        file: PathBuf,
+        #[arg(long)]
+        attempt_id: String,
     },
     /// Inspect quantity-dependent Czech controls offline after loading the event; never reserves.
     CartControls {
@@ -120,6 +134,12 @@ enum Command {
         execute: bool,
         #[arg(long)]
         headed: bool,
+        /// Keep a local browser open for manual verification and cart review; requires a terminal.
+        #[arg(long, requires = "headed", conflicts_with = "observe_secs")]
+        operator: bool,
+        /// Overall operator session deadline in seconds; defaults to 600.
+        #[arg(long, requires = "operator", value_parser = clap::value_parser!(u64).range(30..=1800))]
+        operator_timeout_secs: Option<u64>,
         /// Keep the same browser open for passive observation after submission.
         #[arg(long, default_value_t = 120, value_parser = clap::value_parser!(u64).range(1..=1800))]
         observe_secs: u64,
@@ -325,6 +345,20 @@ fn find_watch(config: &Config, id: &str) -> Result<Watch> {
 fn print_json(value: &impl serde::Serialize) -> Result<()> {
     println!("{}", serde_json::to_string_pretty(value)?);
     Ok(())
+}
+
+async fn operator_shutdown_signal() {
+    #[cfg(unix)]
+    if let Ok(mut terminate) =
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+    {
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {},
+            _ = terminate.recv() => {},
+        }
+        return;
+    }
+    let _ = tokio::signal::ctrl_c().await;
 }
 fn read_html(path: &Path, limit: usize) -> Result<String> {
     let file = std::fs::File::open(path).context("Open HTML fixture")?;
@@ -840,6 +874,8 @@ async fn main() -> Result<()> {
         | Command::CartPrepare { .. }
         | Command::CartAttempt { .. }
         | Command::CartJournal { .. }
+        | Command::CartRecovery { .. }
+        | Command::CartAbandonPrepared { .. }
         | Command::CartPreferences { .. }
         | Command::CartPlan { .. } => Config::default(),
         Command::Venues { .. }
@@ -891,6 +927,20 @@ async fn main() -> Result<()> {
                 print_json(&ticket_watch::cart_journal::inspect_file(&file)?)?;
             }
         }
+        Command::CartRecovery { file, attempt_id } => {
+            print_json(&ticket_watch::cart_recovery::inspect(
+                &file,
+                attempt_id.as_deref(),
+                chrono::Utc::now().timestamp_millis(),
+            )?)?;
+        }
+        Command::CartAbandonPrepared { file, attempt_id } => {
+            print_json(&ticket_watch::cart_recovery::abandon_prepared(
+                &file,
+                &attempt_id,
+                chrono::Utc::now().timestamp_millis(),
+            )?)?;
+        }
         Command::CartAttempt {
             url,
             event_start,
@@ -904,6 +954,8 @@ async fn main() -> Result<()> {
             evidence_dir,
             execute,
             headed,
+            operator,
+            operator_timeout_secs,
             observe_secs,
         } => {
             use ticket_watch::cart_controller::{
@@ -917,6 +969,16 @@ async fn main() -> Result<()> {
                     "cart-attempt requires --execute because Find tickets may reserve immediately; use cart-prepare for an offline rehearsal"
                 );
             }
+            if operator && !std::io::stdin().is_terminal() {
+                bail!(
+                    "Operator mode requires an interactive terminal on the desktop running the browser"
+                );
+            }
+            let operator_input = if operator {
+                Some(ticket_watch::operator_terminal::OperatorTerminal::open()?)
+            } else {
+                None
+            };
             if attempt_id.is_empty()
                 || attempt_id.len() > 128
                 || !attempt_id
@@ -1002,6 +1064,33 @@ async fn main() -> Result<()> {
                 timeout: Duration::from_secs(90),
             })?;
             let mut controller = NativeCartController::new(storage, session);
+            if operator {
+                let timeout_secs = operator_timeout_secs.unwrap_or(600);
+                eprintln!(
+                    "Operator mode keeps this local browser open for up to {timeout_secs} seconds. Complete verification in the browser, then type resume to continue the authorized attempt. After dispatch, status and resume only observe. Type close to end the session."
+                );
+                let report = ticket_watch::cart_operator::run(
+                    &mut controller,
+                    &ticket_watch::cart_operator::OperatorOptions {
+                        attempt_id,
+                        selection,
+                        preferences: document,
+                        timeout: Duration::from_secs(timeout_secs),
+                    },
+                    tokio::io::BufReader::new(
+                        operator_input.context("Operator terminal was not opened")?,
+                    ),
+                    tokio::io::stderr(),
+                    operator_shutdown_signal(),
+                )
+                .await?;
+                print_json(&serde_json::json!({
+                    "source":"native_cart_operator",
+                    "effective_preferences":effective,
+                    "operator":report
+                }))?;
+                return Ok(());
+            }
             let operation = async {
                 let prepared = controller.prepare(&selection).await?;
                 if prepared.state != SessionState::Prepared {

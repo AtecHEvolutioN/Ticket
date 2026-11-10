@@ -97,6 +97,7 @@ pub enum SessionCommand {
         request: SessionPrepareRequest,
     },
     Refresh,
+    ResumePreparation,
     Commit {
         attempt_id: String,
         preflight_id: String,
@@ -145,6 +146,7 @@ pub struct NativeCartController<S, C = SystemClock> {
     clock: C,
     selection: Option<SessionPrepareRequest>,
     preflight: Option<SessionPreflight>,
+    last_preparation: Option<SessionReply>,
     lineage: Option<(String, String, String)>,
     attempt: Option<AttemptRecord>,
 }
@@ -163,6 +165,7 @@ impl<S: NativeCartSession, C: Clock> NativeCartController<S, C> {
             clock,
             selection: None,
             preflight: None,
+            last_preparation: None,
             lineage: None,
             attempt: None,
         }
@@ -178,12 +181,14 @@ impl<S: NativeCartSession, C: Clock> NativeCartController<S, C> {
         request.expected_event_start = cart::normalize_event_start(&request.expected_event_start)
             .context("native performance start is invalid")?;
         self.selection = Some(request.clone());
+        self.last_preparation = None;
         let mut reply = self
             .session
             .exchange(SessionCommand::Prepare { request })
             .await?;
         reply.manual_intervention = safe_intervention(reply.manual_intervention);
         self.accept_preflight(&reply)?;
+        self.last_preparation = Some(reply.clone());
         Ok(reply)
     }
 
@@ -193,10 +198,42 @@ impl<S: NativeCartSession, C: Clock> NativeCartController<S, C> {
             self.selection.is_some() && self.attempt.is_none(),
             "refresh requires an undispatched native session"
         );
+        self.last_preparation = None;
         let mut reply = self.session.exchange(SessionCommand::Refresh).await?;
         reply.manual_intervention = safe_intervention(reply.manual_intervention);
         self.accept_preflight(&reply)?;
+        self.last_preparation = Some(reply.clone());
         Ok(reply)
+    }
+
+    /// Continue only an undispatched preparation in the same retained browser.
+    /// The native adapter revalidates the current page; this never reloads it or
+    /// submits Find tickets. An established source lineage remains immutable.
+    pub async fn resume_preparation(&mut self) -> Result<SessionReply> {
+        ensure!(
+            self.selection.is_some() && self.attempt.is_none(),
+            "resume requires an undispatched native session"
+        );
+        self.last_preparation = None;
+        let mut reply = self
+            .session
+            .exchange(SessionCommand::ResumePreparation)
+            .await?;
+        reply.manual_intervention = safe_intervention(reply.manual_intervention);
+        self.accept_preflight(&reply)?;
+        self.last_preparation = Some(reply.clone());
+        Ok(reply)
+    }
+
+    /// Read-only local state for an operator; no browser command is sent.
+    pub fn cached_preparation(&self) -> Option<&SessionReply> {
+        self.last_preparation.as_ref()
+    }
+
+    /// Includes a dispatch marker even if the asynchronous native command was
+    /// interrupted before its response. This never implies a verified hold.
+    pub fn current_attempt(&self) -> Option<&AttemptRecord> {
+        self.attempt.as_ref()
     }
 
     fn accept_preflight(&mut self, reply: &SessionReply) -> Result<()> {

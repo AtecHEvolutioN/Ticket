@@ -33,6 +33,7 @@ impl NativeCartSession for FakeSession {
         let name = match command {
             SessionCommand::Prepare { .. } => "prepare",
             SessionCommand::Refresh => "refresh",
+            SessionCommand::ResumePreparation => "resume_preparation",
             SessionCommand::Commit {
                 attempt_id,
                 preflight_id,

@@ -14,6 +14,7 @@ const { prepareTicketmaster } = require('./ticketmaster.cjs');
 const { inspectChallenge, responseIntervention } = require('./manual-intervention.cjs');
 const { observeDocuments } = require('./document-lifecycle.cjs');
 const { identificationRetryAllowed, proxyOptions } = require('./worker.cjs');
+const { PassiveNativeRequestLedger, classifyNativeRequest } = require('./native-request-ledger.cjs');
 
 const id = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value);
 const applicationId = value => typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(value);
@@ -58,9 +59,89 @@ function eventNavigationAllowed(target, candidate) {
   } catch { return false; }
 }
 
+// Installed before site scripts, scoped only to this browser's Find control.
+// It never invokes the control: one post-journal permit can admit one click,
+// whether that first click comes from the operator or Playwright.
+function installNativeFindGate({ binding, counter, control, secret }) {
+  let count = 0, allowed = 0, blocked = 0, armed = false, sealed = false, invalidated = false, snapshot = null;
+  const selector = 'button[data-testid="findTicketsBtn"]';
+  const signature = () => JSON.stringify([
+    location.href, document.querySelector('link[rel="canonical"]')?.href,
+    document.querySelector('#__NEXT_DATA__')?.textContent,
+    [...document.querySelectorAll('[data-testid="quantityStepper"]')].map(node => node.outerHTML),
+    snapshot?.filters.map(node => node.outerHTML),
+  ]);
+  const notify = kind => { void window[binding](kind).catch(() => {}); };
+  const invalidate = () => { if (sealed || armed) { armed = false; invalidated = true; } };
+  Object.defineProperty(globalThis, counter, { get: () => count, configurable: false });
+  Object.defineProperty(globalThis, control, { configurable: false, value: (key, action, args) => {
+    if (key !== secret) return null;
+    if (action === 'snapshot') return { attempted: count, admitted: allowed, blocked, invalidated };
+    if (action === 'arm') {
+      if (!sealed || count || armed || allowed || invalidated || !args?.button?.isConnected
+          || args.root !== snapshot.root || args.root !== document.documentElement
+          || !args.button.matches(selector) || args.button.disabled || document.querySelectorAll(selector).length !== 1
+          || snapshot.signature !== signature() || !snapshot.filters.every(node => node.isConnected)) return false;
+      snapshot.button = args.button;
+      armed = true;
+      return true;
+    }
+    if (action !== 'seal' || sealed || count || armed || allowed || invalidated
+        || args?.root !== document.documentElement) return false;
+    const labels = Object.values(args.filterLabels || {});
+    const filters = labels.map(label => [...document.querySelectorAll('button')]
+      .filter(node => node.textContent.replace(/\s+/g, ' ').trim() === label));
+    if (labels.length !== 2 || filters.some(nodes => nodes.length !== 1)) return false;
+    snapshot = { root: args.root, filters: filters.map(nodes => nodes[0]) };
+    snapshot.signature = signature();
+    sealed = true;
+    return true;
+  } });
+  const ticketControl = event => event.composedPath().some(node => node instanceof Element
+    && (node.matches('[data-testid="quantityStepper"],[data-testid="panelPriceSection"]')
+      || snapshot?.filters.includes(node)));
+  for (const type of ['input', 'change']) document.addEventListener(type, event => {
+    if (ticketControl(event)) invalidate();
+  }, true);
+  document.addEventListener('click', event => {
+    const button = event.composedPath().find(node => node instanceof Element && node.matches(selector));
+    if (!button) { if (ticketControl(event)) invalidate(); return; }
+    count++;
+    const admit = armed && snapshot.root === document.documentElement && button === snapshot.button
+      && snapshot.filters.every(node => node.isConnected) && snapshot.signature === signature();
+    armed = false;
+    if (admit) { allowed++; return; }
+    blocked++;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    notify('find_control_blocked');
+  }, { capture: true, passive: false });
+}
+
+// Diagnostics use a clone only. Human credentials and form values must never
+// reach disk; identity documents are omitted even when their form is empty.
+function sanitizedDocumentSnapshot() {
+  if (location.hostname === 'identity.ticketmaster.cz'
+      || /(?:^|\/)(?:sign-in|signin|login|authenticate)(?:\/|$)/i.test(location.pathname)
+      || document.querySelector('input[type="password"],input[autocomplete="username"],input[autocomplete="current-password"],input[autocomplete="one-time-code"]')) return null;
+  const clone = document.documentElement.cloneNode(true);
+  clone.querySelectorAll('script,style,link,meta,template,noscript,iframe,object,embed').forEach(node => node.remove());
+  clone.querySelectorAll('input,textarea,select,[contenteditable]').forEach(node => {
+    node.replaceChildren();
+    for (const name of node.getAttributeNames()) node.removeAttribute(name);
+    node.setAttribute('data-redacted', 'form-control');
+  });
+  for (const node of [clone, ...clone.querySelectorAll('*')]) {
+    for (const name of node.getAttributeNames()) {
+      if (!['data-testid', 'data-redacted', 'role', 'hidden', 'aria-live'].includes(name)) node.removeAttribute(name);
+    }
+  }
+  return { url: location.origin + location.pathname, html: '<!doctype html>' + clone.outerHTML, form_values_redacted: true };
+}
+
 class NativeFormDriver {
-  constructor(page, target, request, guard) {
-    Object.assign(this, { page, target, request, externalGuard: guard });
+  constructor(page, target, request, guard, nativeFindGate) {
+    Object.assign(this, { page, target, request, externalGuard: guard, nativeFindGate });
     this.args = { categoryId: request.category_id, quantity: request.quantity, eventId: eventIdentity(target).id };
     this.signature = null;
     this.filterLabels = undefined;
@@ -71,7 +152,8 @@ class NativeFormDriver {
     if (value < 1) throw failure('native_form_timeout');
     return Math.min(value, 1500);
   }
-  read(phase, kind) { return this.page.evaluate(readSurface, { ...this.args, phase, kind, filterLabels: this.filterLabels }); }
+  read(phase, kind, sealFind = false) { return this.page.evaluate(readSurface, { ...this.args, phase, kind,
+    filterLabels: this.filterLabels, ...(sealFind ? { nativeFindGate: this.nativeFindGate } : {}) }); }
   bindingMatches(binding) {
     return binding && sameEvent(this.target, binding.canonical) && sameEvent(this.target, binding.embedded_canonical)
       && (!this.signature || JSON.stringify(binding) === this.signature);
@@ -98,8 +180,8 @@ class NativeFormDriver {
     if (modal) throw failure('native_modal_blocked');
     if (!this.bindingMatches(await this.read('binding'))) throw failure('native_form_changed');
   }
-  async form(quantity = this.request.quantity) {
-    const result = await this.read('form');
+  async form(quantity = this.request.quantity, sealFind = false) {
+    const result = await this.read('form', undefined, sealFind);
     if (!result || !this.bindingMatches(result.binding) || result.quantity !== quantity) throw failure('native_form_unrecognized');
     return result;
   }
@@ -205,6 +287,7 @@ class NativeFormDriver {
       const control = await this.page.locator('[data-testid="quantityStepper"]').nth(surface.stepper_index)
         .locator(':scope > button').nth(1).elementHandle();
       if (!control) throw failure('native_form_changed');
+      this.quantityActionAttempted = true;
       try { await control.click({ timeout: this.remaining() }); } finally { await control.dispose(); }
       await this.guard(false, true);
       // React can remove/reorder other category rows after an increment.
@@ -241,9 +324,10 @@ class NativeFormDriver {
     if (await this.setChecks('section', this.effectiveSections))
       await this.apply({ price: priceLabel, section: sectionLabel(this.effectiveSections) });
     else await this.closePanel();
+    this.selectionApplied = true;
     return this.verify();
   }
-  async verify() {
+  async verify(sealFind = false) {
     this.stage = 'preflight_verification';
     this.deadline = performance.now() + 10000;
     const panels = [];
@@ -254,7 +338,7 @@ class NativeFormDriver {
       await this.closePanel();
     }
     await this.guard();
-    const form = await this.form();
+    const form = await this.form(this.request.quantity, sealFind);
     return { binding: form.binding, panels };
   }
   async findHandle() {
@@ -300,6 +384,35 @@ class NativeCartSession {
     try { return await this.makePreflight(await this.driver.verify()); }
     catch (error) { this.preflight = null; this.state = 'paused'; throw error; }
   }); }
+  resumePreparation() { return this.serialize(async () => {
+    if (!['paused', 'prepared'].includes(this.state) || this.spent || !this.connected)
+      throw failure('invalid_state');
+    this.preflight = null;
+    try {
+      await this.checkManualActions();
+      await this.documents.synchronize();
+      const current = this.documents.current();
+      if (!current || !eventNavigationAllowed(this.request.event_url, current.url)
+          || !eventNavigationAllowed(this.request.event_url, this.page.url())) throw failure('native_form_changed');
+      if (current.status < 200 || current.status >= 300) throw Object.assign(failure('needs_human'), {
+        kind: responseIntervention(current.status, current.headers) || 'access_blocked',
+      });
+      const challenge = await inspectChallenge(this.page);
+      if (challenge) throw Object.assign(failure('needs_human'), { kind: challenge });
+      if (this.establishedPreflight || this.driver?.selectionApplied) {
+        // Reopen only display panels in the exact existing document/configuration.
+        // Never reset selections or silently adopt a newly loaded document here.
+        if (!this.driver || current.loader !== this.snapshot?.loader) throw failure('native_form_changed');
+        return await this.makePreflight(await this.driver.verify());
+      }
+      // An interrupted increment is not a reusable initial form. We cannot know
+      // whether a human altered its local selection while handling verification.
+      if (this.driver?.quantityActionAttempted) throw failure('native_form_changed');
+      await this.driver?.root?.dispose().catch(() => {});
+      this.driver = null;
+      return await this.prepareCurrentDocument(current);
+    } catch (error) { return this.pausePreparation(error); }
+  }); }
   commit(command) { return this.serialize(() => this.commitOnce(command)); }
   observe(command) { return this.serialize(async () => {
     if (!this.spent || command.attempt_id !== this.attemptId) throw failure('invalid_state');
@@ -329,6 +442,27 @@ class NativeCartSession {
     try { await fs.writeFile(path.join(this.evidenceDir, filename), bytes, { mode: 0o600, flag: 'wx' }); }
     catch { this.captureFailed = true; }
   }
+  assertAutomationOwned() {
+    if (!this.connected || this.unsafeNavigation || this.nativeDialog || this.foreignNativeAction)
+      throw failure('native_form_changed');
+  }
+  async checkManualActions() {
+    this.assertAutomationOwned();
+    if (!this.findClickAttempted && this.nativeClickCounter) {
+      const count = await this.page.evaluate(key => globalThis[key], this.nativeClickCounter);
+      if (count !== 0) {
+        this.markForeignNativeAction('find_control');
+        throw failure('native_form_changed');
+      }
+    }
+  }
+  markForeignNativeAction(kind) {
+    if (this.findClickAttempted || this.foreignNativeAction) return;
+    this.foreignNativeAction = true;
+    this.preflight = null;
+    if (!this.spent) this.state = 'paused';
+    this.enqueueEvidence('untracked-native-action', { kind, observed_at_ms: Date.now() });
+  }
   allowedNavigation(url) {
     if (eventNavigationAllowed(this.request.event_url, url)) return true;
     return this.spent && typeof this.checkoutNavigationPolicy === 'function' && this.checkoutNavigationPolicy(url) === true;
@@ -339,6 +473,17 @@ class NativeCartSession {
     this.stage = 'event_navigation';
     await this.initializeEvidence();
     this.context = await this.browser.newContext({ serviceWorkers: 'block' });
+    const actionBinding = uid('native_action');
+    this.nativeClickCounter = uid('native_click_count');
+    this.nativeGateControl = uid('native_gate');
+    this.nativeGateSecret = uid('native_gate_key');
+    await this.context.exposeBinding(actionBinding, ({ page, frame }) => {
+      if (page !== this.page || frame !== this.page.mainFrame()) return;
+      if (!this.findClickAttempted) this.markForeignNativeAction('find_control');
+      else this.enqueueEvidence('find-gate', { phase: 'additional_find_blocked', observed_at_ms: Date.now() });
+    });
+    await this.context.addInitScript(installNativeFindGate, { binding: actionBinding, counter: this.nativeClickCounter,
+      control: this.nativeGateControl, secret: this.nativeGateSecret });
     this.page = await this.context.newPage();
     this.page.setDefaultTimeout(1500);
     this.context.on('page', page => {
@@ -352,7 +497,7 @@ class NativeCartSession {
       if (outgoing.isNavigationRequest() && outgoing.frame().parentFrame() === null
           && !this.allowedNavigation(outgoing.url())) {
         this.unsafeNavigation = true;
-        if (this.spent) this.enqueueEvidence('blocked-navigation', { observed_at_ms: Date.now(), url: outgoing.url() });
+        if (this.spent) this.enqueueEvidence('blocked-navigation', { observed_at_ms: Date.now(), reason: 'unsupported_navigation' });
         return route.abort('blockedbyclient');
       }
       return route.fallback();
@@ -366,22 +511,30 @@ class NativeCartSession {
     this.page.on('dialog', dialog => {
       this.nativeDialog = true;
       // Never accept reservation, information or non-adjacent confirmations.
-      if (this.spent) this.enqueueEvidence('native-dialog', { observed_at_ms: Date.now(), type: dialog.type(), message: dialog.message() });
+      if (this.spent) this.enqueueEvidence('native-dialog', { observed_at_ms: Date.now(), type: dialog.type() });
     });
-    this.context.on('request', request => { if (this.spent) this.pendingRequests.add(request); });
+    this.context.on('request', request => {
+      const classification = classifyNativeRequest(request, this.request.event_url);
+      if (!this.findClickAttempted && classification.native_endpoint) this.markForeignNativeAction('reservation_request');
+      if (this.findClickAttempted) this.pendingRequests.add(request);
+      this.requestLedger?.observeRequest(request);
+    });
+    this.context.on('requestfinished', request => { this.requestLedger?.requestFinished(request); });
+    this.context.on('requestfailed', request => { this.requestLedger?.requestFailed(request); });
     this.context.on('response', response => {
-      if (!this.spent || !this.pendingRequests.has(response.request())) return;
-      // Only native event/checkout responses are captured. No cookies, request
-      // headers, request bodies or authentication responses are collected.
+      this.requestLedger?.observeResponse(response);
+      if (!this.findClickAttempted || !this.pendingRequests.has(response.request())) return;
+      // Raw bodies are limited to reviewed reservation contracts. Other checkout
+      // APIs, unknown GraphQL and HTML can contain account/payment form data.
       let url;
       try { url = new URL(response.url()); } catch { return; }
-      const eventHost = new URL(this.request.event_url).hostname;
-      if (url.protocol !== 'https:' || ![eventHost, 'checkout.ticketmaster.cz', 'checkout.prod.ticketmaster.cz'].includes(url.hostname)) return;
-      if (url.hostname === eventHost && !new RegExp(`^/event/${eventIdentity(this.request.event_url).id}/api/reserve(?:_ism)?$`).test(url.pathname)
-          && !response.request().isNavigationRequest()) return;
-      if (url.hostname === 'checkout.prod.ticketmaster.cz' && url.pathname !== '/graphql') return;
+      const classification = classifyNativeRequest(response.request(), this.request.event_url);
+      if (response.url() !== response.request().url() || url.search || url.hash
+          || response.request().method() !== 'POST' || !classification.native_endpoint
+          || !(classification.kind === 'mfol_reserve' || classification.kind === 'gco_graphql'
+            && classification.query_contract_verified === true && classification.parse_status === 'parsed')) return;
       const type = response.headers()['content-type'] || '';
-      if (!/^(?:application\/json|text\/html)(?:;|$)/i.test(type)) return;
+      if (!/^application\/json(?:;|$)/i.test(type)) return;
       if (this.responseCaptures >= 24) return;
       this.responseCaptures = (this.responseCaptures || 0) + 1;
       this.captureQueue = this.captureQueue.then(async () => {
@@ -392,10 +545,11 @@ class NativeCartSession {
         // oversized decoded bodies before retaining or writing any evidence.
         if (length && (!/^\d+$/.test(length) || Number(length) > 2 * 1024 * 1024)) return;
         let body;
-        try { body = await bounded(response.body(), 2000); } catch { this.captureFailed = true; return; }
-        if (body.length > 2 * 1024 * 1024) return;
-        await this.writeEvidence('response', { observed_at_ms: Date.now(), url: response.url(), status: response.status(),
-          content_type: type, body: body.toString('utf8') });
+        try { body = await bounded(response.body(), 2000); } catch { this.captureFailed = true; this.requestLedger?.observeResponse(response); return; }
+        if (body.length > 2 * 1024 * 1024) { this.requestLedger?.observeResponse(response); return; }
+        this.requestLedger?.observeResponse(response, body);
+        await this.writeEvidence('response', { observed_at_ms: Date.now(), url: url.origin + url.pathname, status: response.status(),
+          content_type: type, request_correlation_id: this.requestLedger?.requestId(response.request()) || null, body: body.toString('utf8') });
       }).catch(() => { this.captureFailed = true; });
     });
     try {
@@ -416,53 +570,68 @@ class NativeCartSession {
         throw Object.assign(failure('needs_human'), { kind });
       }
       await this.documents.synchronize();
-      this.snapshot = this.documents.current();
-      if (!this.snapshot) throw failure('navigation_failed');
-      const guard = async ({ afterCartControlsAction = false, afterDisplayAction = false } = {}) => {
-        if (!this.connected || this.unsafeNavigation || this.nativeDialog) throw failure('native_form_changed');
-        if (!eventNavigationAllowed(this.request.event_url, this.page.url())) throw failure('unsafe_redirect');
-        await this.documents.synchronize();
-        if (afterCartControlsAction || afterDisplayAction) {
-          const current = this.documents.current();
-          if (!current || current.loader !== this.snapshot.loader || current.status !== this.snapshot.status) throw failure('native_form_changed');
-          this.snapshot = current;
-        } else this.documents.assertCurrent(this.snapshot);
-      };
-      // Consent mounts asynchronously after DOMContentLoaded on the observed
-      // Czech page. Match the normal worker's bounded initial rendering window
-      // before its exact known consent handler runs, while quantities are zero.
-      // A later or unknown modal still fails closed in NativeFormDriver.guard.
-      this.stage = 'initial_render';
-      const renderingDeadline = performance.now() + 1500;
-      while (performance.now() < renderingDeadline) {
-        await guard();
-        const challenge = await inspectChallenge(this.page);
-        if (challenge) throw Object.assign(failure('needs_human'), { kind: challenge });
-        await this.page.waitForTimeout(Math.min(100, Math.max(1, renderingDeadline - performance.now())));
-      }
-      await guard();
-      this.stage = 'public_display';
-      const display = await prepareTicketmaster(this.page, this.request.event_url, 10000, guard);
-      if (display.state === 'blocked') throw Object.assign(failure('needs_human'), { kind: await inspectChallenge(this.page) || 'verification' });
-      if (display.state !== 'regional') throw failure('native_form_unrecognized');
-      this.driver = new NativeFormDriver(this.page, this.request.event_url, this.request, guard);
-      return await this.makePreflight(await this.driver.prepare());
-    } catch (error) {
-      if (error.name === 'TimeoutError') error = failure(this.driver ? 'native_form_timeout' : 'navigation_failed');
-      this.state = 'paused';
-      this.preflight = null;
-      // Failed preparation is useful private evidence, never a stock/hold claim.
-      try {
-        const html = await bounded(this.page.content(), 1500);
-        await this.writeEvidence('preparation-failed', { observed_at_ms: Date.now(), stage: this.driver?.stage || this.stage,
-          reason: ['needs_human', 'native_form_changed', 'native_form_unrecognized', 'native_modal_blocked',
-            'native_form_timeout', 'navigation_failed', 'event_date_changed', 'unsafe_redirect', 'cart_controls_unrecognized'].includes(error.code)
-            ? error.code : 'session_failed', url: this.page.url(), html });
-      } catch { this.captureFailed = true; }
-      throw error;
+      const current = this.documents.current();
+      if (!current) throw failure('navigation_failed');
+      return await this.prepareCurrentDocument(current);
+    } catch (error) { return this.pausePreparation(error); }
+  }
+  async prepareCurrentDocument(current) {
+    this.assertAutomationOwned();
+    if (!current || current.status < 200 || current.status >= 300
+        || !eventNavigationAllowed(this.request.event_url, current.url)
+        || !eventNavigationAllowed(this.request.event_url, this.page.url())) throw failure('navigation_failed');
+    if (this.snapshot && current.loader !== this.snapshot.loader) {
+      this.documentId = uid('document');
+      this.outcomeDocumentId = this.documentId;
     }
+    this.snapshot = current;
+    const guard = async ({ afterCartControlsAction = false, afterDisplayAction = false } = {}) => {
+      await this.checkManualActions();
+      if (!eventNavigationAllowed(this.request.event_url, this.page.url())) throw failure('unsafe_redirect');
+      await this.documents.synchronize();
+      if (afterCartControlsAction || afterDisplayAction) {
+        const current = this.documents.current();
+        if (!current || current.loader !== this.snapshot.loader || current.status !== this.snapshot.status) throw failure('native_form_changed');
+        this.snapshot = current;
+      } else this.documents.assertCurrent(this.snapshot);
+    };
+    // Consent mounts asynchronously after DOMContentLoaded on the observed
+    // Czech page. Match the normal worker's bounded initial rendering window
+    // before its exact known consent handler runs, while quantities are zero.
+    // A later or unknown modal still fails closed in NativeFormDriver.guard.
+    this.stage = 'initial_render';
+    const renderingDeadline = performance.now() + 1500;
+    while (performance.now() < renderingDeadline) {
+      await guard();
+      const challenge = await inspectChallenge(this.page);
+      if (challenge) throw Object.assign(failure('needs_human'), { kind: challenge });
+      await this.page.waitForTimeout(Math.min(100, Math.max(1, renderingDeadline - performance.now())));
+    }
+    await guard();
+    this.stage = 'public_display';
+    const display = await prepareTicketmaster(this.page, this.request.event_url, 10000, guard);
+    if (display.state === 'blocked') throw Object.assign(failure('needs_human'), { kind: await inspectChallenge(this.page) || 'verification' });
+    if (display.state !== 'regional') throw failure('native_form_unrecognized');
+    this.driver = new NativeFormDriver(this.page, this.request.event_url, this.request, guard,
+      { control: this.nativeGateControl, secret: this.nativeGateSecret });
+    return await this.makePreflight(await this.driver.prepare());
+  }
+  async pausePreparation(error) {
+    if (error.name === 'TimeoutError') error = failure(this.driver ? 'native_form_timeout' : 'navigation_failed');
+    this.state = 'paused';
+    this.preflight = null;
+    // Failed preparation is useful private evidence, never a stock/hold claim.
+    try {
+      const document = await this.captureDocument();
+      await this.writeEvidence('preparation-failed', { observed_at_ms: Date.now(), stage: this.driver?.stage || this.stage,
+        reason: ['needs_human', 'native_form_changed', 'native_form_unrecognized', 'native_modal_blocked',
+          'native_form_timeout', 'navigation_failed', 'event_date_changed', 'unsafe_redirect', 'cart_controls_unrecognized'].includes(error.code)
+          ? error.code : 'session_failed', ...(document || { document_omitted: true }) });
+    } catch { this.captureFailed = true; }
+    throw error;
   }
   async makePreflight(surface) {
+    await this.checkManualActions();
     if (!this.connected || this.spent) throw failure('invalid_state');
     const observed = Date.now();
     this.preflight = {
@@ -474,6 +643,7 @@ class NativeCartSession {
       configured_unit_price_minor: this.request.configured_unit_price_minor, currency: 'CZK',
       section_ids: [...this.request.section_ids],
     };
+    this.establishedPreflight = true;
     this.state = 'prepared';
     return { state: 'prepared', preflight: { ...this.preflight } };
   }
@@ -492,18 +662,29 @@ class NativeCartSession {
     this.state = 'dispatching';
     await this.writeEvidence('dispatch', { attempt_id: this.attemptId, preflight: this.dispatchPreflight, observed_at_ms: Date.now() });
     try {
-      await this.driver.verify();
+      await this.driver.verify(true);
       if (!this.connected || Date.now() >= this.dispatchPreflight.config_expires_at_ms) throw failure('preflight_expired');
       const handle = await this.driver.findHandle();
       if (!handle) throw failure('native_form_changed');
       try {
         await this.driver.guard();
         if (!this.connected || Date.now() >= this.dispatchPreflight.config_expires_at_ms) throw failure('preflight_expired');
+        this.requestLedger = new PassiveNativeRequestLedger({ eventUrl: this.request.event_url,
+          sourceDocumentId: this.documentId, expectedSelection: { quantity: this.request.quantity,
+            categoryId: this.request.category_id, priceId: this.request.price_id, sectionIds: this.driver.effectiveSections },
+          onRecord: record => this.enqueueEvidence('request-ledger', record) });
+        this.requestLedger.arm({ attemptId: this.attemptId, clickedAtMs: Date.now(), monotonicMs: performance.now() });
         this.findClickAttempted = true;
         // Diagnostic markers are queued without extending the fresh preflight's
         // critical path. The journal, not these files, authorizes the dispatch.
         this.enqueueEvidence('action', { attempt_id: this.attemptId, phase: 'find_click_attempted',
           observed_at_ms: Date.now(), monotonic_ms: performance.now() });
+        const armed = await this.page.evaluate(({ control, secret, button, root, filterLabels }) =>
+          globalThis[control]?.(secret, 'arm', { button, root, filterLabels }), {
+          control: this.nativeGateControl, secret: this.nativeGateSecret, button: handle,
+          root: this.driver.root, filterLabels: this.driver.filterLabels,
+        });
+        if (!armed) throw failure('native_form_changed');
         await handle.click({ timeout: 1500, noWaitAfter: true });
         this.enqueueEvidence('action', { attempt_id: this.attemptId, phase: 'find_click_returned',
           observed_at_ms: Date.now(), monotonic_ms: performance.now() });
@@ -518,6 +699,10 @@ class NativeCartSession {
   }
   enqueueEvidence(kind, data) {
     this.captureQueue = this.captureQueue.then(() => this.writeEvidence(kind, data)).catch(() => { this.captureFailed = true; });
+  }
+  async captureDocument() {
+    if (!this.page || !this.allowedNavigation(this.page.url())) return null;
+    return bounded(this.page.evaluate(sanitizedDocumentSnapshot), 1500);
   }
   async nativeSignal() {
     // Diagnostic only: a failed native search is not proof that no hold exists
@@ -575,11 +760,11 @@ class NativeCartSession {
     if (challenge) reason = 'challenge';
     if (this.unsafeNavigation || this.nativeDialog || this.captureFailed) reason = 'unrecognized_response';
     try {
-      const html = await this.page.content();
-      const fingerprint = hash([this.page.url(), html]);
-      if (fingerprint !== this.lastDocumentFingerprint) {
+      const document = challenge === 'authentication_required' ? null : await this.captureDocument();
+      const fingerprint = hash(document);
+      if (document && fingerprint !== this.lastDocumentFingerprint) {
         this.lastDocumentFingerprint = fingerprint;
-        this.enqueueEvidence('document', { observed_at_ms: Date.now(), url: this.page.url(), document_id: this.outcomeDocumentId, html });
+        this.enqueueEvidence('document', { observed_at_ms: Date.now(), document_id: this.outcomeDocumentId, ...document });
       }
     } catch { reason = 'unrecognized_response'; }
     await bounded(this.captureQueue, 2500).catch(() => { this.captureFailed = true; });
@@ -703,8 +888,8 @@ async function main() {
         if (Buffer.byteLength(line) > 16384) throw failure('invalid_request');
         command = JSON.parse(line);
         if (!command || !finiteInteger(command.id, 1, Number.MAX_SAFE_INTEGER)
-            || !['prepare', 'refresh', 'commit', 'observe', 'close'].includes(command.op)) throw failure('invalid_request');
-        const keys = { prepare: ['id', 'op', 'request'], refresh: ['id', 'op'],
+            || !['prepare', 'refresh', 'resume_preparation', 'commit', 'observe', 'close'].includes(command.op)) throw failure('invalid_request');
+        const keys = { prepare: ['id', 'op', 'request'], refresh: ['id', 'op'], resume_preparation: ['id', 'op'],
           commit: ['id', 'op', 'attempt_id', 'preflight_id', 'dispatch_token'],
           observe: ['id', 'op', 'attempt_id'], close: ['id', 'op'] }[command.op];
         if (Object.keys(command).some(key => !keys.includes(key))) throw failure('invalid_request');
@@ -729,6 +914,7 @@ async function main() {
         } else {
           if (!session) throw failure('invalid_state');
           reply = command.op === 'refresh' ? await session.refresh()
+            : command.op === 'resume_preparation' ? await session.resumePreparation()
             : command.op === 'commit' ? await session.commit(command) : await session.observe(command);
         }
         send({ id: command.id, ok: true, ...reply });

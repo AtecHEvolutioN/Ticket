@@ -1,7 +1,7 @@
 'use strict';
 
 // This helper runs in the page. Only bounded, non-secret form metadata leaves it.
-function readSurface({ categoryId, eventId, quantity, phase, kind, filterLabels }) {
+function readSurface({ categoryId, eventId, quantity, phase, kind, filterLabels, nativeFindGate }) {
   const text = node => String(node?.innerText ?? node?.textContent ?? '').normalize('NFC').replace(/\s+/g, ' ').trim();
   const label = (value, max = 500) => typeof value === 'string' && value.length > 0
     && value.length <= max && value.trim() === value && !/[\u0000-\u001f\u007f]/.test(value);
@@ -166,6 +166,12 @@ function readSurface({ categoryId, eventId, quantity, phase, kind, filterLabels 
     if (buttons.length !== 1 || buttons[0].getAttribute('type') !== 'button') return null;
     filters.push({ kind: filterKind, label: name, disabled: disabled(buttons[0]) });
   }
+  // Seal the final verified form in this same JS turn. Later operator changes
+  // cannot become a fresh baseline in the async gap before the one-use arm.
+  if (nativeFindGate && (selected.quantity !== quantity
+      || globalThis[nativeFindGate.control]?.(nativeFindGate.secret, 'seal', {
+        root: document.documentElement, filterLabels,
+      }) !== true)) return null;
   return { binding, ...selected, filters };
 }
 

@@ -99,9 +99,11 @@ function fixture({ merged = false, mergedOther = false, initialQuantity = 0, oth
 // Synthetic implementation of the observed native temporary/apply filter model.
 // It deliberately remounts checkbox IDs and toolbar buttons between opens.
 function preparationFixture({ preselected = false, missingApply = false, brokenApply = false,
-  lostPriceAfterSection = false, multiplePriceSections = false, onCheckbox = '', discountType = 'STANDARD', reorderAfterIncrement = false } = {}) {
-  let html = fixture({ mutate: reorderAfterIncrement
-    ? `if(count===1 && spin.closest('li').id==='row-2'){document.getElementById('row-1')?.remove();spin.closest('ul').prepend(spin.closest('li'))}` : '' });
+  lostPriceAfterSection = false, multiplePriceSections = false, onCheckbox = '', discountType = 'STANDARD', reorderAfterIncrement = false, pauseAfterIncrement = false } = {}) {
+  const mutations = [];
+  if (reorderAfterIncrement) mutations.push(`if(count===1 && spin.closest('li').id==='row-2'){document.getElementById('row-1')?.remove();spin.closest('ul').prepend(spin.closest('li'))}`);
+  if (pauseAfterIncrement) mutations.push(`if(count===1){const warning=document.createElement('div');warning.id='manual-challenge';warning.textContent='Verify you are human';document.body.append(warning)}`);
+  let html = fixture({ mutate: mutations.join(';') });
   const match = /<script id="__NEXT_DATA__" type="application\/json">([^<]+)<\/script>/.exec(html);
   const metadata = JSON.parse(match[1]);
   const state = metadata.props.pageProps.initialReduxState;
@@ -169,6 +171,7 @@ const request = () => ({ event_url: target, category_id: '2', price_id: '6', sec
   quantity: 2, expected_event_start: eventStart, configured_unit_price_minor: 188900 });
 function liveFixture(options = {}) {
   return preparationFixture(options).replace('</body>', `<script>
+  ${options.initialChallenge ? `const initialChallenge=document.createElement('div');initialChallenge.id='manual-challenge';initialChallenge.textContent='Verify you are human';document.body.append(initialChallenge);` : ''}
   ${options.delayedConsent ? `setTimeout(()=>{
     const banner=document.createElement('div');banner.id='ketch-consent-banner';banner.setAttribute('role','dialog');
     const button=document.createElement('button');button.id='ketch-banner-button-secondary';button.type='button';
@@ -188,12 +191,13 @@ async function withSession(run, options = {}) {
     ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}) });
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'native-session-test-'));
   const session = new NativeCartSession({ browser, evidenceDir: dir, request: request(), checkoutNavigationPolicy: () => false });
-  let reserveCalls = 0;
+  let reserveCalls = 0, navigationCalls = 0;
   // Synthetic Ticketmaster origin is fulfilled locally; no provider request.
   const original = browser.newContext.bind(browser);
   browser.newContext = async args => {
     const context = await original(args);
     await context.route('**/*', route => {
+      if (route.request().isNavigationRequest()) navigationCalls++;
       if (route.request().url().endsWith('/api/reserve')) {
         reserveCalls++;
         return route.fulfill({ status: 200, contentType: 'application/json', body: '{"statusCode":"PENDING","private":"test-secret"}' });
@@ -202,7 +206,7 @@ async function withSession(run, options = {}) {
     });
     return context;
   };
-  try { await run(session, () => reserveCalls, dir); }
+  try { await run(session, () => reserveCalls, dir, () => navigationCalls); }
   finally { await session.close(); await browser.close(); await fs.rm(dir, { recursive: true, force: true }); }
 }
 
@@ -258,6 +262,22 @@ test('prepare selects native controls online without Find and one durable-token 
     const actions = await Promise.all(filenames.filter(name => name.endsWith('-action.json'))
       .map(async name => JSON.parse(await fs.readFile(path.join(sessionDir, name), 'utf8'))));
     assert.deepEqual(actions.map(action => action.phase), ['find_click_attempted', 'find_click_returned']);
+    const ledger = await Promise.all(filenames.filter(name => name.endsWith('-request-ledger.json'))
+      .map(async name => JSON.parse(await fs.readFile(path.join(sessionDir, name), 'utf8'))));
+    assert.ok(ledger.length, JSON.stringify(session.requestLedger.snapshot()));
+    assert.deepEqual(new Set(ledger.map(record => record.phase)), new Set(['request_started', 'response_received', 'request_finished', 'response_body']));
+    const requestId = ledger.find(record => record.phase === 'request_started').request_id;
+    for (const record of ledger) {
+      assert.equal(record.request_id, requestId);
+      assert.equal(record.source_document_id, prepared.preflight.document_id);
+      assert.equal(record.attempt_id, 'attempt1');
+      assert.equal(record.evidence_scope, 'diagnostic_only');
+      assert.ok(record.observed_at_ms >= actions[0].observed_at_ms);
+    }
+    const responses = await Promise.all(filenames.filter(name => name.endsWith('-response.json'))
+      .map(async name => JSON.parse(await fs.readFile(path.join(sessionDir, name), 'utf8'))));
+    assert.equal(responses[0].request_correlation_id, requestId);
+    assert.equal(JSON.stringify(ledger).includes('test-secret'), false);
     for (const action of actions) {
       assert.deepEqual(Object.keys(action).sort(), ['attempt_id', 'monotonic_ms', 'observed_at_ms', 'phase']);
       assert.equal(action.attempt_id, 'attempt1');
@@ -354,9 +374,12 @@ test('worker exits after explicit close of a spent session instead of starting d
   try {
     const prepared = await command({ id: 1, op: 'prepare', request: request() });
     assert.equal(prepared.state, 'prepared');
-    const committed = await command({ id: 2, op: 'commit', attempt_id: 'protocol_spent', dispatch_token: 'protocol_spent', preflight_id: prepared.preflight.preflight_id });
+    const resumed = await command({ id: 2, op: 'resume_preparation' });
+    assert.equal(resumed.state, 'prepared');
+    assert.equal(resumed.preflight.document_id, prepared.preflight.document_id);
+    const committed = await command({ id: 3, op: 'commit', attempt_id: 'protocol_spent', dispatch_token: 'protocol_spent', preflight_id: resumed.preflight.preflight_id });
     assert.equal(committed.outcome.kind, 'uncertain');
-    const closed = await command({ id: 3, op: 'close' });
+    const closed = await command({ id: 4, op: 'close' });
     assert.equal(closed.state, 'closed');
     assert.equal(await done, 0);
     assert.equal(stderr, '');
@@ -439,4 +462,189 @@ test('native insufficient-ticket diagnostic requires current visible exact same-
     assert.equal((await session.observe({ attempt_id: 'signal_test' })).native_signal, undefined, 'Wrong embedded event is rejected');
     assert.equal(calls(), 1, 'Diagnostic observations never submit another search');
   });
+});
+
+
+test('manual clearance resumes the same initial browser without navigation or trusting acknowledgement', { skip: !enabled }, async () => {
+  await withSession(async (session, calls, _dir, navigations) => {
+    await assert.rejects(session.prepare(), /needs_human/);
+    assert.equal(navigations(), 1);
+    await assert.rejects(session.resumePreparation(), /needs_human/);
+    assert.equal(await session.page.locator('#row-2 [role="spinbutton"]').getAttribute('aria-valuenow'), '0');
+    await session.page.locator('#manual-challenge').evaluate(node => node.remove());
+    const resumed = await session.resumePreparation();
+    assert.equal(resumed.state, 'prepared');
+    assert.equal(resumed.preflight.session_id, session.sessionId);
+    assert.equal(navigations(), 1, 'Resume must not navigate or reload');
+    assert.equal(await session.page.locator('body').getAttribute('data-increments'), '2');
+    assert.equal(calls(), 0);
+  }, { initialChallenge: true });
+});
+
+test('initial manual document replacement can rebind only before any preflight or quantity action', { skip: !enabled }, async () => {
+  await withSession(async (session, calls, _dir, navigations) => {
+    await assert.rejects(session.prepare(), /needs_human/);
+    const oldDocument = session.documentId;
+    let laterNavigations = 0;
+    session.context.on('request', request => { if (request.isNavigationRequest()) laterNavigations++; });
+    await session.context.route(target, route => route.fulfill({ status: 200, contentType: 'text/html', body: liveFixture() }));
+    await session.page.reload({ waitUntil: 'domcontentloaded' }); // Simulated human browser action.
+    const resumed = await session.resumePreparation();
+    assert.equal(resumed.state, 'prepared');
+    assert.notEqual(resumed.preflight.document_id, oldDocument);
+    assert.equal(calls(), 0);
+    assert.equal(laterNavigations, 1, 'Only the human reload navigates; resume does not');
+    assert.equal(navigations(), 1);
+  }, { initialChallenge: true });
+});
+
+test('manual pause preserves an established selection and rejects replacement document or changed configuration', { skip: !enabled }, async () => {
+  await withSession(async (session, calls) => {
+    const prepared = await session.prepare();
+    await session.page.evaluate(() => { const node=document.createElement('div');node.id='manual-challenge';node.textContent='Verify you are human';document.body.append(node); });
+    await assert.rejects(session.refresh(), /needs_human/);
+    await session.page.locator('#manual-challenge').evaluate(node => node.remove());
+    const resumed = await session.resumePreparation();
+    for (const key of ['session_id', 'document_id', 'config_id']) assert.equal(resumed.preflight[key], prepared.preflight[key]);
+    assert.equal(await session.page.locator('body').getAttribute('data-increments'), '2');
+    await session.page.reload({ waitUntil: 'domcontentloaded' });
+    await assert.rejects(session.resumePreparation(), /native_form_changed/);
+    assert.equal(calls(), 0);
+  });
+  await withSession(async (session, calls) => {
+    await session.prepare();
+    await session.page.locator('#__NEXT_DATA__').evaluate(node => { const value=JSON.parse(node.textContent);value.props.pageProps.initialReduxState.eventInfo.dates.startDate='2027-01-01T00:00:00Z';node.textContent=JSON.stringify(value); });
+    await assert.rejects(session.resumePreparation(), /native_form_changed/);
+    assert.equal(calls(), 0);
+  });
+});
+
+test('partial preparation and foreign reservation activity never resume into an automatic Find', { skip: !enabled }, async () => {
+  await withSession(async (session, calls) => {
+    await assert.rejects(session.prepare(), /needs_human/);
+    await session.page.locator('#manual-challenge').evaluate(node => node.remove());
+    await assert.rejects(session.resumePreparation(), /native_form_changed/);
+    assert.equal(await session.page.locator('#row-2 [role="spinbutton"]').getAttribute('aria-valuenow'), '1');
+    assert.equal(calls(), 0);
+  }, { pauseAfterIncrement: true });
+  await withSession(async (session, calls) => {
+    const prepared = await session.prepare();
+    await session.page.locator('[data-testid="findTicketsBtn"]').click(); // Simulated independent human action.
+    await assert.rejects(session.resumePreparation(), /native_form_changed/);
+    await assert.rejects(session.commit({ attempt_id: 'foreign', dispatch_token: 'foreign', preflight_id: prepared.preflight.preflight_id }), /invalid_commit/);
+    assert.equal(calls(), 0, 'The bot-owned browser blocks Find before the journaled permit');
+    assert.equal(session.findClickAttempted, undefined);
+  });
+  await withSession(async (session, calls) => {
+    await session.prepare();
+    await session.page.evaluate(() => fetch('/event/1234567890/api/reserve', { method: 'POST' }));
+    await assert.rejects(session.resumePreparation(), /native_form_changed/);
+    assert.equal(calls(), 1);
+  });
+});
+
+test('resume is forbidden after a dispatched attempt and does not clear its one-shot latch', { skip: !enabled }, async () => {
+  await withSession(async (session, calls) => {
+    const prepared = await session.prepare();
+    await session.commit({ attempt_id: 'spent_resume', dispatch_token: 'spent_resume', preflight_id: prepared.preflight.preflight_id });
+    await assert.rejects(session.resumePreparation(), /invalid_state/);
+    assert.equal(calls(), 1);
+    assert.equal(session.spent, true);
+  });
+});
+
+test('a manual Find racing the authorized click reaches the native handler only once', { skip: !enabled }, async () => {
+  await withSession(async (session, calls) => {
+    const prepared = await session.prepare();
+    const findHandle = session.driver.findHandle.bind(session.driver);
+    session.driver.findHandle = async () => {
+      const handle = await findHandle(), click = handle.click.bind(handle);
+      handle.click = async options => {
+        await session.page.locator('[data-testid="findTicketsBtn"]').click();
+        return click(options);
+      };
+      return handle;
+    };
+    const result = await session.commit({ attempt_id: 'manual_race', dispatch_token: 'manual_race', preflight_id: prepared.preflight.preflight_id });
+    assert.equal(result.outcome.kind, 'uncertain');
+    assert.equal(calls(), 1);
+    assert.equal(await session.page.locator('body').getAttribute('data-reserve-clicks'), '1');
+    await session.page.locator('[data-testid="findTicketsBtn"]').click();
+    assert.equal(calls(), 1, 'The consumed permit blocks all later Find activations');
+  });
+});
+
+test('manual ticket changes between the verified seal, arm, and click never dispatch', { skip: !enabled }, async () => {
+  for (const timing of ['before_arm', 'after_arm', 'reverted_control_change']) await withSession(async (session, calls) => {
+    const prepared = await session.prepare();
+    const findHandle = session.driver.findHandle.bind(session.driver);
+    session.driver.findHandle = async () => {
+      const handle = await findHandle(), click = handle.click.bind(handle);
+      const mutate = () => session.page.locator('#row-2 [role="spinbutton"]').evaluate(node => node.setAttribute('aria-valuenow', '1'));
+      if (timing === 'reverted_control_change') {
+        await session.page.locator('#row-2 [data-direction="minus"]').click();
+        await session.page.locator('#row-2 [data-direction="plus"]').click();
+      } else if (timing === 'before_arm') await mutate();
+      else handle.click = async options => { await mutate(); return click(options); };
+      return handle;
+    };
+    const result = await session.commit({ attempt_id: timing, dispatch_token: timing, preflight_id: prepared.preflight.preflight_id });
+    assert.equal(result.outcome.kind, 'uncertain');
+    assert.equal(calls(), 0, timing);
+  });
+});
+
+test('private diagnostics redact cloned form values and omit identity documents and unrelated response bodies', { skip: !enabled }, async () => {
+  await withSession(async (session, calls, dir) => {
+    const prepared = await session.prepare();
+    await session.commit({ attempt_id: 'privacy', dispatch_token: 'privacy', preflight_id: prepared.preflight.preflight_id });
+    const marker = 'synthetic-user-private-value';
+    await session.page.evaluate(marker => {
+      const box = document.createElement('div');
+      box.innerHTML = '<input value="'+marker+'"><textarea>'+marker+'</textarea><div contenteditable="true">'+marker+'</div><span data-private="'+marker+'">Receipt</span><script type="application/json">{"private":"'+marker+'"}</script>';
+      document.body.append(box);
+    }, marker);
+    await session.observe({ attempt_id: 'privacy' });
+    assert.equal(await session.page.locator('input:not([type])').inputValue(), marker, 'Sanitizer never edits the live form');
+    await session.context.route('https://checkout.ticketmaster.cz/account', route => route.fulfill({ status: 200,
+      contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ private: marker }) }));
+    await session.context.route('https://checkout.prod.ticketmaster.cz/graphql', route => route.fulfill({ status: 200,
+      contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ private: marker }) }));
+    await session.context.route('**/event/1234567890/api/reserve_ism', route => route.fulfill({ status: 200,
+      contentType: 'text/html', body: '<input value="'+marker+'">' }));
+    await session.page.evaluate(async () => {
+      await fetch('https://checkout.ticketmaster.cz/account');
+      await fetch('https://checkout.prod.ticketmaster.cz/graphql', { method: 'POST', body: JSON.stringify({ operationName: 'GCOReserve', query: 'query GCOReserve { account { payment } }', variables: {} }) });
+      await fetch('/event/1234567890/api/reserve_ism', { method: 'POST' });
+    });
+    await session.observe({ attempt_id: 'privacy' });
+    session.checkoutNavigationPolicy = url => new URL(url).hostname === 'identity.ticketmaster.cz';
+    await session.context.route('https://identity.ticketmaster.cz/sign-in', route => route.fulfill({ status: 200,
+      contentType: 'text/html', body: '<html><body>Identity '+marker+'<input type="password" value="'+marker+'"></body></html>' }));
+    await session.page.goto('https://identity.ticketmaster.cz/sign-in');
+    const observed = await session.observe({ attempt_id: 'privacy' });
+    assert.equal(observed.manual_intervention, 'authentication_required');
+    const sessionDir = path.join(dir, prepared.preflight.session_id);
+    const records = await Promise.all((await fs.readdir(sessionDir)).map(name => fs.readFile(path.join(sessionDir, name), 'utf8')));
+    assert.equal(records.join('\n').includes(marker), false);
+    assert.equal(records.join('\n').includes('Identity '), false);
+    assert.equal(calls(), 1);
+  });
+});
+
+test('preparation failure evidence also removes values typed during a manual pause', { skip: !enabled }, async () => {
+  await withSession(async (session, calls, dir) => {
+    await assert.rejects(session.prepare(), /needs_human/);
+    await session.page.evaluate(() => {
+      const input = document.createElement('textarea');
+      input.textContent = 'private-pause-marker';
+      document.body.append(input);
+    });
+    await assert.rejects(session.resumePreparation(), /needs_human/);
+    const sessionDir = path.join(dir, session.sessionId);
+    const records = await Promise.all((await fs.readdir(sessionDir)).map(name => fs.readFile(path.join(sessionDir, name), 'utf8')));
+    assert.equal(records.join('\n').includes('private-pause-marker'), false);
+    assert.equal(await session.page.locator('textarea').inputValue(), 'private-pause-marker');
+    assert.equal(calls(), 0);
+  }, { initialChallenge: true });
 });

@@ -66,6 +66,12 @@ period (120 seconds by default, up to 1,800). Ctrl+C during this observation end
 the wait. Browser closure does not release a provider hold or unlock the attempt.
 The final output reports the durable state and whether browser closure succeeded.
 
+For manual verification and cart review on the computer running the browser, use
+the new [`--operator --headed` mode](cart-operator.md). It keeps the same browser
+under terminal control for a bounded window. `resume` before dispatch rechecks
+the current page; after dispatch it only observes. Recovery reports and cleanup
+of never-dispatched attempts are also described in that guide.
+
 ```bash
 ./target/release/ticket-watch cart-journal --file data/cart-attempts.sqlite
 ./target/release/ticket-watch cart-journal --file data/cart-attempts.sqlite \
@@ -103,7 +109,7 @@ Console and journal outputs use application correlation IDs and public event
 identities, rather than raw checkout URLs or provider cart identifiers.
 
 Automatic monitoring-to-cart dispatch, authenticated receipt extraction, usable
-customer cart handoff and verified Discord hold notifications remain unfinished.
+remote customer cart handoff and verified Discord hold notifications remain unfinished.
 No exact-second availability or reservation latency guarantee is implied by this
 command.
 

@@ -22,10 +22,16 @@ or queue bypass is implemented.
   Enter triggers a fresh check of the event URL, response status and visible text.
   Acknowledgement alone cannot clear the pause. Three unsuccessful prompts, an
   unsafe navigation, cancellation, or the overall session timeout stop capture.
+- **Native cart operator:** `cart-attempt --operator --headed --execute` retains
+  one local browser while you clear recognized verification. Terminal `resume`
+  rechecks the actual document and controls before continuing the single authorized
+  attempt. After dispatch, commands only observe or close. Partial selections,
+  changed established bindings and foreign reservation actions stop automation.
+  See [operator and recovery commands](cart-operator.md).
 - **Notifications:** the monitor's diagnostic/status detail records the fixed
   reason. Challenge-specific Discord/Android notifications and a remote browser
   handoff are not connected yet. Background pages still close after each check;
-  only interactive capture retains its page while waiting for you.
+  interactive capture and native operator mode retain their own separate pages.
 
 Run the interactive capture on a graphical desktop:
 
@@ -72,7 +78,8 @@ watches keep running.
 
 ## Future cart integration
 
-Automatic carting is not implemented. A cart flow can use this boundary before
+The native command can submit one journaled search; automatic monitoring-to-cart
+dispatch and verified cart receipts remain unfinished. A cart flow can use this boundary before
 selection and after any verification interruption, but must re-read current offers
 and prices after the pause. It must verify the selected quantity, adjacency,
 currency and fees, then confirm any actual hold and expiry in that same session.

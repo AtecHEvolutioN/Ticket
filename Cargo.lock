@@ -1703,6 +1703,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "libc",
  "reqwest",
  "rusqlite",
  "scraper",

@@ -1,6 +1,73 @@
 use std::process::Command;
 
 #[test]
+fn operator_mode_requires_a_local_terminal_and_compatible_flags_before_creating_state() {
+    let directory = tempfile::tempdir().unwrap();
+    let base = [
+        "cart-attempt",
+        "--execute",
+        "--url",
+        "https://www.ticketmaster.cz/event/synthetic/1234567890",
+        "--event-start",
+        "2027-01-02T19:00:00+01:00",
+        "--category-id",
+        "2",
+        "--price-id",
+        "6",
+        "--unit-price-minor",
+        "188900",
+        "--attempt-id",
+        "operator-test",
+    ];
+    for (extra, expected) in [
+        (vec!["--operator", "--headed"], "interactive terminal"),
+        (vec!["--operator"], "--headed"),
+        (vec!["--operator-timeout-secs", "60"], "--operator"),
+        (
+            vec!["--operator", "--headed", "--observe-secs", "30"],
+            "cannot be used",
+        ),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+            .current_dir(directory.path())
+            .args(base)
+            .args(extra)
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(expected),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!directory.path().join("data").exists());
+    }
+}
+
+#[test]
+fn recovery_commands_never_create_a_missing_journal_or_monitor_configuration() {
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("missing.sqlite");
+    for command in ["cart-recovery", "cart-abandon-prepared"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+            .current_dir(directory.path())
+            .args([
+                command,
+                "--file",
+                file.to_str().unwrap(),
+                "--attempt-id",
+                "missing-attempt",
+            ])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(!file.exists());
+        assert!(!directory.path().join("data").exists());
+    }
+}
+
+#[test]
 fn native_attempt_requires_execution_flag_and_validates_preferences_before_state() {
     let directory = tempfile::tempdir().unwrap();
     let mut args = vec![
@@ -121,6 +188,43 @@ fn native_attempt_restart_never_opens_another_browser_for_an_unresolved_event() 
             .unwrap()
             .len(),
         1
+    );
+    let before = ticket_watch::cart_journal::inspect_file(&journal_path).unwrap();
+    let recovery = Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+        .current_dir(directory.path())
+        .args([
+            "cart-recovery",
+            "--file",
+            journal_path.to_str().unwrap(),
+            "--attempt-id",
+            "existing-1",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        recovery.status.success(),
+        "{}",
+        String::from_utf8_lossy(&recovery.stderr)
+    );
+    let recovery: serde_json::Value = serde_json::from_slice(&recovery.stdout).unwrap();
+    assert_eq!(recovery["retry_authorized"], false);
+    assert_eq!(recovery["attempts"][0]["attempt_retains_event_lock"], true);
+    assert_eq!(recovery["attempts"][0]["browser_session"], "unknown");
+    let abandon = Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+        .current_dir(directory.path())
+        .args([
+            "cart-abandon-prepared",
+            "--file",
+            journal_path.to_str().unwrap(),
+            "--attempt-id",
+            "existing-1",
+        ])
+        .output()
+        .unwrap();
+    assert!(!abandon.status.success());
+    assert_eq!(
+        ticket_watch::cart_journal::inspect_file(&journal_path).unwrap(),
+        before
     );
 }
 
