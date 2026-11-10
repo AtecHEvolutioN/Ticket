@@ -42,19 +42,24 @@ async function inspect(page) {
 }
 
 /** Prepare a public event's ticket display, within the caller's remaining budget. */
-async function prepareTicketmaster(page, target, budgetMs) {
+async function prepareTicketmaster(page, target, budgetMs, assertCurrent = async () => {}) {
   if (!Number.isFinite(budgetMs) || budgetMs < 1) return { state: 'render_timeout', opened: false };
   const deadline = performance.now() + Math.min(budgetMs, 10000);
   const remaining = () => Math.max(0, Math.floor(deadline - performance.now()));
   const guard = () => { if (!sameEvent(target, page.url())) throw new Error('unsafe_redirect'); };
   guard();
+  await assertCurrent();
   let state = await inspect(page);
+  await assertCurrent();
   if (challengeText(state.text)) return { state: 'blocked', opened: false };
   if (state.rejectId && remaining() > 0) {
+    await assertCurrent();
     try { await page.locator(`#${state.rejectId}`).click({ timeout: Math.max(1, Math.min(1500, remaining())) }); }
     catch { return { state: 'consent_blocked', opened: false }; }
     guard();
+    await assertCurrent();
     state = await inspect(page);
+    await assertCurrent();
     if (challengeText(state.text)) return { state: 'blocked', opened: false };
   }
   // Hydration can reveal a known display tab after DOMContentLoaded. A brief
@@ -64,6 +69,7 @@ async function prepareTicketmaster(page, target, budgetMs) {
     && performance.now() < readinessDeadline) {
     await page.waitForTimeout(Math.min(100, Math.max(0, readinessDeadline - performance.now())));
     guard();
+    await assertCurrent();
     state = await inspect(page);
     if (challengeText(state.text)) return { state: 'blocked', opened: false };
   }
@@ -75,16 +81,19 @@ async function prepareTicketmaster(page, target, budgetMs) {
   // Re-match the exact recognized display label so a DOM insertion cannot shift an
   // index onto another control. A duplicate match fails closed under strict click.
   try {
+    await assertCurrent();
     const words = state.bestLabel.split(' ').map(word => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
     const exact = new RegExp(`^\\s*${words.join('\\s+')}\\s*$`);
     await page.locator('button:visible:not(:disabled):not([aria-disabled="true"]),[role="tab"]:visible:not([aria-disabled="true"])')
       .filter({ hasText: exact }).click({ timeout: Math.max(1, Math.min(2000, remaining())) });
   } catch { return { state: 'view_control_blocked', opened: false }; }
   guard();
+  await assertCurrent({ afterDisplayAction: true });
   // The view may fetch asynchronously. Stop on a challenge, and do not resubmit a search.
   while (remaining() > 0) {
     state = await inspect(page);
     guard();
+    await assertCurrent();
     if (challengeText(state.text)) return { state: 'blocked', opened: true };
     if (state.regional) return { state: 'regional', opened: true };
     if (state.listings) return { state: 'listings', opened: true };

@@ -98,6 +98,12 @@ The seating price filter displayed five choices (two at the same price):
 Opening a native filter changes the document's UI/fragment state; a future runner
 must close it and revalidate the event before interpreting results.
 
+The reusable [native controls command](cart-controls.md) now performs this demo
+with networking disabled and restores zero quantity afterward. It validates both
+native filter panels without activating Find tickets or selecting a filter. Its
+isolated browser context closes when the command finishes; the output does not
+configure a live purchase.
+
 The [sanitized evidence](evidence/czech-cart-controls-2026-11-09.json) records
 the successful offline UI inspection and three saved-capture catalog checks.
 Raw HTML and session data remain private. Earlier headed access evidence is in
@@ -128,6 +134,9 @@ routes; the existing monitor's public-event policy remains in place. The
 [durable attempt journal](cart-journal.md) now supplies separate storage, a
 dispatch marker, idempotent outcomes and restart reconciliation. It is not yet
 connected to a native cart adapter and does not authenticate supplied receipts.
+The journal's `native_search` workflow now records requested filters before a
+search that may reserve, keeping later seat/price/ranking evidence separate.
+Recorded uncertain outcomes remain locked pending a separate reconciliation flow.
 The planner and journal now bind supplied performance instants. Native extraction
 and authentication of the receipt's date and other claims remain to be implemented.
 Session ownership and manual pauses must not stall checks for unrelated watched

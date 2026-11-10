@@ -13,7 +13,7 @@ Inspect an existing journal without creating or modifying it:
 The Rust API is `cart_journal::CartJournal`. Its database is separate from both
 inventory alerts and map observations. Unrelated database files are rejected.
 
-## Required sequence for the future adapter
+## Reserving a fully quoted group
 
 1. Call `begin` with an application-generated attempt ID and a fresh
    `CartPlanRequest`. The journal recomputes the planner decision. It requires an
@@ -47,21 +47,57 @@ dates permit only provisional offline diagnostics. New receipts must supply
 `context.event_start` matching both dates in the persisted plan.
 
 All of this validates **caller-supplied evidence**, not its authenticity. Reports
-keep `reservation_authorized=false` and `date_verified=false`, while
+keep `reservation_authorized=false`, `source_authenticated=false` and `date_verified=false`, while
 `event_start_claims_match` reports consistency of the supplied date claims. A
 native receipt parser is still required before connecting the journal to real
 cart actions.
 
-Version 1 journals migrate to version 2 without rewriting historical evidence.
+Version 1 and 2 journals migrate to version 3 without rewriting historical evidence.
 Undated prepared attempts may be abandoned but cannot dispatch. Existing confirmed
 holds may expire by their recorded expiry. Undated uncertain attempts stay
 blocked; the migration does not invent an expected date or unlock another attempt.
 
+## A native search that may reserve
+
 The Czech [Find tickets flow](czech-reservation-flow.md) can search and reserve in
-one action. This journal currently admits a fully quoted group before dispatch;
-it cannot use a quote obtained after a hold as evidence for the earlier action.
-A native adapter must establish an appropriate request-intent stage before that
-button or obtain a verified group through a separate non-reserving source.
+one action. The journal now has a separate `native_search` workflow for this
+sequence; it does not invent a complete quote before the site returns one.
+
+1. `begin_search` records a `NativeSearchRequest`: explicit quantity, matching
+   expected/source event starts, application session/document/configuration IDs,
+   selected category and exact configured price filter, CZK currency and optional
+   total ceiling. Both adjacent and cheapest requirements must be enabled.
+   Configuration freshness is capped at five seconds. The configured unit price
+   is a reference, not proof of stock, complete fees or the cheapest available group.
+2. Commit `mark_search_dispatch_started` before Find tickets. The quoted and native
+   workflows share the same event lock, so they cannot start competing holds.
+   Only the first committed dispatch reports `newly_started=true`.
+3. Supply the observed `NativeSearchOutcome` to `record_search_outcome`. The source
+   form document and the outcome document have separate IDs because the native
+   flow may navigate. Both remain bound to the same application session, attempt
+   and configuration.
+4. A matching hold must have the requested seats/quantity, affirmative adjacency,
+   exact filters, complete total and an actual expiry. Classifying it as cheapest
+   also requires complete **post-action** ranking evidence. The existing planner
+   reevaluates that snapshot and its exact winning group. This never becomes a
+   reconstructed pre-action quote.
+
+Missing or mismatched claims are retained with explicit review reasons under
+`needs_reconciliation`. Private checkout URLs are discarded instead of persisted
+as event URLs. A valid matching hold with only unproven cheapest ranking can expire
+at its confirmed deadline. A mismatched or unknown hold cannot release the event
+using an unverified timer. An explicit terminal no-hold result can release a new
+attempt only when its bindings and finality checks pass.
+
+An outcome is immutable apart from exact idempotent replay. A recorded uncertain
+or mismatched outcome cannot be overwritten with a generic no-hold claim; a
+separate native reconciliation flow is still needed for those cases. An empty
+cart, timeout, selection counter or expired configuration never proves release.
+
+Inspection JSON includes `workflow`; native bindings appear under
+`binding.request`. Old quoted binding fields retain their previous JSON shape.
+Both workflows validate caller-supplied claims only. Neither is connected to a
+live browser submission or an authenticated native receipt parser yet.
 
 Use application correlation IDs or digests in journal records. Do not supply
 cookies, authentication tokens, checkout URLs or private cart identifiers.

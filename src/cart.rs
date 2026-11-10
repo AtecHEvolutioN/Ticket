@@ -21,7 +21,7 @@ pub const MAX_QUOTE_AGE_MS: i64 = 5_000;
 /// Preserve exact integer values when exchanging decisions with a JS runner.
 pub const MAX_EXACT_INTEGER: u64 = 9_007_199_254_740_991;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct CartPlanRequest {
     pub intent: CartIntent,
@@ -29,7 +29,7 @@ pub struct CartPlanRequest {
     pub snapshot: QuoteSnapshot,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct CartIntent {
     pub event_url: String,
@@ -45,7 +45,7 @@ pub struct CartIntent {
     pub max_total_minor: Option<u64>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct BrowserContext {
     /// Application-generated correlation IDs, never cookies or authentication.
@@ -53,7 +53,7 @@ pub struct BrowserContext {
     pub document_id: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct QuoteSnapshot {
     pub event_url: String,
@@ -81,7 +81,7 @@ pub enum Coverage {
     Partial,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct GroupQuote {
     pub id: String,
@@ -110,7 +110,7 @@ pub struct SeatIdentity {
     pub label: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct GroupPrice {
     #[serde(default)]

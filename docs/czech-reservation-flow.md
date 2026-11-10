@@ -55,10 +55,13 @@ the cheapest configured category or first successful reservation cannot prove th
 cheapest available adjacent group. Exhaustive search coverage also remains
 unverified; do not create multiple holds to manufacture that evidence.
 
-The next non-reserving browser step can inspect **quantity-dependent native
-filters**, extending the existing catalog: bind a readable event document, disable
-networking before an explicitly labeled demo form change, inspect the labeled
-checkboxes in `panelPriceSection`, then close it using `panelClose`/`panelBack` and
-revalidate the visible form. Escape did not close the saved panel. This adds native
-control-state evidence to the initial catalog without submitting Find tickets,
-selecting seats or activating resale rows. Its result remains configuration only.
+The [native controls inspector](cart-controls.md) now implements the non-reserving
+quantity/filter step: bind a readable event document, disable networking before a
+demo form change, inspect the labeled checkboxes in `panelPriceSection`, close it
+with `panelClose`/`panelBack` and restore zero selection. Escape did not close the
+earlier saved panel. Its result remains configuration only.
+
+The [journal's native-search workflow](cart-journal.md#a-native-search-that-may-reserve)
+can now persist the requested quantity and filters before Find tickets without
+pretending that the later quote already existed. Actual submission, native
+receipt extraction and unresolved-outcome reconciliation remain unconnected.

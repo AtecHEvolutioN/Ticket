@@ -727,6 +727,79 @@ fn new_status_commands_do_not_create_missing_databases() {
 }
 
 #[test]
+fn cart_controls_cli_requires_explicit_demo_and_never_creates_cart_state() {
+    let directory = tempfile::tempdir().unwrap();
+    let url = "https://www.ticketmaster.cz/event/synthetic-vstupenky/1234567890";
+    for extra in [
+        vec![],
+        vec!["--demo-quantity", "0"],
+        vec!["--demo-quantity", "21"],
+        vec!["--demo-quantity", "2", "--html", "offline.html"],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+            .current_dir(directory.path())
+            .args(["cart-controls", "--url", url, "--category-id", "2"])
+            .args(extra)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+    }
+    std::fs::create_dir(directory.path().join("browser")).unwrap();
+    std::fs::write(
+        directory.path().join("page.html"),
+        include_str!("fixtures/cart-catalog-cz.html"),
+    )
+    .unwrap();
+    std::fs::write(directory.path().join("browser/worker.cjs"),r#"
+        const fs=require('node:fs');
+        require('node:readline').createInterface({input:process.stdin}).on('line',line=>{
+            const r=JSON.parse(line),now=Date.now();
+            if(r.display!=='cart_controls'||r.adapter!=='ticketmaster'||r.cart_category_id!=='2'||r.cart_demo_quantity!==2||r.map_section_id!==undefined){
+                process.stdout.write(JSON.stringify({id:r.id,error:'invalid_request'})+'\n');return;
+            }
+            const controls={event_url:r.url,event_id:'1234567890',category_id:'2',category_title:'Sezení',demo_quantity:2,
+                initial_quantity:0,final_quantity:0,started_at_ms:now-100,finished_at_ms:now,
+                network_disabled_before_changes:true,form_restored:true,
+                panels:[{kind:'price',heading:'Ceny',opened:true,disabled:false,options:[{checkbox_id:'price-1',label:'1 889,00 Kč',checked:false,disabled:false}]},
+                    {kind:'section',heading:'Všechny sekce',opened:false,disabled:true,options:[]}],
+                stock_verified:false,adjacency_verified:false,fees_complete:false,hold_verified:false,reservation_attempted:false};
+            process.stdout.write(JSON.stringify({id:r.id,status:200,final_url:r.url,adapter_state:'ready',elapsed_ms:100,
+                html:fs.readFileSync('page.html','utf8'),cart_controls:controls})+'\n');
+        });
+    "#).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+        .current_dir(directory.path())
+        .env_remove("TICKETMASTER_API_KEY")
+        .env_remove("DISCORD_BOT_TOKEN")
+        .args([
+            "--config",
+            "missing.toml",
+            "cart-controls",
+            "--url",
+            url,
+            "--category-id",
+            "2",
+            "--demo-quantity",
+            "2",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let output: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(output["source"], "live_browser_offline_form_demo");
+    assert_eq!(output["report"]["controls"]["demo_quantity"], 2);
+    assert_eq!(output["report"]["catalog"]["current_selected_count"], 0);
+    assert_eq!(output["report"]["purchase_quantity_configured"], false);
+    assert_eq!(output["report"]["reservation_authorized"], false);
+    assert!(!directory.path().join("data").exists());
+}
+
+#[test]
 fn map_run_cli_previews_then_respects_restart_pacing_and_disabled_watches() {
     let directory = tempfile::tempdir().unwrap();
     let svg =

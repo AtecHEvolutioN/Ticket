@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { validateUrl, validateRequest, retryAfter, identificationRetryAllowed, proxyOptions, capture } = require('./worker.cjs');
+const { validateUrl, validateRequest, retryAfter, identificationRetryAllowed, proxyOptions, capture, captureCartControls } = require('./worker.cjs');
 const { captureRendered, sameEvent, challengeText } = require('./rendered.cjs');
 const { EventEmitter } = require('node:events');
 
@@ -76,6 +76,39 @@ test('automatic seat scans are bounded and cannot combine with an explicit seat 
     { map_seat_id: 'seat-1' }, { display: undefined }]) {
     assert.throws(() => validateRequest({ ...request, ...change }), /invalid_request/);
   }
+});
+
+test('cart control demonstration requires an exclusive bounded Czech target before browser creation', async () => {
+  const request = { id:1,url:'https://www.ticketmaster.cz/event/synthetic/12345678',
+    timeout_ms:45000,max_body_bytes:4096,render_wait_ms:0,adapter:'ticketmaster',
+    display:'cart_controls',cart_category_id:'00000000-0000-0000-0000-000000000000',cart_demo_quantity:2 };
+  assert.doesNotThrow(() => validateRequest(request));
+  const browser = { newContext() { throw new Error('must reject before creating a context'); } };
+  for (const change of [
+    { display:undefined }, {display:'map'}, {adapter:'selectors'},
+    {url:'https://www.ticketmaster.pl/event/synthetic/12345678'},
+    {url:'https://www.ticketmaster.cz/artist/12345678'},
+    {cart_category_id:undefined}, {cart_category_id:null}, {cart_category_id:''},
+    {cart_category_id:'a'.repeat(129)}, {cart_category_id:'category] *'},
+    {cart_demo_quantity:undefined}, {cart_demo_quantity:null}, {cart_demo_quantity:0},
+    {cart_demo_quantity:21}, {cart_demo_quantity:1.5}, {cart_demo_quantity:'2'},
+    {map_section_id:'s_1'}, {map_seat_id:'seat-2'}, {map_scan_limit:20},
+  ]) {
+    assert.throws(() => validateRequest({...request,...change}), /invalid_request/);
+    await assert.rejects(captureCartControls(browser,{...request,...change}), /invalid_request/);
+  }
+  await assert.rejects(capture({}, request), /invalid_request/);
+});
+
+test('cart context is closed if websocket fencing is unsupported', async () => {
+  let closed = false, created;
+  const browser = { async newContext(options) { created=options;
+    return {off(){},async close(){closed=true;},newPage(){throw new Error('must not navigate');}}; } };
+  await assert.rejects(captureCartControls(browser, {id:1,url:'https://www.ticketmaster.cz/event/synthetic/12345678',
+    timeout_ms:1000,max_body_bytes:1024,render_wait_ms:0,adapter:'ticketmaster',
+    display:'cart_controls',cart_category_id:'category-1',cart_demo_quantity:1}), /navigation_failed/);
+  assert.deepEqual(created,{serviceWorkers:'block'});
+  assert.equal(closed,true);
 });
 
 test('event identity binds region and event ID rather than page slug', () => {

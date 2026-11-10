@@ -8,6 +8,8 @@ const { prepareTicketmaster } = require('./ticketmaster.cjs');
 const { prepareTicketmasterMap } = require('./ticketmaster-map.cjs');
 const { inspectTicketmasterSection, assertSectionInspectionCurrent,
   scanTicketmasterSection, assertSectionScanCurrent } = require('./ticketmaster-section.cjs');
+const { inspectTicketmasterCartControls, assertCartControlsCurrent,
+  releaseCartControlsInspection } = require('./ticketmaster-cart-controls.cjs');
 const { inspectChallenge, responseIntervention } = require('./manual-intervention.cjs');
 const { observeDocuments } = require('./document-lifecycle.cjs');
 const ALLOWED_DOMAINS = new Set([
@@ -68,7 +70,8 @@ function validateRequest(request) {
     throw new Error('invalid_request');
   }
   if (request.adapter !== undefined && !['ticketmaster', 'selectors'].includes(request.adapter)) throw new Error('invalid_request');
-  if (request.display !== undefined && (request.display !== 'map' || request.adapter !== 'ticketmaster')) throw new Error('invalid_request');
+  if (request.display !== undefined && (!['map', 'cart_controls'].includes(request.display)
+      || request.adapter !== 'ticketmaster')) throw new Error('invalid_request');
   if (request.adapter === 'ticketmaster' && !sameEvent(request.url, request.url)) throw new Error('invalid_request');
   const url = validateUrl(request.url);
   const identifier = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
@@ -78,11 +81,92 @@ function validateRequest(request) {
   if (request.map_scan_limit !== undefined && (request.map_section_id === undefined
       || request.map_seat_id !== undefined || !Number.isInteger(request.map_scan_limit)
       || request.map_scan_limit < 1 || request.map_scan_limit > 50)) throw new Error('invalid_request');
+  if (request.display === 'cart_controls') {
+    if (url.hostname.replace(/^www\./, '') !== 'ticketmaster.cz'
+        || !identifier(request.cart_category_id) || !Number.isInteger(request.cart_demo_quantity)
+        || request.cart_demo_quantity < 1 || request.cart_demo_quantity > 20
+        || request.map_section_id !== undefined || request.map_seat_id !== undefined
+        || request.map_scan_limit !== undefined) throw new Error('invalid_request');
+  } else if (request.cart_category_id !== undefined || request.cart_demo_quantity !== undefined) {
+    throw new Error('invalid_request');
+  }
   return url;
 }
 
-async function capture(context, request) {
+// Quantity/filter demonstrations never share cookies, pages or in-flight traffic
+// with the ordinary monitor. WebSocket server connections are blocked before any
+// document exists; HTTP routes and offline emulation are fenced before mutation.
+async function captureCartControls(browser, request) {
+  validateRequest(request);
+  if (request.display !== 'cart_controls') throw new Error('invalid_request');
+  const context = await browser.newContext({ serviceWorkers: 'block' });
+  let primaryPage;
+  let unsafePage = false;
+  let fenced = false;
+  let drained = false;
+  let closed = false;
+  const active = new Set();
+  const began = outgoing => { if (!fenced) active.add(outgoing); };
+  const ended = outgoing => active.delete(outgoing);
+  const onPage = page => {
+    if (!primaryPage) primaryPage = page;
+    else { unsafePage = true; void page.close().catch(() => {}); }
+  };
+  try {
+    if (typeof context.routeWebSocket !== 'function') throw new Error('navigation_failed');
+    await context.routeWebSocket('**/*', socket => socket.close());
+    context.on('page', onPage);
+    context.on('request', began);
+    context.on('requestfinished', ended);
+    context.on('requestfailed', ended);
+    await context.route('**/*', route => {
+      const outgoing = route.request();
+      if (outgoing.isNavigationRequest()) {
+        let owner;
+        try { owner = outgoing.frame().page(); } catch { /* Unbound navigation is unsafe. */ }
+        if (owner !== primaryPage) {
+          unsafePage = true;
+          return route.abort('blockedbyclient');
+        }
+      }
+      return route.fallback();
+    });
+    const isolation = {
+      assertCurrent() { if (unsafePage || closed) throw new Error('navigation_failed'); },
+      assertNetworkDisabled: async () => fenced && drained && !unsafePage && !closed,
+      async fence(page, budgetMs) {
+        this.assertCurrent();
+        if (!(budgetMs > 0) || page !== primaryPage) throw new Error('navigation_failed');
+        await context.route('**/*', route => route.abort('blockedbyclient'));
+        await context.setOffline(true);
+        fenced = true;
+        // Terminate remaining initial-load traffic. New attempted requests are
+        // already rejected and must not be confused with pre-fence connections.
+        await page.evaluate(() => window.stop());
+        const until = performance.now() + Math.min(2000, budgetMs);
+        while (active.size && performance.now() < until) {
+          await new Promise(resolve => setTimeout(resolve, 10));
+          this.assertCurrent();
+        }
+        if (active.size) throw new Error('navigation_failed');
+        drained = true;
+        this.assertCurrent();
+      },
+    };
+    return await capture(context, request, isolation);
+  } finally {
+    closed = true;
+    context.off('page', onPage);
+    context.off('request', began);
+    context.off('requestfinished', ended);
+    context.off('requestfailed', ended);
+    await context.close().catch(() => {});
+  }
+}
+
+async function capture(context, request, cartIsolation) {
   const target = validateRequest(request);
+  if (request.display === 'cart_controls' && !cartIsolation) throw new Error('invalid_request');
   const started = performance.now();
   const page = await context.newPage();
   page.setDefaultTimeout?.(request.timeout_ms);
@@ -155,7 +239,7 @@ async function capture(context, request) {
       // Section scans already allow a longer initial page load. A successful
       // normal identification navigation may take more than five seconds; this
       // passive grace remains inside the original request deadline and cooldown.
-      const identificationGrace = request.map_scan_limit !== undefined ? 15000 : 5000;
+      const identificationGrace = request.map_scan_limit !== undefined || request.display === 'cart_controls' ? 15000 : 5000;
       snapshot = await documents.waitForIdentification(Math.min(identificationGrace, Math.max(0, remaining() - 5)), identification, validateDocument);
       identificationPending = false;
       if (identification(snapshot)) return incompleteIdentification();
@@ -173,8 +257,10 @@ async function capture(context, request) {
     let adapterReason;
     let mapInspection;
     let mapScan;
+    let cartControls;
     let manualIntervention = responseIntervention(status, headers);
     const guard = async () => {
+      cartIsolation?.assertCurrent();
       await documents.synchronize();
       documents.assertCurrent(snapshot);
       validateDocument({ url: page.url() });
@@ -199,7 +285,37 @@ async function capture(context, request) {
           validateDocument({ url: page.url() });
           snapshot = current;
         };
-        const prepared = request.map_scan_limit !== undefined
+        const cartGuard = async ({ afterCartControlsAction = false, afterDisplayAction = false } = {}) => {
+          if (!afterCartControlsAction && !afterDisplayAction) return guard();
+          cartIsolation.assertCurrent();
+          await documents.synchronize();
+          const current = documents.current();
+          if (!current || current.loader !== snapshot.loader || current.status !== snapshot.status) {
+            throw new Error('navigation_failed');
+          }
+          // Rebind only around an inspected native display/quantity/panel action.
+          // The lifecycle observer forbids path/query/history and loader changes.
+          validateDocument(current);
+          validateDocument({ url: page.url() });
+          snapshot = current;
+        };
+        let prepared;
+        if (request.display === 'cart_controls') {
+          prepared = await prepareTicketmaster(page, target.href, remaining(), cartGuard);
+          await guard();
+          if (prepared.state === 'regional') {
+            await cartIsolation.fence(page, remaining());
+            await guard();
+            prepared = await inspectTicketmasterCartControls(page, target.href, {
+              categoryId: request.cart_category_id, quantity: request.cart_demo_quantity,
+              networkDisabled: true, assertNetworkDisabled: cartIsolation.assertNetworkDisabled,
+            }, remaining(), cartGuard);
+          }
+          // A recognizable listing without the requested controls is unsupported.
+          if (!prepared.state.startsWith('cart_controls_') && !['blocked', 'consent_blocked'].includes(prepared.state)) {
+            prepared = { ...prepared, state: 'cart_controls_unsupported' };
+          }
+        } else prepared = request.map_scan_limit !== undefined
           ? await scanTicketmasterSection(page, target.href,
             { sectionId: request.map_section_id, limit: request.map_scan_limit }, remaining(), mapGuard)
           : request.map_section_id !== undefined
@@ -211,10 +327,15 @@ async function capture(context, request) {
         await guard();
         if (prepared.state === 'section_ready') mapInspection = prepared.inspection;
         if (prepared.state === 'scan_ready') mapScan = prepared.scan;
+        if (prepared.state === 'cart_controls_ready') cartControls = prepared.inspection;
         adapterReason = prepared.state;
-        adapterState = ['regional', 'listings', 'map_svg', 'map_static', 'map_canvas', 'map_iframe', 'section_ready', 'scan_ready'].includes(prepared.state) ? 'ready'
-          : ['blocked', 'map_modal_blocked'].includes(prepared.state) ? 'blocked'
+        adapterState = ['regional', 'listings', 'map_svg', 'map_static', 'map_canvas', 'map_iframe', 'section_ready', 'scan_ready', 'cart_controls_ready'].includes(prepared.state) ? 'ready'
+          : ['blocked', 'map_modal_blocked', 'cart_controls_modal_blocked'].includes(prepared.state) ? 'blocked'
             : prepared.state === 'no_visible_offers' ? 'no_offers' : 'unsupported';
+      }
+      if (cartControls) {
+        await assertCartControlsCurrent(page, target.href, cartControls);
+        await guard();
       }
       html = await captureRendered(page, request.max_body_bytes);
       await guard();
@@ -226,6 +347,10 @@ async function capture(context, request) {
         await assertSectionScanCurrent(page, target.href, mapScan);
         await guard();
       }
+      if (cartControls) {
+        await assertCartControlsCurrent(page, target.href, cartControls);
+        await guard();
+      }
       manualIntervention ||= await inspectChallenge(page);
       await guard();
     }
@@ -234,6 +359,7 @@ async function capture(context, request) {
       adapterReason = 'manual_intervention';
       mapInspection = undefined;
       mapScan = undefined;
+      cartControls = undefined;
     }
     const finalUrl = validateUrl(page.url());
     validateDocument({ url: finalUrl.href });
@@ -241,6 +367,7 @@ async function capture(context, request) {
       ...(adapterState ? { adapter_state: adapterState, adapter_reason: adapterReason } : {}),
       ...(mapInspection ? { map_inspection: mapInspection } : {}),
       ...(mapScan ? { map_scan: mapScan } : {}),
+      ...(cartControls ? { cart_controls: cartControls } : {}),
       ...(manualIntervention ? { manual_intervention: manualIntervention } : {}),
       retry_after_secs: retryAfter(headers['retry-after']), elapsed_ms: Math.round(performance.now() - started),
       server: headers.server?.slice(0, 120), content_type: headers['content-type']?.slice(0, 120) };
@@ -263,6 +390,7 @@ async function capture(context, request) {
   } finally {
     stopped = true;
     clearTimeout(deadlineTimer);
+    if (request.display === 'cart_controls') await releaseCartControlsInspection(page).catch(() => {});
     await documents?.close().catch(() => {});
     await page.close().catch(() => {});
   }
@@ -322,12 +450,13 @@ async function main() {
           return;
         }
       }
-      try { send(await capture(context, request)); }
+      try { send(await (request.display === 'cart_controls'
+        ? captureCartControls(browser, request) : capture(context, request))); }
       catch (error) { send({ id: request.id, error: error.message }); }
     }).catch(() => { send({ id: null, error: 'capture_failed' }); });
   });
   lines.once('close', () => { void requests.finally(close); });
 }
 
-module.exports = { validateUrl, validateRequest, retryAfter, identificationRetryAllowed, proxyOptions, capture };
+module.exports = { validateUrl, validateRequest, retryAfter, identificationRetryAllowed, proxyOptions, capture, captureCartControls };
 if (require.main === module) main().catch(() => { process.exitCode = 1; });

@@ -105,7 +105,11 @@ npm run browser:install
 npm test
 ```
 
-Use Node.js 20+. Set a watch or website profile's `mode = "browser"` when rendering is needed. The worker reuses one ordinary browser context and navigates directly to each selected event. With `adapter = "ticketmaster"`, it rejects a recognized nonessential-cookie banner and opens a known Polish, English, Czech, Spanish, or Dutch best-available display tab when needed. It never selects a ticket, changes quantity, submits Find tickets, or enters checkout. Set `[browser] headed = true` to use a graphical display. Queues, access blocks, unfamiliar layouts, and unsupported display labels remain explicit; there is no automatic retry using another browser identity.
+Use Node.js 20+. Set a watch or website profile's `mode = "browser"` when rendering is needed. The worker reuses one ordinary browser context and navigates directly to each selected event. With `adapter = "ticketmaster"`, it rejects a recognized nonessential-cookie banner and opens a known Polish, English, Czech, Spanish, or Dutch best-available display tab when needed. Monitoring does not select tickets, change quantity, submit Find tickets or enter checkout. Set `[browser] headed = true` to use a graphical display. Queues, access blocks, unfamiliar layouts, and unsupported display labels remain explicit; there is no automatic retry using another browser identity.
+
+The separate [cart-controls diagnostic](cart-controls.md) changes a demo quantity
+only after disabling networking in its own browser context. It reads the native
+filters, restores zero quantity and closes that context without submitting a search.
 
 For an installed Chromium, set `[browser].executable_path` to its absolute path or expose `CHROMIUM_PATH`; the configured path takes precedence. `browser.node` can be an absolute Node executable path. Browser dependencies and the worker script must be accessible to the service account.
 

@@ -1,0 +1,114 @@
+{
+  "verified_on": "2026-11-10",
+  "source": "live_browser_offline_form_demo",
+  "transport_binding": "observed_main_document",
+  "event_url": "https://www.ticketmaster.cz/event/korn-vstupenky/1472650657",
+  "event_name": "KoRn",
+  "configured_event_start": "2026-11-16T18:30:00Z",
+  "observed_at_utc": "2026-11-10T08:27:41.497000+00:00",
+  "page_capture_elapsed_ms": 10184,
+  "offline_controls_duration_ms": 3012,
+  "controls": {
+    "adjacency_verified": false,
+    "category_id": "2",
+    "category_title": "Sezení",
+    "demo_quantity": 2,
+    "event_id": "1472650657",
+    "event_url": "https://www.ticketmaster.cz/event/1472650657",
+    "fees_complete": false,
+    "final_quantity": 0,
+    "finished_at_ms": 1794299261497,
+    "form_restored": true,
+    "hold_verified": false,
+    "initial_quantity": 0,
+    "network_disabled_before_changes": true,
+    "panels": [
+      {
+        "disabled": false,
+        "heading": "Cena",
+        "kind": "price",
+        "opened": true,
+        "options": [
+          {
+            "checkbox_id": "_r_4_-input",
+            "checked": false,
+            "disabled": false,
+            "label": "2 361,00 Kč • Sezení 1. kategorie"
+          },
+          {
+            "checkbox_id": "_r_7_-input",
+            "checked": false,
+            "disabled": false,
+            "label": "2 243,00 Kč • Sezení 2. kategorie"
+          },
+          {
+            "checkbox_id": "_r_a_-input",
+            "checked": false,
+            "disabled": false,
+            "label": "2 125,00 Kč • Sezení 4. kategorie"
+          },
+          {
+            "checkbox_id": "_r_d_-input",
+            "checked": false,
+            "disabled": false,
+            "label": "2 125,00 Kč • Sezení 3. kategorie"
+          },
+          {
+            "checkbox_id": "_r_g_-input",
+            "checked": false,
+            "disabled": false,
+            "label": "1 889,00 Kč • Sezení 5. kategorie"
+          }
+        ]
+      },
+      {
+        "disabled": false,
+        "heading": "Sekce",
+        "kind": "section",
+        "opened": true,
+        "options": [
+          {
+            "checkbox_id": "_r_k_-input",
+            "checked": false,
+            "disabled": false,
+            "label": "1. POSCHODÍ"
+          },
+          {
+            "checkbox_id": "_r_n_-input",
+            "checked": false,
+            "disabled": false,
+            "label": "4. POSCHODÍ"
+          }
+        ]
+      }
+    ],
+    "reservation_attempted": false,
+    "started_at_ms": 1794299258485,
+    "stock_verified": false
+  },
+  "purchase_quantity_configured": false,
+  "reservation_authorized": false,
+  "diagnosed_layout_mismatch": {
+    "reason": "native title span includes a nested matching description button",
+    "diagnostic_stage": "form recognition before quantity changes",
+    "fix": "recognize the exact title/description shape; reject unrelated descriptions"
+  },
+  "verification": {
+    "rust_tests_passed": 343,
+    "browser_tests_passed": 96,
+    "browser_tests_skipped": 0,
+    "formatting": "passed",
+    "clippy": "passed",
+    "journal": "synthetic native-search, shared-event-lock, migration, duplicate-dispatch and post-action outcome tests",
+    "release_build": "passed"
+  },
+  "limitations": {
+    "search_submitted": false,
+    "tickets_selected": 0,
+    "tickets_reserved": 0,
+    "native_receipt_authenticated": false,
+    "cheapest_purchasable_group_verified": false,
+    "live_discord_message_sent": false,
+    "android_apk_changed": false
+  }
+}

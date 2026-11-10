@@ -54,6 +54,18 @@ enum Command {
         #[arg(long)]
         file: PathBuf,
     },
+    /// Inspect quantity-dependent Czech controls offline after loading the event; never reserves.
+    CartControls {
+        #[arg(long)]
+        url: String,
+        #[arg(long)]
+        category_id: String,
+        /// Local form demo only; this does not configure a purchase quantity.
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=20))]
+        demo_quantity: u32,
+        #[arg(long)]
+        headed: bool,
+    },
     /// Scan displayed resale prices in one Czech map section; never selects tickets.
     MapScan {
         #[arg(long)]
@@ -733,6 +745,7 @@ async fn main() -> Result<()> {
         | Command::Events { .. }
         | Command::Inspect { .. }
         | Command::CartCatalog { .. }
+        | Command::CartControls { .. }
         | Command::CartJournal { .. }
         | Command::CartPlan { .. } => Config::default(),
         Command::Venues { .. }
@@ -773,6 +786,46 @@ async fn main() -> Result<()> {
         }
         Command::CartJournal { file } => {
             print_json(&ticket_watch::cart_journal::inspect_file(&file)?)?;
+        }
+        Command::CartControls {
+            url,
+            category_id,
+            demo_quantity,
+            headed,
+        } => {
+            let mut config = config;
+            config.browser.headed = headed;
+            config.request_timeout_secs = 45;
+            let fetcher = Fetcher::new(&config)?;
+            let result = fetcher
+                .fetch_cart_controls(&url, &category_id, demo_quantity)
+                .await;
+            fetcher.shutdown().await;
+            let page = result?;
+            if !(200..300).contains(&page.status) || page.adapter_state.as_deref() != Some("ready")
+            {
+                bail!(
+                    "HTTP {}; {}; no native control report produced",
+                    page.status,
+                    page.detail
+                );
+            }
+            let report = ticket_watch::cart_controls::validate(
+                &url,
+                &page.final_url,
+                &category_id,
+                demo_quantity,
+                &page.html,
+                page.cart_controls
+                    .as_ref()
+                    .context("Missing native control evidence")?,
+                chrono::Utc::now().timestamp_millis(),
+            )?;
+            print_json(
+                &serde_json::json!({"source":"live_browser_offline_form_demo",
+                "transport_binding":"observed_main_document", "elapsed_ms":page.elapsed_ms,
+                "report":report}),
+            )?;
         }
         Command::MapScan {
             url,
@@ -1283,6 +1336,7 @@ mod observation_tests {
                 adapter_state: Some(state.into()),
                 map_inspection: None,
                 map_scan: None,
+                cart_controls: None,
             };
             let result = page_observation(&watch, &page, 10);
             assert_eq!(result.availability, expected, "{state}");
