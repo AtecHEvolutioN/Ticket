@@ -16,6 +16,7 @@ pub mod discovery;
 pub mod event_identity;
 pub mod fetch;
 pub mod hybrid;
+pub mod inventory;
 pub mod map_asset;
 pub mod map_geometry;
 pub mod map_health;

@@ -9,6 +9,8 @@ experiment. This roadmap does not enable purchases, resale listings or repricing
 - Rust artist/location subscriptions, Discovery catalog refresh, website adapters,
   persistent observations/outbox, deduplication, pacing and saved cooldowns.
   Displayed prices, listing quantities and unknown inventory remain distinct.
+  [Primary/resale classification](ticket-sale-types.md) is explicit per observed
+  offer/category and appears in Discord; unproven sale channels remain unknown.
   The [coverage report](coverage-2026-11-10.md) records the tested markets and gaps.
 - Czech section/seat inspection and displayed-price monitoring, service templates,
   graceful shutdown and freshness checks. Production installation and live Discord

@@ -5,7 +5,10 @@ use ticket_watch::{
     cart_preferences::{CartPreferences, EventOverride, PreferenceSource, PreferencesDocument},
     catalog::{self, Selection, Snapshot},
     config::{Config, PageAdapter, Subscription, Watch, WebsiteProfile},
-    model::{Availability, Evidence, FeeScope, Observation, Offer, PriceScope, QuantityKind},
+    model::{
+        Availability, Evidence, FeeScope, InventoryKind, Observation, Offer, PriceScope,
+        QuantityKind,
+    },
     monitor_trigger::{self, Check, MissingEvidence, OfferReason, SubtotalBasis, TriggerReason},
     preference_store::PreferenceSnapshot,
     store::Store,
@@ -33,6 +36,7 @@ fn offer() -> Offer {
         seats: Some("1-2".into()),
         ticket_type: Some("Standard Ticket".into()),
         inventory: Some("private inventory text".into()),
+        inventory_kind: InventoryKind::Unknown,
         price_text: Some("https://private.invalid/checkout?token=private-value".into()),
         price_minor: Some(1000),
         currency: Some("CZK".into()),
@@ -186,6 +190,60 @@ fn latest_blocked_or_unknown_replaces_the_old_positive_for_preview_only() {
                 Availability::Unknown => TriggerReason::LatestObservationUnknown,
                 _ => TriggerReason::LatestObservationUnavailable,
             }]
+        );
+    }
+}
+
+#[test]
+fn sale_classification_survives_preview_without_becoming_stock_or_purchase_evidence() {
+    let fixture = Fixture::new();
+    for (value, expected) in [
+        ("primary", InventoryKind::Primary),
+        ("resale", InventoryKind::Resale),
+        ("unknown", InventoryKind::Unknown),
+    ] {
+        let mut raw = serde_json::to_value(observation()).unwrap();
+        raw["offers"][0]["inventory_kind"] = value.into();
+        raw["ticket_categories"] = serde_json::json!([{
+            "key":"displayed-only", "ticket_type":"Official Platinum", "inventory_kind":value,
+            "price_text":null, "price_min_minor":null, "price_max_minor":null,
+            "currency":"CZK", "selectable_quantity":6
+        }]);
+        fixture.raw(raw.clone());
+        let result = fixture.preview();
+        assert_eq!(result.offers[0].inventory_kind, expected);
+        assert!(!result.reservation_authorized);
+
+        raw["offers"][0]["quantity_kind"] = "selectable".into();
+        fixture.raw(raw);
+        let result = fixture.preview();
+        assert_eq!(result.offers[0].inventory_kind, expected);
+        assert!(!result.needs_fresh_native_preparation);
+    }
+
+    let mut legacy = serde_json::to_value(observation()).unwrap();
+    legacy["offers"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("inventory_kind");
+    legacy["offers"][0]["inventory"] = "Resale".into();
+    fixture.raw(legacy);
+    assert_eq!(
+        fixture.preview().offers[0].inventory_kind,
+        InventoryKind::Unknown
+    );
+
+    for invalid in [
+        serde_json::json!("platinum"),
+        serde_json::Value::Null,
+        serde_json::json!(true),
+    ] {
+        let mut raw = serde_json::to_value(observation()).unwrap();
+        raw["offers"][0]["inventory_kind"] = invalid;
+        fixture.raw(raw);
+        assert_eq!(
+            fixture.preview().reasons,
+            [TriggerReason::InvalidObservation]
         );
     }
 }

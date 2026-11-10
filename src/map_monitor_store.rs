@@ -11,7 +11,7 @@ use crate::{
     map_inspection::DisplayedSeatQuote,
     map_scan::{SectionScan, validate_displayed_quote, validate_report},
     map_scan_store::{ChangeKind, MapScanStore, ScanChanges, record_in_transaction},
-    model::{Alert, FeeScope, Offer, PendingAlert, PriceScope, QuantityKind},
+    model::{Alert, FeeScope, InventoryKind, Offer, PendingAlert, PriceScope, QuantityKind},
 };
 
 const MAX_PENDING: usize = 10_000;
@@ -268,7 +268,7 @@ impl MapMonitorStore {
                     event_url: scan.event_url.clone(),
                     observed_at: observed_at_ms / 1000,
                     kind: signal.into(),
-                    detail: "Displayed resale price observation. Availability, purchasable quantity, complete checkout fees and adjacency are unverified. No tickets are reserved.".into(),
+                    detail: "Displayed ticket price observation. Availability, purchasable quantity, complete checkout fees and adjacency are unverified. No tickets are reserved.".into(),
                     offers: chunk.iter().map(|(quote, _)| offer(quote)).collect(),
                 };
                 let payload = serde_json::to_string(&alert)?;
@@ -388,6 +388,7 @@ impl MapMonitorStore {
         let mut result = Vec::new();
         for (id, nonce, raw, attempts, watch_raw) in rows {
             let alert: Alert = serde_json::from_str(&raw).context("Invalid saved map alert")?;
+            let encoded: serde_json::Value = serde_json::from_str(&raw)?;
             let watch = parse_watch(&watch_raw)?;
             ensure!(
                 nonce.len() == 64
@@ -409,7 +410,7 @@ impl MapMonitorStore {
                 "Saved alert event mismatch"
             );
             let mut current = true;
-            for offered in &alert.offers {
+            for (index, offered) in alert.offers.iter().enumerate() {
                 let saved:Option<String>=tx.query_row("SELECT CASE WHEN length(CAST(quote_json AS BLOB))<=?5 THEN quote_json ELSE NULL END FROM map_scan_quotes WHERE site_host=?1 AND event_id=?2 AND section_id=?3 AND seat_id=?4",params![identity.0,identity.1,watch.section_id,offered.key,MAX_JSON],|r|r.get(0)).optional()?;
                 let Some(saved) = saved else {
                     current = false;
@@ -428,7 +429,13 @@ impl MapMonitorStore {
                 validate_displayed_quote(&displayed)?;
                 let mut normalized = offered.clone();
                 normalized.price_text = Some(quote.price_text.clone());
-                if normalized != offer(&quote) {
+                let mut expected = offer(&quote);
+                if encoded["offers"][index].get("inventory_kind").is_none() {
+                    // Legacy alerts remain Unknown without inventing a classification
+                    // or cancelling an otherwise current, fully matching saved quote.
+                    expected.inventory_kind = InventoryKind::Unknown;
+                }
+                if normalized != expected {
                     current = false;
                     break;
                 }
@@ -509,6 +516,9 @@ fn offer(quote: &DisplayedSeatQuote) -> Offer {
         seats: Some(quote.seat.clone()),
         ticket_type: Some(quote.ticket_type.clone()),
         inventory: quote.restriction.clone(),
+        // All callers validate the strict rendered resale tooltip before conversion.
+        // A restriction is retained above but never used to classify the sale.
+        inventory_kind: InventoryKind::Resale,
         price_text: Some(quote.price_text.clone()),
         price_minor: Some(quote.price_minor),
         currency: Some(quote.currency.clone()),

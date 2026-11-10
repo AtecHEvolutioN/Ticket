@@ -18,7 +18,8 @@ use sha2::{Digest, Sha256};
 use crate::{
     config::{DiscordConfig, Watch},
     model::{
-        Alert, Availability, Evidence, Observation, Offer, PendingAlert, PriceScope, QuantityKind,
+        Alert, Availability, Evidence, InventoryKind, Observation, Offer, PendingAlert, PriceScope,
+        QuantityKind,
     },
     venues::{self, VenuePreset},
 };
@@ -961,10 +962,9 @@ fn cancel_obsolete_offers(
         }
         let before = alert.offers.len();
         alert.offers.retain(|offer| {
-            state
-                .offers
-                .get(&offer.key)
-                .is_some_and(|known| known.qualifies == Some(true))
+            state.offers.get(&offer.key).is_some_and(|known| {
+                known.qualifies == Some(true) && !known_inventory_changed(offer, &known.offer)
+            })
         });
         if alert.offers.is_empty() {
             transaction.execute("UPDATE outbox SET state='cancelled' WHERE id=?1", [id])?;
@@ -1023,6 +1023,12 @@ fn matches_filters(watch: &Watch, offer: &Offer) -> Option<bool> {
     if unknown { None } else { Some(true) }
 }
 
+fn known_inventory_changed(previous: &Offer, current: &Offer) -> bool {
+    previous.inventory_kind != InventoryKind::Unknown
+        && current.inventory_kind != InventoryKind::Unknown
+        && previous.inventory_kind != current.inventory_kind
+}
+
 fn meaningful_change(previous: &Offer, current: &Offer) -> bool {
     fn changed<T: PartialEq>(left: &Option<T>, right: &Option<T>) -> bool {
         matches!((left, right), (Some(a), Some(b)) if a != b)
@@ -1039,6 +1045,7 @@ fn meaningful_change(previous: &Offer, current: &Offer) -> bool {
         || changed(&previous.currency, &current.currency)
         || changed(&previous.ticket_type, &current.ticket_type)
         || changed(&previous.inventory, &current.inventory)
+        || known_inventory_changed(previous, current)
 }
 
 fn bounded(value: &str) -> String {
@@ -1107,6 +1114,7 @@ mod tests {
             seats: None,
             ticket_type: Some("Standard".into()),
             inventory: Some("primary".into()),
+            inventory_kind: InventoryKind::Primary,
             price_text: Some("100.00 PLN".into()),
             price_minor: Some(10_000),
             currency: Some("PLN".into()),
@@ -1275,6 +1283,80 @@ mod tests {
         assert_eq!(matches_filters(&watch, &value), None);
         value.price_scope = PriceScope::PerTicket;
         assert_eq!(matches_filters(&watch, &value), Some(true));
+    }
+
+    #[test]
+    fn inventory_classification_upgrade_does_not_create_a_restock_or_repeat_ping() {
+        let mut watch = watch();
+        watch.notify_initial = true;
+        watch.notify_offer_changes = true;
+        let mut old = offer("A");
+        old.inventory = None;
+        old.inventory_kind = InventoryKind::Unknown;
+        let mut store = Store::open(Path::new(":memory:")).unwrap();
+        assert_eq!(
+            store
+                .apply(&watch, &offers(1, vec![old.clone()], true))
+                .unwrap(),
+            1
+        );
+        let mut classified = old.clone();
+        classified.inventory_kind = InventoryKind::Resale;
+        assert!(!meaningful_change(&old, &classified));
+        assert!(!meaningful_change(&classified, &old));
+        assert_eq!(
+            store
+                .apply(&watch, &offers(2, vec![classified], true))
+                .unwrap(),
+            0
+        );
+        let pending = store.pending(2, 10).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(
+            pending[0].payload.offers[0].inventory_kind,
+            InventoryKind::Unknown
+        );
+        assert_eq!(
+            store.status().unwrap()[0]["latest_observation"]["offers"][0]["inventory_kind"],
+            "resale"
+        );
+    }
+
+    #[test]
+    fn proven_sale_channel_change_cancels_the_old_classification_in_pending_alerts() {
+        for notify_changes in [false, true] {
+            let mut watch = watch();
+            watch.notify_initial = true;
+            watch.notify_offer_changes = notify_changes;
+            let mut old = offer("A");
+            old.inventory = None;
+            old.inventory_kind = InventoryKind::Primary;
+            let mut store = Store::open(Path::new(":memory:")).unwrap();
+            assert_eq!(
+                store
+                    .apply(&watch, &offers(1, vec![old.clone()], true))
+                    .unwrap(),
+                1
+            );
+            let mut changed = old.clone();
+            changed.inventory_kind = InventoryKind::Resale;
+            assert!(meaningful_change(&old, &changed));
+            assert_eq!(
+                store
+                    .apply(&watch, &offers(2, vec![changed], true))
+                    .unwrap(),
+                usize::from(notify_changes)
+            );
+            let pending = store.pending(2, 10).unwrap();
+            assert_eq!(pending.len(), usize::from(notify_changes));
+            if notify_changes {
+                assert_eq!(pending[0].payload.kind, "offers_changed");
+                assert_eq!(
+                    pending[0].payload.offers[0].inventory_kind,
+                    InventoryKind::Resale
+                );
+            }
+        }
     }
 
     #[test]

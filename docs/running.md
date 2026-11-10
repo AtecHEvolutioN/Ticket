@@ -201,6 +201,11 @@ Only one monitor can own a database. Use persistent local storage for SQLite and
 
 ## Discord delivery
 
+Alerts label each observed offer as **Original (primary sale)**, **Resale**, or
+**Unknown**, separately from its ticket description and price. Mixed events keep
+per-offer labels. [Sale-type evidence](ticket-sale-types.md) explains why Standard,
+VIP or Official Platinum alone cannot determine the sale channel.
+
 Create a Discord bot application and add it to your chosen server. Grant View Channel, Send Messages, and Embed Links for the destination; administrator permission is unnecessary. Role mentions also depend on server permissions/settings, and device pings depend on recipient notification settings.
 
 Set numeric `[discord].channel_id`, `mention_user_ids`, and/or `mention_role_ids`. Store the token in the `DISCORD_BOT_TOKEN` secret environment variable, or change `token_env` to another variable name. Never place the token itself in TOML. Previews need no token.

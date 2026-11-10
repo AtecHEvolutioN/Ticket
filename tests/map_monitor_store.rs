@@ -6,7 +6,7 @@ use ticket_watch::{
     map_monitor_store::MapMonitorStore,
     map_scan::{ScanOutcome, SeatScanObservation, SectionScan, StopReason},
     map_scan_store::{COMPARISON_MAX_AGE_MS, MapScanStore},
-    model::{FeeScope, PriceScope, QuantityKind},
+    model::{FeeScope, InventoryKind, PriceScope, QuantityKind},
 };
 
 const START: i64 = 1_700_000_000_000;
@@ -152,6 +152,7 @@ fn initial_baseline_is_silent_but_new_seats_and_price_changes_queue_precise_obse
     assert_eq!(pending[1].payload.offers[0].price_minor, Some(90_000));
     for entry in pending {
         for offer in entry.payload.offers {
+            assert_eq!(offer.inventory_kind, InventoryKind::Resale);
             assert_eq!(offer.quantity, None);
             assert_eq!(offer.quantity_kind, QuantityKind::Unknown);
             assert_eq!(offer.price_scope, PriceScope::PerTicket);
@@ -195,6 +196,139 @@ fn queue_survives_restart_and_ambiguous_delivery_retries_keep_the_same_nonce() {
     store.delivered(retry.id, "123456789012345678").unwrap();
     assert!(store.pending(START + 3000, 300_000, 10).unwrap().is_empty());
     assert_eq!(state_count(&path, "delivered"), 1);
+}
+
+#[test]
+fn verified_map_quote_is_resale_even_when_restriction_mentions_original_tickets() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("monitor.sqlite");
+    let mut store = setup(&path, &watch(true));
+    let mut report = scan(START, &[("seat-1", Some(100_000))]);
+    report.observations[0].quote.as_mut().unwrap().restriction =
+        Some("Original printed ticket required".into());
+    assert_eq!(record(&mut store, &report), 1);
+    let pending = store.pending(START + 500, 300_000, 10).unwrap().remove(0);
+    assert_eq!(
+        pending.payload.offers[0].inventory_kind,
+        InventoryKind::Resale
+    );
+    assert_eq!(
+        pending.payload.offers[0].inventory.as_deref(),
+        Some("Original printed ticket required")
+    );
+
+    let mut unsupported = scan(START + 1000, &[("seat-2", Some(90_000))]);
+    unsupported.observations[0]
+        .quote
+        .as_mut()
+        .unwrap()
+        .ticket_type = "Official Platinum".into();
+    assert!(
+        store
+            .record_success(
+                "synthetic-section",
+                &unsupported,
+                START + 1500,
+                START + 61_500,
+                300_000
+            )
+            .is_err()
+    );
+    assert_eq!(state_count(&path, "pending"), 1);
+}
+
+#[test]
+fn legacy_map_payload_missing_sale_kind_survives_restart_as_unknown_without_rewriting_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("monitor.sqlite");
+    let watch = watch(true);
+    let mut store = setup(&path, &watch);
+    assert_eq!(
+        record(&mut store, &scan(START, &[("seat-1", Some(100_000))])),
+        1
+    );
+    let original = store.pending(START + 500, 300_000, 10).unwrap().remove(0);
+    let mut payload = serde_json::to_value(&original.payload).unwrap();
+    payload["offers"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("inventory_kind");
+    let raw = serde_json::to_string(&payload).unwrap();
+    Connection::open(&path)
+        .unwrap()
+        .execute(
+            "UPDATE map_monitor_outbox SET payload_json=?1 WHERE id=?2",
+            params![raw, original.id],
+        )
+        .unwrap();
+    drop(store);
+    let mut store = setup(&path, &watch);
+    let pending = store.pending(START + 1000, 300_000, 10).unwrap().remove(0);
+    assert_eq!(pending.id, original.id);
+    assert_eq!(pending.nonce, original.nonce);
+    assert_eq!(
+        pending.payload.offers[0].inventory_kind,
+        InventoryKind::Unknown
+    );
+    let saved: String = Connection::open(&path)
+        .unwrap()
+        .query_row(
+            "SELECT payload_json FROM map_monitor_outbox WHERE id=?1",
+            [original.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(saved, raw);
+    assert_eq!(state_count(&path, "pending"), 1);
+
+    // Missing classification never bypasses the independent current-price comparison.
+    payload["offers"][0]["price_minor"] = serde_json::json!(90_000);
+    payload["offers"][0]["price_text"] = serde_json::json!("900,00 Kč za kus");
+    Connection::open(&path)
+        .unwrap()
+        .execute(
+            "UPDATE map_monitor_outbox SET payload_json=?1 WHERE id=?2",
+            params![serde_json::to_string(&payload).unwrap(), original.id],
+        )
+        .unwrap();
+    assert!(store.pending(START + 1500, 300_000, 10).unwrap().is_empty());
+    assert_eq!(state_count(&path, "cancelled"), 1);
+}
+
+#[test]
+fn explicit_conflicting_or_malformed_sale_kind_cannot_take_the_legacy_path() {
+    for (encoded_kind, malformed) in [
+        (serde_json::json!("primary"), false),
+        (serde_json::json!("unknown"), false),
+        (serde_json::json!("not-a-sale-kind"), true),
+        (serde_json::Value::Null, true),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("monitor.sqlite");
+        let mut store = setup(&path, &watch(true));
+        assert_eq!(
+            record(&mut store, &scan(START, &[("seat-1", Some(100_000))])),
+            1
+        );
+        let original = store.pending(START + 500, 300_000, 10).unwrap().remove(0);
+        let mut payload = serde_json::to_value(&original.payload).unwrap();
+        payload["offers"][0]["inventory_kind"] = encoded_kind;
+        Connection::open(&path)
+            .unwrap()
+            .execute(
+                "UPDATE map_monitor_outbox SET payload_json=?1 WHERE id=?2",
+                params![serde_json::to_string(&payload).unwrap(), original.id],
+            )
+            .unwrap();
+        let result = store.pending(START + 1000, 300_000, 10);
+        if malformed {
+            assert!(result.is_err());
+        } else {
+            assert!(result.unwrap().is_empty());
+            assert_eq!(state_count(&path, "cancelled"), 1);
+        }
+        assert_eq!(state_count(&path, "delivered"), 0);
+    }
 }
 
 #[test]

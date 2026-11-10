@@ -34,6 +34,11 @@ Country/market channels are a routing option; they do not mean all worldwide eve
 | Link | Canonical event URL by default. A documented stable offer link can be included if validated; private/session-bound checkout links are not reusable general links. |
 | Ping | Only currently subscribed user/role mention targets; merge overlapping watches per destination. |
 
+The Rust monitor now implements the sale-type field per offer and displayed
+category; see [original tickets and resale](ticket-sale-types.md) for source
+evidence, unknown cases and an offline Discord preview. Ticket descriptions such
+as Official Platinum remain independent of that classification.
+
 An alert should describe evidence, for example “matching ticket offer observed,” without implying that tickets have been reserved. If quantity/price/section filtering cannot be evaluated, show the unsupported filter instead of emitting a confirmed match.
 
 ## Offer-level change detection

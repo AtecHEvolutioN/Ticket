@@ -6,8 +6,8 @@
 use crate::{
     config::Watch,
     model::{
-        Availability, Evidence, FeeScope, Observation, Offer, PriceScope, QuantityKind,
-        TicketCategory,
+        Availability, Evidence, FeeScope, InventoryKind, Observation, Offer, PriceScope,
+        QuantityKind, TicketCategory,
     },
     parser::{
         canonical_event_url, disabled_element, event_identity, event_matches, hidden_element,
@@ -117,16 +117,7 @@ fn listing_quantity(text: &str) -> Option<u32> {
 }
 
 fn resale_label(text: &str) -> bool {
-    matches!(
-        text.to_lowercase().as_str(),
-        "bilety resale"
-            | "resale tickets"
-            | "resale"
-            | "tickets resale"
-            | "resale-tickets"
-            | "verified resale ticket"
-            | "ověřená přeprodávaná vstupenka"
-    )
+    crate::inventory::classify_inventory_label(text) == InventoryKind::Resale
 }
 
 /// This hint only disambiguates a visible monetary amount. Structured event
@@ -469,6 +460,7 @@ fn parse_resale(
         seats: None,
         ticket_type: Some(ticket_type),
         inventory: Some(inventory),
+        inventory_kind: InventoryKind::Resale,
         price_text: Some(price_text),
         price_minor,
         currency,
@@ -532,6 +524,9 @@ fn parse_category(
     Some(TicketCategory {
         key: identity,
         ticket_type,
+        // A quantity stepper or regular/Platinum ticket type does not prove
+        // that the tickets are being sold for the first time.
+        inventory_kind: InventoryKind::Unknown,
         section,
         row: seat_row,
         price_text: Some(price_text),
@@ -634,18 +629,46 @@ fn global_display_category(
     one_visible(row, "[data-analytics='offer-card']")?;
     one_visible(row, "[data-bdd='quick-pick-ticket-info']")?;
     let kind = row.value().attr("data-bdd")?;
-    let branding = if kind == "quick-picks-list-item-resale" {
-        "[data-bdd='quick-picks-resale-branding']"
+    let (branding, mut inventory_kind) = if kind == "quick-picks-list-item-resale" {
+        (
+            "[data-bdd='quick-picks-resale-branding']",
+            InventoryKind::Resale,
+        )
     } else if kind
         .strip_prefix("quick-picks-list-item-primary-")
         .and_then(number)
         .is_some()
     {
-        "[data-bdd='branding-ticket-text']"
+        ("[data-bdd='branding-ticket-text']", InventoryKind::Primary)
     } else {
         return None;
     };
     let ticket_type = bounded_label(visible_text(one_visible(row, branding)?))?;
+    // Conflicts are actual channel markers, not Standard/VIP/Platinum wording.
+    // Preserve displayed prices while declining to label contradictory source
+    // evidence as either primary or resale.
+    let opposing_marker = match inventory_kind {
+        InventoryKind::Primary => "[data-bdd='quick-picks-resale-branding']",
+        InventoryKind::Resale => "[data-bdd='quick-picks-primary-branding']",
+        InventoryKind::Unknown => unreachable!(),
+    };
+    let label_kind = crate::inventory::classify_inventory_label(&ticket_type);
+    let channel_words = ticket_type.to_lowercase();
+    let channel_words = channel_words
+        .split(|character: char| !character.is_alphanumeric())
+        .collect::<Vec<_>>();
+    let mixed_channel_label = channel_words.contains(&"resale")
+        && (channel_words.contains(&"primary") || channel_words.contains(&"original"));
+    if row.select(&selector(opposing_marker)).any(visible)
+        || matches!(
+            (inventory_kind, label_kind),
+            (InventoryKind::Primary, InventoryKind::Resale)
+                | (InventoryKind::Resale, InventoryKind::Primary)
+        )
+        || mixed_channel_label
+    {
+        inventory_kind = InventoryKind::Unknown;
+    }
     let price_text = bounded_label(visible_text(one_visible(
         row,
         "[data-bdd='quick-pick-price-button']",
@@ -687,8 +710,14 @@ fn global_display_category(
             &section,
             &seat_row,
             &price_text,
+            match inventory_kind {
+                InventoryKind::Primary => "primary",
+                InventoryKind::Resale => "resale",
+                InventoryKind::Unknown => "unknown",
+            },
         ]),
         ticket_type,
+        inventory_kind,
         section: Some(section),
         row: Some(seat_row),
         price_text: Some(price_text),
@@ -757,6 +786,7 @@ fn italian_display_category(
     Some(TicketCategory {
         key: key(&[ITALIAN_DISPLAY, &ticket_type, &price_text]),
         ticket_type,
+        inventory_kind: InventoryKind::Unknown,
         section: None,
         row: None,
         price_text: Some(price_text),

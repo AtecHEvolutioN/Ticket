@@ -363,6 +363,12 @@ pub fn parse(watch: &Watch, html: &str, observed_at: i64) -> Observation {
                 let seats = field(row, &selectors.seats);
                 let ticket_type = field(row, &selectors.ticket_type);
                 let inventory = field(row, &selectors.inventory);
+                // This selector is verified as an inventory/provenance field.
+                // Ticket type and displayed price never determine sale channel.
+                let inventory_kind = inventory
+                    .as_deref()
+                    .map(crate::inventory::classify_inventory_label)
+                    .unwrap_or_default();
                 let price_text = field(row, &selectors.price);
                 let currency = watch.currency.as_ref().map(|s| s.to_ascii_uppercase());
                 let price_minor = price_text.as_ref().and_then(|p| {
@@ -419,6 +425,7 @@ pub fn parse(watch: &Watch, html: &str, observed_at: i64) -> Observation {
                     seats,
                     ticket_type,
                     inventory,
+                    inventory_kind,
                     price_text,
                     price_minor,
                     currency,
@@ -918,6 +925,57 @@ price_decimal_separator = ","
         );
         assert_eq!(first.offers[0].key, second.offers[0].key);
         assert_ne!(first.offers[0].price_minor, second.offers[0].price_minor);
+    }
+
+    #[test]
+    fn configured_inventory_field_classifies_channel_without_changing_ticket_type() {
+        use crate::model::InventoryKind;
+        for (label, expected) in [
+            ("primary", InventoryKind::Primary),
+            ("Original tickets", InventoryKind::Primary),
+            ("Verified Resale Ticket", InventoryKind::Resale),
+            ("Primary / Resale", InventoryKind::Unknown),
+            ("Standard", InventoryKind::Unknown),
+            ("", InventoryKind::Unknown),
+        ] {
+            let html = OFFERS.replace(">primary</span>", &format!(">{label}</span>"));
+            let result = parse(&watch(), &html, 100);
+            assert_eq!(result.offers.len(), 1);
+            let offer = &result.offers[0];
+            assert_eq!(offer.inventory_kind, expected, "{label}");
+            assert_eq!(
+                offer.ticket_type.as_deref(),
+                Some("Official Platinum Ticket")
+            );
+            assert_eq!(offer.price_minor, Some(91080));
+            assert_eq!(offer.quantity, Some(2));
+            if !label.is_empty() {
+                assert_eq!(offer.inventory.as_deref(), Some(label));
+            }
+        }
+    }
+
+    #[test]
+    fn missing_hidden_or_conflicting_inventory_fields_do_not_infer_channel() {
+        use crate::model::InventoryKind;
+        for html in [
+            OFFERS.replace("class=\"inventory\"", "class=\"inventory\" hidden"),
+            OFFERS.replace("class=\"inventory\"", "class=\"missing\""),
+            OFFERS.replace(
+                "<span class=\"inventory\">primary</span>",
+                "<span class='inventory'>primary</span><span class='inventory'>resale</span>",
+            ),
+        ] {
+            let result = parse(&watch(), &html, 100);
+            assert_eq!(result.offers.len(), 1);
+            assert_eq!(result.offers[0].inventory_kind, InventoryKind::Unknown);
+        }
+        let mut watch = watch();
+        watch.parser.inventory_selector = None;
+        let html = OFFERS.replace("Official Platinum Ticket", "Verified Resale Ticket");
+        let result = parse(&watch, &html, 100);
+        assert_eq!(result.offers.len(), 1);
+        assert_eq!(result.offers[0].inventory_kind, InventoryKind::Unknown);
     }
 
     #[test]

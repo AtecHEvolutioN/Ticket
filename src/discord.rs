@@ -1,7 +1,7 @@
 //! Discord REST delivery. No browser cookies or Ticketmaster credentials enter this module.
 use crate::{
     config::{DiscordConfig, discord_snowflake as is_snowflake},
-    model::{FeeScope, PendingAlert, PriceScope, QuantityKind},
+    model::{FeeScope, InventoryKind, PendingAlert, PriceScope, QuantityKind},
 };
 use anyhow::{Context, Result, bail};
 use reqwest::{Client, StatusCode, header};
@@ -257,8 +257,8 @@ fn clone_config(config: &DiscordConfig) -> DiscordConfig {
 pub fn preview(pending: &PendingAlert, cfg: &DiscordConfig) -> Value {
     let alert = &pending.payload;
     let display_signal = match alert.kind.as_str() {
-        "displayed_price_observed" => Some("Displayed resale price observed"),
-        "displayed_price_changed" => Some("Displayed resale price changed"),
+        "displayed_price_observed" => Some("Displayed ticket price observed"),
+        "displayed_price_changed" => Some("Displayed ticket price changed"),
         "displayed_details_changed" => Some("Displayed seat details changed"),
         _ => None,
     };
@@ -271,24 +271,23 @@ pub fn preview(pending: &PendingAlert, cfg: &DiscordConfig) -> Value {
             Some(section) => format!("{label} {} · {}", index + 1, clean(section, 120)),
             None => format!("{label} {}", index + 1),
         };
-        let mut lines = Vec::new();
-        for (label, value) in [
-            ("Type", offer.ticket_type.as_deref()),
-            (
-                if display_only {
-                    "Restriction"
-                } else {
-                    "Inventory"
-                },
-                offer.inventory.as_deref(),
-            ),
-            ("Row", offer.row.as_deref()),
-            ("Seats", offer.seats.as_deref()),
-            ("Price as shown", offer.price_text.as_deref()),
-            ("Currency", offer.currency.as_deref()),
+        let mut lines = vec![format!(
+            "Sale type: {}",
+            match offer.inventory_kind {
+                InventoryKind::Primary => "Original (primary sale)",
+                InventoryKind::Resale => "Resale",
+                InventoryKind::Unknown => "Unknown",
+            }
+        )];
+        // Preserve classification and financial/stock qualifiers before optional
+        // metadata, so long provider labels cannot push them beyond the field budget.
+        for (label, value, limit) in [
+            ("Type", offer.ticket_type.as_deref(), 80),
+            ("Price as shown", offer.price_text.as_deref(), 100),
+            ("Currency", offer.currency.as_deref(), 12),
         ] {
             if let Some(value) = value.filter(|s| !s.trim().is_empty()) {
-                lines.push(format!("{label}: {}", clean(value, 110)));
+                lines.push(format!("{label}: {}", clean(value, limit)));
             }
         }
         if display_only {
@@ -326,6 +325,22 @@ pub fn preview(pending: &PendingAlert, cfg: &DiscordConfig) -> Value {
         if display_only {
             lines.push("Availability and adjacency: not verified".into());
         }
+        for (label, value) in [
+            (
+                if display_only {
+                    "Restriction"
+                } else {
+                    "Inventory"
+                },
+                offer.inventory.as_deref(),
+            ),
+            ("Row", offer.row.as_deref()),
+            ("Seats", offer.seats.as_deref()),
+        ] {
+            if let Some(value) = value.filter(|s| !s.trim().is_empty()) {
+                lines.push(format!("{label}: {}", clean(value, 110)));
+            }
+        }
         fields.push(
             json!({"name": name, "value": truncate(&lines.join("\n"), 600), "inline": false}),
         );
@@ -345,11 +360,11 @@ pub fn preview(pending: &PendingAlert, cfg: &DiscordConfig) -> Value {
         clean(&alert.detail, 650)
     );
     let mut embed = json!({
-        "title": if display_only { format!("Displayed resale price · {}", clean(&alert.event_name, 220)) } else { clean(&alert.event_name, 250) },
+        "title": if display_only { format!("Displayed ticket price · {}", clean(&alert.event_name, 220)) } else { clean(&alert.event_name, 250) },
         "description": description,
         "color": 3447003,
         "fields": fields,
-        "footer": {"text": if display_only { "Displayed prices only. Availability, quantity, complete fees and adjacency are unverified. Tickets are not reserved." } else { "Observed offers; tickets are not reserved. Total event stock is not reported; offer quantities are not summed." }},
+        "footer": {"text": if display_only { "Prices only; stock, quantity, complete fees and adjacency are unverified. Tickets are not reserved. Primary sale does not imply face value." } else { "Tickets are not reserved. Total event stock is not reported; offer quantities are not summed. Primary sale does not imply face value or a lower price." }},
     });
     if let Ok(url) = crate::config::validate_public_url(&alert.event_url) {
         embed["url"] = Value::String(url.to_string());
@@ -589,9 +604,9 @@ mod tests {
         for (kind, signal) in [
             (
                 "displayed_price_observed",
-                "Displayed resale price observed",
+                "Displayed ticket price observed",
             ),
-            ("displayed_price_changed", "Displayed resale price changed"),
+            ("displayed_price_changed", "Displayed ticket price changed"),
             (
                 "displayed_details_changed",
                 "Displayed seat details changed",
@@ -604,7 +619,7 @@ mod tests {
                 embed["title"]
                     .as_str()
                     .unwrap()
-                    .starts_with("Displayed resale price")
+                    .starts_with("Displayed ticket price")
             );
             assert!(!embed["title"].as_str().unwrap().contains("@everyone"));
             assert!(embed["description"].as_str().unwrap().contains(signal));
@@ -656,6 +671,94 @@ mod tests {
                 .unwrap()
                 .contains("not summed")
         );
+    }
+
+    #[test]
+    fn mixed_sale_kinds_are_labelled_per_offer_independently_of_platinum_ticket_type() {
+        let mut pending = pending();
+        let base = pending.payload.offers[0].clone();
+        pending.payload.offers = [
+            InventoryKind::Primary,
+            InventoryKind::Resale,
+            InventoryKind::Unknown,
+        ]
+        .into_iter()
+        .map(|inventory_kind| Offer {
+            inventory_kind,
+            ..base.clone()
+        })
+        .collect();
+        for kind in ["availability_observed", "displayed_price_observed"] {
+            pending.payload.kind = kind.into();
+            let payload = preview(&pending, &config());
+            for (field, label) in payload["embeds"][0]["fields"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .zip(["Original (primary sale)", "Resale", "Unknown"])
+            {
+                let text = field["value"].as_str().unwrap();
+                assert!(text.starts_with(&format!("Sale type: {label}\n")));
+                assert!(text.contains("Type: Official Platinum"));
+                assert!(text.contains("Price as shown: 910,80 PLN"));
+                assert!(text.contains("Price basis: per ticket"));
+            }
+            let title = payload["embeds"][0]["title"].as_str().unwrap();
+            assert!(!title.contains("resale") && !title.contains("primary"));
+            assert!(
+                payload["embeds"][0]["footer"]["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Primary sale does not imply face value")
+            );
+        }
+        for ticket_type in ["Standard", "VIP", "Official Platinum"] {
+            pending.payload.offers = vec![Offer {
+                ticket_type: Some(ticket_type.into()),
+                inventory_kind: InventoryKind::Unknown,
+                ..base.clone()
+            }];
+            let payload = preview(&pending, &config());
+            let text = payload["embeds"][0]["fields"][0]["value"].as_str().unwrap();
+            assert!(text.starts_with("Sale type: Unknown\n"));
+            assert!(text.contains(&format!("Type: {ticket_type}")));
+        }
+    }
+
+    #[test]
+    fn bounded_fields_keep_sale_type_prices_and_uncertainty_before_long_metadata() {
+        let mut pending = pending();
+        let offer = &mut pending.payload.offers[0];
+        offer.inventory_kind = InventoryKind::Primary;
+        offer.ticket_type = Some("🦀@everyone**".repeat(3000));
+        offer.inventory = offer.ticket_type.clone();
+        offer.row = offer.ticket_type.clone();
+        offer.seats = offer.ticket_type.clone();
+        offer.quantity = Some(u32::MAX);
+        offer.quantity_kind = QuantityKind::Selectable;
+        offer.price_scope = PriceScope::Total;
+        offer.fees = FeeScope::Excluded;
+        for kind in ["availability_observed", "displayed_price_observed"] {
+            pending.payload.kind = kind.into();
+            let payload = preview(&pending, &config());
+            let text = payload["embeds"][0]["fields"][0]["value"].as_str().unwrap();
+            assert!(text.encode_utf16().count() <= 600);
+            assert!(text.starts_with("Sale type: Original (primary sale)\n"));
+            assert!(text.contains("Price as shown: 910,80 PLN"));
+            assert!(text.contains("Currency: PLN"));
+            assert!(text.contains("Price basis: total offer price"));
+            if kind == "displayed_price_observed" {
+                assert!(text.contains("Available quantity: not verified"));
+                assert!(text.contains("Complete fees: not verified"));
+                assert!(text.contains("Availability and adjacency: not verified"));
+                assert!(!text.contains("4294967295"));
+            } else {
+                assert!(
+                    text.contains("Selectable order quantity: 4294967295 (not remaining stock)")
+                );
+                assert!(text.contains("Fees: extra"));
+            }
+        }
     }
 
     #[test]

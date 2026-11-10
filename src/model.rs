@@ -18,6 +18,17 @@ pub enum Evidence {
     None,
 }
 
+/// Explicit ticket sale channel, independent of ticket type, price or stock.
+/// Missing provenance in older observations remains unknown after deserialization.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum InventoryKind {
+    Primary,
+    Resale,
+    #[default]
+    Unknown,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum QuantityKind {
@@ -54,6 +65,8 @@ pub struct Offer {
     pub seats: Option<String>,
     pub ticket_type: Option<String>,
     pub inventory: Option<String>,
+    #[serde(default)]
+    pub inventory_kind: InventoryKind,
     pub price_text: Option<String>,
     pub price_minor: Option<i64>,
     pub currency: Option<String>,
@@ -70,6 +83,8 @@ pub struct Offer {
 pub struct TicketCategory {
     pub key: String,
     pub ticket_type: String,
+    #[serde(default)]
+    pub inventory_kind: InventoryKind,
     #[serde(default)]
     pub section: Option<String>,
     #[serde(default)]

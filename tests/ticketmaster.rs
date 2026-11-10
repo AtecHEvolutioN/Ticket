@@ -1,6 +1,6 @@
 use ticket_watch::{
     config::{PageAdapter, Watch},
-    model::{Availability, QuantityKind},
+    model::{Availability, InventoryKind, QuantityKind},
     parser,
 };
 
@@ -45,6 +45,22 @@ fn global_price_cards_preserve_different_quotes_without_claiming_tickets_or_stoc
     assert!(result.offers.is_empty());
     assert!(!result.complete);
     assert_eq!(result.ticket_categories.len(), 3);
+    assert_eq!(
+        result
+            .ticket_categories
+            .iter()
+            .filter(|category| category.inventory_kind == InventoryKind::Resale)
+            .count(),
+        2
+    );
+    assert_eq!(
+        result
+            .ticket_categories
+            .iter()
+            .filter(|category| category.inventory_kind == InventoryKind::Primary)
+            .count(),
+        1
+    );
     assert!(
         result
             .ticket_categories
@@ -83,6 +99,139 @@ fn global_price_cards_preserve_different_quotes_without_claiming_tickets_or_stoc
         parser::parse(&display_watch(false), &duplicate, 10).ticket_categories,
         result.ticket_categories
     );
+}
+
+#[test]
+fn global_display_conflicting_channel_markers_are_unknown_but_ticket_types_are_independent() {
+    for (extra, expected) in [
+        (
+            "<span data-bdd='quick-picks-resale-branding'>Verified Resale Ticket</span>",
+            InventoryKind::Unknown,
+        ),
+        (
+            "<span data-bdd='quick-picks-resale-branding' hidden>Verified Resale Ticket</span>",
+            InventoryKind::Primary,
+        ),
+    ] {
+        let html = GLOBAL_DISPLAY.replace(
+            "<span>Standard Ticket</span>",
+            &format!("<span>Standard Ticket</span>{extra}"),
+        );
+        let result = parser::parse(&display_watch(false), &html, 10);
+        assert_eq!(
+            result
+                .ticket_categories
+                .iter()
+                .find(|category| category.price_min_minor == Some(9500))
+                .unwrap()
+                .inventory_kind,
+            expected
+        );
+        assert!(result.offers.is_empty());
+        assert_eq!(result.availability, Availability::Unknown);
+    }
+    for label in [
+        "Verified Resale Ticket",
+        "Primary / Resale",
+        "Original and Resale tickets",
+    ] {
+        let html = GLOBAL_DISPLAY.replace(
+            "<span>Standard Ticket</span>",
+            &format!("<span>{label}</span>"),
+        );
+        let result = parser::parse(&display_watch(false), &html, 10);
+        assert_eq!(
+            result
+                .ticket_categories
+                .iter()
+                .find(|category| category.price_min_minor == Some(9500))
+                .unwrap()
+                .inventory_kind,
+            InventoryKind::Unknown
+        );
+    }
+    for (extra, expected) in [
+        (
+            "<span data-bdd='branding-ticket-text'>Standard Ticket</span>",
+            InventoryKind::Resale,
+        ),
+        (
+            "<span data-bdd='branding-ticket-text'>Official Platinum</span>",
+            InventoryKind::Resale,
+        ),
+        (
+            "<span data-bdd='quick-picks-primary-branding'>Primary</span>",
+            InventoryKind::Unknown,
+        ),
+        (
+            "<span data-bdd='quick-picks-primary-branding' hidden>Primary</span>",
+            InventoryKind::Resale,
+        ),
+    ] {
+        let html = GLOBAL_DISPLAY.replace(
+            "Verified Resale Ticket</span>",
+            &format!("Verified Resale Ticket</span>{extra}"),
+        );
+        let result = parser::parse(&display_watch(false), &html, 10);
+        assert!(
+            result
+                .ticket_categories
+                .iter()
+                .filter(|category| category.price_min_minor != Some(9500))
+                .all(|category| category.inventory_kind == expected)
+        );
+        assert_eq!(result.ticket_categories.len(), 3);
+    }
+    let opposite = GLOBAL_DISPLAY.replace("Verified Resale Ticket", "Original tickets");
+    assert!(
+        parser::parse(&display_watch(false), &opposite, 10)
+            .ticket_categories
+            .iter()
+            .filter(|category| category.price_min_minor != Some(9500))
+            .all(|category| category.inventory_kind == InventoryKind::Unknown)
+    );
+}
+
+#[test]
+fn identical_display_quotes_with_different_source_channels_remain_distinct() {
+    let html = GLOBAL_DISPLAY.replace("Verified Resale Ticket", "Standard Ticket");
+    let first = html
+        .split("<li role=\"menuitem\"")
+        .nth(1)
+        .unwrap()
+        .split("</li>")
+        .next()
+        .unwrap();
+    let primary = first
+        .replace(
+            "quick-picks-list-item-resale",
+            "quick-picks-list-item-primary-7",
+        )
+        .replace("quick-picks-resale-branding", "branding-ticket-text");
+    let html = html.replace(
+        "</ul>",
+        &format!("<li role=\"menuitem\"{primary}</li></ul>"),
+    );
+    let result = parser::parse(&display_watch(false), &html, 10);
+    assert_eq!(result.ticket_categories.len(), 4);
+    let same_quote = result
+        .ticket_categories
+        .iter()
+        .filter(|category| category.price_min_minor == Some(7550))
+        .collect::<Vec<_>>();
+    assert_eq!(same_quote.len(), 2);
+    assert!(
+        same_quote
+            .iter()
+            .any(|category| category.inventory_kind == InventoryKind::Primary)
+    );
+    assert!(
+        same_quote
+            .iter()
+            .any(|category| category.inventory_kind == InventoryKind::Resale)
+    );
+    assert_ne!(same_quote[0].key, same_quote[1].key);
+    assert!(result.offers.is_empty());
 }
 
 #[test]
@@ -220,6 +369,12 @@ fn italian_display_preserves_visible_fee_text_and_ranges_but_skips_unavailable_r
         result
             .ticket_categories
             .iter()
+            .all(|category| category.inventory_kind == InventoryKind::Unknown)
+    );
+    assert!(
+        result
+            .ticket_categories
+            .iter()
             .all(|category| category.selectable_quantity.is_none()
                 && category.currency.as_deref() == Some("EUR")
                 && category.price_text.as_ref().unwrap().ends_with("+ fees"))
@@ -292,6 +447,18 @@ fn same_adapter_extracts_different_events_without_event_specific_selectors() {
     assert_eq!(second.watch_id, "second-choice");
     assert_eq!(first.availability, Availability::Available);
     assert_eq!(first.offers.len(), 2);
+    assert!(
+        first
+            .offers
+            .iter()
+            .all(|offer| offer.inventory_kind == InventoryKind::Resale)
+    );
+    assert!(
+        first
+            .ticket_categories
+            .iter()
+            .all(|category| category.inventory_kind == InventoryKind::Unknown)
+    );
     assert_eq!(first.ticket_categories.len(), 4);
     assert!(!first.complete);
     assert!(
@@ -585,6 +752,7 @@ fn captured_czech_categories_and_resale_have_distinct_quantity_meanings() {
     assert_eq!(result.ticket_categories.len(), 1);
     let category = &result.ticket_categories[0];
     assert_eq!(category.ticket_type, "Základní");
+    assert_eq!(category.inventory_kind, InventoryKind::Unknown);
     assert_eq!(category.currency.as_deref(), Some("CZK"));
     assert_eq!(
         (category.price_min_minor, category.price_max_minor),
@@ -593,6 +761,7 @@ fn captured_czech_categories_and_resale_have_distinct_quantity_meanings() {
     assert_eq!(category.selectable_quantity, Some(12));
     assert_eq!(result.offers.len(), 1);
     let offer = &result.offers[0];
+    assert_eq!(offer.inventory_kind, InventoryKind::Resale);
     assert_eq!(offer.section.as_deref(), Some("413"));
     assert_eq!(offer.row.as_deref(), Some("2"));
     assert_eq!(offer.price_minor, Some(333500));
@@ -608,6 +777,7 @@ fn captured_dutch_duplicate_cards_are_not_added_to_stock() {
     assert_eq!(result.availability, Availability::Available);
     assert_eq!(result.ticket_categories.len(), 1);
     let category = &result.ticket_categories[0];
+    assert_eq!(category.inventory_kind, InventoryKind::Unknown);
     assert_eq!(
         (category.price_min_minor, category.price_max_minor),
         (Some(4034), Some(5550))
@@ -615,6 +785,8 @@ fn captured_dutch_duplicate_cards_are_not_added_to_stock() {
     assert_eq!(category.selectable_quantity, Some(4));
     assert_eq!(result.offers.len(), 1);
     let offer = &result.offers[0];
+    assert_eq!(offer.inventory_kind, InventoryKind::Resale);
+    assert_eq!(offer.ticket_type.as_deref(), Some("Reguliere verkoop"));
     assert_eq!(offer.price_minor, Some(7460));
     assert_eq!(offer.currency.as_deref(), Some("EUR"));
     assert_eq!(offer.quantity, Some(2));

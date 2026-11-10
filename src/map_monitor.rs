@@ -495,7 +495,8 @@ mod tests {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
             let request = String::from_utf8(request).unwrap();
-            assert!(request.contains("Displayed resale price"));
+            assert!(request.contains("Displayed ticket price"));
+            assert!(request.contains("Sale type: Resale"));
             assert!(request.contains("enforce_nonce"));
             assert!(!request.to_lowercase().contains("authorization:"));
             socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 14\r\nX-RateLimit-Remaining: 0\r\nX-RateLimit-Reset-After: 120\r\nConnection: close\r\n\r\n{\"id\":\"12345\"}").await.unwrap();

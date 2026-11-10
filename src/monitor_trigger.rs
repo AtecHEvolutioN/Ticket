@@ -13,7 +13,10 @@ use crate::{
     cart_preferences::{self, CartPreferences, EffectivePreferences},
     catalog,
     config::Config,
-    model::{Availability, Evidence, FeeScope, Observation, Offer, PriceScope, QuantityKind},
+    model::{
+        Availability, Evidence, FeeScope, InventoryKind, Observation, Offer, PriceScope,
+        QuantityKind,
+    },
     preference_store::PreferenceSnapshot,
 };
 
@@ -114,6 +117,8 @@ pub struct OfferChecks {
 pub struct OfferCheck {
     /// Position in the observed rows, never a provider listing identifier.
     pub offer_index: usize,
+    /// Source classification only; it does not prove stock, price tier or a cart.
+    pub inventory_kind: InventoryKind,
     pub checks: OfferChecks,
     pub displayed_group_subtotal_minor: Option<u64>,
     pub subtotal_basis: Option<SubtotalBasis>,
@@ -235,6 +240,7 @@ fn parse_observation(raw: &str) -> Result<Observation> {
                     "seats",
                     "ticket_type",
                     "inventory",
+                    "inventory_kind",
                     "price_text",
                     "price_minor",
                     "currency",
@@ -256,6 +262,7 @@ fn parse_observation(raw: &str) -> Result<Observation> {
                         &[
                             "key",
                             "ticket_type",
+                            "inventory_kind",
                             "section",
                             "row",
                             "price_text",
@@ -416,6 +423,7 @@ fn offer_check(index: usize, offer: &Offer, prefs: &CartPreferences) -> OfferChe
     }
     OfferCheck {
         offer_index: index,
+        inventory_kind: offer.inventory_kind,
         checks: OfferChecks {
             quantity,
             currency,
