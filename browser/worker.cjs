@@ -6,7 +6,8 @@ const readline = require('node:readline');
 const { captureRendered, sameEvent } = require('./rendered.cjs');
 const { prepareTicketmaster } = require('./ticketmaster.cjs');
 const { prepareTicketmasterMap } = require('./ticketmaster-map.cjs');
-const { inspectTicketmasterSection, assertSectionInspectionCurrent } = require('./ticketmaster-section.cjs');
+const { inspectTicketmasterSection, assertSectionInspectionCurrent,
+  scanTicketmasterSection, assertSectionScanCurrent } = require('./ticketmaster-section.cjs');
 const { inspectChallenge, responseIntervention } = require('./manual-intervention.cjs');
 const { observeDocuments } = require('./document-lifecycle.cjs');
 const ALLOWED_DOMAINS = new Set([
@@ -74,6 +75,9 @@ function validateRequest(request) {
   if (request.map_section_id !== undefined && (request.display !== 'map'
       || url.hostname.replace(/^www\./, '') !== 'ticketmaster.cz' || !identifier(request.map_section_id))) throw new Error('invalid_request');
   if (request.map_seat_id !== undefined && (request.map_section_id === undefined || !identifier(request.map_seat_id))) throw new Error('invalid_request');
+  if (request.map_scan_limit !== undefined && (request.map_section_id === undefined
+      || request.map_seat_id !== undefined || !Number.isInteger(request.map_scan_limit)
+      || request.map_scan_limit < 1 || request.map_scan_limit > 50)) throw new Error('invalid_request');
   return url;
 }
 
@@ -148,7 +152,11 @@ async function capture(context, request) {
       initialIdentification = document;
       identificationPending = true;
       await documents.synchronize();
-      snapshot = await documents.waitForIdentification(Math.min(5000, Math.max(0, remaining() - 5)), identification, validateDocument);
+      // Section scans already allow a longer initial page load. A successful
+      // normal identification navigation may take more than five seconds; this
+      // passive grace remains inside the original request deadline and cooldown.
+      const identificationGrace = request.map_scan_limit !== undefined ? 15000 : 5000;
+      snapshot = await documents.waitForIdentification(Math.min(identificationGrace, Math.max(0, remaining() - 5)), identification, validateDocument);
       identificationPending = false;
       if (identification(snapshot)) return incompleteIdentification();
       document = snapshot;
@@ -164,6 +172,7 @@ async function capture(context, request) {
     let adapterState;
     let adapterReason;
     let mapInspection;
+    let mapScan;
     let manualIntervention = responseIntervention(status, headers);
     const guard = async () => {
       await documents.synchronize();
@@ -190,16 +199,20 @@ async function capture(context, request) {
           validateDocument({ url: page.url() });
           snapshot = current;
         };
-        const prepared = request.map_section_id !== undefined
-          ? await inspectTicketmasterSection(page, target.href,
-            { sectionId: request.map_section_id, seatId: request.map_seat_id }, remaining(), mapGuard)
-          : request.display === 'map'
-            ? await prepareTicketmasterMap(page, target.href, remaining(), mapGuard)
-            : await prepareTicketmaster(page, target.href, remaining());
+        const prepared = request.map_scan_limit !== undefined
+          ? await scanTicketmasterSection(page, target.href,
+            { sectionId: request.map_section_id, limit: request.map_scan_limit }, remaining(), mapGuard)
+          : request.map_section_id !== undefined
+            ? await inspectTicketmasterSection(page, target.href,
+              { sectionId: request.map_section_id, seatId: request.map_seat_id }, remaining(), mapGuard)
+            : request.display === 'map'
+              ? await prepareTicketmasterMap(page, target.href, remaining(), mapGuard)
+              : await prepareTicketmaster(page, target.href, remaining());
         await guard();
         if (prepared.state === 'section_ready') mapInspection = prepared.inspection;
+        if (prepared.state === 'scan_ready') mapScan = prepared.scan;
         adapterReason = prepared.state;
-        adapterState = ['regional', 'listings', 'map_svg', 'map_static', 'map_canvas', 'map_iframe', 'section_ready'].includes(prepared.state) ? 'ready'
+        adapterState = ['regional', 'listings', 'map_svg', 'map_static', 'map_canvas', 'map_iframe', 'section_ready', 'scan_ready'].includes(prepared.state) ? 'ready'
           : ['blocked', 'map_modal_blocked'].includes(prepared.state) ? 'blocked'
             : prepared.state === 'no_visible_offers' ? 'no_offers' : 'unsupported';
       }
@@ -209,6 +222,10 @@ async function capture(context, request) {
         await assertSectionInspectionCurrent(page, target.href, mapInspection);
         await guard();
       }
+      if (mapScan) {
+        await assertSectionScanCurrent(page, target.href, mapScan);
+        await guard();
+      }
       manualIntervention ||= await inspectChallenge(page);
       await guard();
     }
@@ -216,12 +233,14 @@ async function capture(context, request) {
       adapterState = 'blocked';
       adapterReason = 'manual_intervention';
       mapInspection = undefined;
+      mapScan = undefined;
     }
     const finalUrl = validateUrl(page.url());
     validateDocument({ url: finalUrl.href });
     return { id: request.id, status, html, final_url: finalUrl.href,
       ...(adapterState ? { adapter_state: adapterState, adapter_reason: adapterReason } : {}),
       ...(mapInspection ? { map_inspection: mapInspection } : {}),
+      ...(mapScan ? { map_scan: mapScan } : {}),
       ...(manualIntervention ? { manual_intervention: manualIntervention } : {}),
       retry_after_secs: retryAfter(headers['retry-after']), elapsed_ms: Math.round(performance.now() - started),
       server: headers.server?.slice(0, 120), content_type: headers['content-type']?.slice(0, 120) };

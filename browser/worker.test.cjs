@@ -66,6 +66,18 @@ test('section inspection requires explicit bounded Czech map targets', () => {
   ]) assert.throws(() => validateRequest({ ...request, ...change }), /invalid_request/);
 });
 
+test('automatic seat scans are bounded and cannot combine with an explicit seat hover', () => {
+  const request = { id: 1, url: 'https://www.ticketmaster.cz/event/synthetic/12345678',
+    timeout_ms: 1000, max_body_bytes: 1024, render_wait_ms: 0,
+    adapter: 'ticketmaster', display: 'map', map_section_id: 's_12', map_scan_limit: 20 };
+  assert.doesNotThrow(() => validateRequest(request));
+  for (const change of [{ map_scan_limit: 0 }, { map_scan_limit: 51 }, { map_scan_limit: 1.5 },
+    { map_scan_limit: '20' }, { map_scan_limit: null }, { map_section_id: undefined },
+    { map_seat_id: 'seat-1' }, { display: undefined }]) {
+    assert.throws(() => validateRequest({ ...request, ...change }), /invalid_request/);
+  }
+});
+
 test('event identity binds region and event ID rather than page slug', () => {
   const event = 'https://www.ticketmaster.pl/event/korn/496543017';
   assert.ok(sameEvent(event, 'https://ticketmaster.pl/event/new-slug/496543017?language=en'));

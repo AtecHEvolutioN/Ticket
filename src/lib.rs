@@ -11,6 +11,8 @@ pub mod hybrid;
 pub mod map_asset;
 pub mod map_geometry;
 pub mod map_inspection;
+pub mod map_scan;
+pub mod map_scan_store;
 pub mod model;
 pub(crate) mod page_data;
 pub mod parser;

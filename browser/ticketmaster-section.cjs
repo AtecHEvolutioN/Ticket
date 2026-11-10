@@ -7,6 +7,7 @@ const { prepareTicketmasterMap } = require('./ticketmaster-map.cjs');
 const MAIN_MAP = 'aside[aria-label="Mapa míst"] [data-component="zoomer"] svg[data-component="svg"]';
 const IDENTIFIER = /^[A-Za-z0-9_-]{1,128}$/;
 const pendingInspections = new WeakMap();
+const pendingScans = new WeakMap();
 
 // This is deliberately a separate read-only inspection path. A section click
 // expands a known map display; a seat is only hovered, never selected.
@@ -42,7 +43,8 @@ function checkElement(element, expected) {
   if (maps.length !== 1) return null;
   const roots = maps[0].querySelectorAll('[data-component="zoomer"] svg[data-component="svg"]');
   const svg = element.closest('svg[data-component="svg"]');
-  if (roots.length !== 1 || roots[0] !== svg || !paint(svg, svg) || !paint(element, svg)) return null;
+  if (roots.length !== 1 || roots[0] !== svg || (expected.svg && expected.svg !== svg) || !paint(svg, svg)
+      || (!expected.structureOnly && !paint(element, svg))) return null;
   if (expected.kind === 'section') {
     const paths = svg.querySelectorAll('g.polygons > path[data-component="svg__section"]');
     const matches = [...paths].filter(n => n.getAttribute('data-section-id') === expected.sectionId);
@@ -57,6 +59,29 @@ function checkElement(element, expected) {
   if (blocks.length !== 1 || blocks[0].parentElement.parentElement !== svg) return null;
   const block = blocks[0];
   if (expected.kind === 'block') return element === block ? { section_id: expected.sectionId } : null;
+  if (expected.kind === 'candidate_list') {
+    if (element !== block) return null;
+    const nodes = [...block.querySelectorAll('[data-component="svg__seat"][type="resale"]')];
+    if (nodes.length > 2000 || nodes.length !== expected.nodes.length
+        || nodes.some((node, index) => node !== expected.nodes[index])) return null;
+    const blockName = block.getAttribute('data-section-name');
+    if (!blockName || blockName.length > 160 || /[\u0000-\u001f\u007f]/.test(blockName)) return null;
+    const ids = new Map();
+    for (const node of block.querySelectorAll('[data-component="svg__seat"]')) ids.set(node.id, (ids.get(node.id) || 0) + 1);
+    const entries = [];
+    for (const node of nodes) {
+      const row = node.parentElement;
+      const rowName = row?.getAttribute('data-row-name')?.trim();
+      const seatName = node.getAttribute('data-seat-name')?.trim();
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(node.id) || ids.get(node.id) !== 1
+          || row?.parentElement !== block || row.tagName.toLowerCase() !== 'g' || node.tagName.toLowerCase() !== 'g'
+          || !rowName || rowName.length > 80 || !seatName || seatName.length > 80
+          || /[\u0000-\u001f\u007f]/.test(rowName + seatName)) return null;
+      entries.push({ section_id: expected.sectionId, section_name: expected.sectionName,
+        seat_id: node.id, row: rowName, seat: seatName, visible: paint(node, svg) });
+    }
+    return { block_name: blockName, entries };
+  }
   const seats = [...block.querySelectorAll('[data-component="svg__seat"]')].filter(n => n.id === expected.seatId);
   const row = element.parentElement;
   if (seats.length !== 1 || seats[0] !== element || row?.parentElement !== block
@@ -176,7 +201,7 @@ async function inspectTicketmasterSection(page, target, { sectionId, seatId }, b
     const paths = await svg.$$(`g.polygons > path[data-component="svg__section"][data-section-id="${sectionId}"]`);
     if (paths.length !== 1) { await Promise.all(paths.map(n => n.dispose())); return failure('section_unavailable'); }
     section = paths[0];
-    const expected = { kind: 'section', sectionId };
+    const expected = { kind: 'section', sectionId, svg };
     const identity = await section.evaluate(checkElement, expected);
     if (!identity) return failure('section_unavailable');
     blocked = await guard(); if (blocked) return failure(blocked);
@@ -190,7 +215,7 @@ async function inspectTicketmasterSection(page, target, { sectionId, seatId }, b
       if (blocks.length > 1) { await Promise.all(blocks.map(n => n.dispose())); return failure('section_ambiguous'); }
       if (blocks.length === 1) {
         block = blocks[0];
-        if (await block.evaluate(checkElement, { kind: 'block', sectionId })) break;
+        if (await block.evaluate(checkElement, { kind: 'block', sectionId, svg })) break;
         await block.dispose(); block = null;
       }
       if (!remaining()) break;
@@ -205,7 +230,7 @@ async function inspectTicketmasterSection(page, target, { sectionId, seatId }, b
     const matches = await block.$$(`[data-component="svg__seat"][id="${seatId}"]`);
     if (matches.length !== 1) { await Promise.all(matches.map(n => n.dispose())); return failure('section_seat_unavailable'); }
     seat = matches[0];
-    const seatExpected = { kind: 'seat', sectionId, sectionName: identity.section_name, seatId };
+    const seatExpected = { kind: 'seat', sectionId, sectionName: identity.section_name, seatId, svg };
     const seatIdentity = await seat.evaluate(checkElement, seatExpected);
     if (!seatIdentity) return failure('section_seat_unavailable');
     // Require the old tooltip to disappear, so a stale matching tooltip cannot
@@ -245,12 +270,12 @@ async function assertSectionInspectionCurrent(page, target, inspection) {
     if (!record || record.target !== target || !sameEvent(target, page.url())
         || record.inspection !== JSON.stringify(inspection)
         || await inspectChallenge(page)
-        || !await record.block.evaluate(checkElement, { kind: 'block', sectionId: inspection.section_id })) {
+        || !await record.block.evaluate(checkElement, { kind: 'block', sectionId: inspection.section_id, svg: record.svg })) {
       throw new Error('section_inspection_changed');
     }
     if (inspection.seat_id !== null) {
       const expected = { kind: 'seat', sectionId: inspection.section_id,
-        sectionName: inspection.section_name, seatId: inspection.seat_id };
+        sectionName: inspection.section_name, seatId: inspection.seat_id, svg: record.svg };
       const identity = await record.seat.evaluate(checkElement, expected);
       if (!identity || !inspection.tooltip || identity.row !== inspection.tooltip.row || identity.seat !== inspection.tooltip.seat
           || JSON.stringify(await record.seat.evaluate(readTooltip, identity)) !== JSON.stringify(inspection.tooltip)) {
@@ -262,4 +287,148 @@ async function assertSectionInspectionCurrent(page, target, inspection) {
   }
 }
 
-module.exports = { inspectTicketmasterSection, assertSectionInspectionCurrent };
+// Reuse one already opened map. Candidate counts describe rendered resale nodes,
+// not stock. Each quote is validated at its own observation time before moving
+// the pointer; an entire scan is deliberately not an atomic inventory snapshot.
+async function scanTicketmasterSection(page, target, { sectionId, limit }, budgetMs, validateCurrent = async () => {}) {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50
+      || !Number.isFinite(budgetMs) || budgetMs < 1) return { state: 'scan_unsupported', opened: false };
+  const startedAt = Date.now();
+  const deadline = performance.now() + Math.min(budgetMs, 15000);
+  const remaining = () => Math.max(0, Math.floor(deadline - performance.now()));
+  const opened = await inspectTicketmasterSection(page, target, { sectionId }, remaining(), validateCurrent);
+  if (opened.state !== 'section_ready') return opened;
+  const record = pendingInspections.get(page);
+  pendingInspections.delete(page);
+  if (!record) throw new Error('scan_changed');
+  const candidates = [];
+  let retained = false;
+  const failure = state => ({ state, opened: opened.opened });
+  const guard = async () => {
+    if (!sameEvent(target, page.url())) throw new Error('unsafe_redirect');
+    await validateCurrent({ afterMapDisplayAction: false });
+    if (await inspectChallenge(page)) throw new Error('scan_changed');
+    if (!await record.block.evaluate(checkElement, { kind: 'block', sectionId, svg: record.svg })) throw new Error('scan_changed');
+  };
+  try {
+    await guard();
+    const nodes = await record.block.$$('[data-component="svg__seat"][type="resale"]');
+    // Keep handles bounded even when a malformed page has excessive candidates.
+    if (nodes.length > 2000) {
+      await Promise.all(nodes.map(node => node.dispose()));
+      return failure('scan_candidate_limit');
+    }
+    for (const node of nodes) candidates.push({ node });
+    const candidateExpected = { kind: 'candidate_list', sectionId,
+      sectionName: opened.inspection.section_name, nodes, svg: record.svg };
+    const discovered = await record.block.evaluate(checkElement, candidateExpected);
+    if (!discovered) return failure('scan_candidate_invalid');
+    record.candidateExpected = candidateExpected;
+    record.candidateIdentity = JSON.stringify({ block_name: discovered.block_name,
+      entries: discovered.entries.map(({ visible, ...identity }) => identity) });
+    for (let index = 0; index < candidates.length; index++) {
+      const { visible: painted, ...identity } = discovered.entries[index];
+      const candidate = candidates[index];
+      candidate.expected = { kind: 'seat', sectionId, sectionName: opened.inspection.section_name, seatId: identity.seat_id, svg: record.svg };
+      candidate.identity = identity;
+      candidate.visible = painted;
+    }
+    candidates.sort((a, b) => a.identity.seat_id < b.identity.seat_id ? -1 : a.identity.seat_id > b.identity.seat_id ? 1 : 0);
+    const visible = candidates.filter(candidate => candidate.visible);
+    const results = [];
+    for (const candidate of visible) {
+      if (!remaining() || results.length >= limit) break;
+      await guard();
+      if (JSON.stringify(await candidate.node.evaluate(checkElement, candidate.expected)) !== JSON.stringify(candidate.identity)) {
+        throw new Error('scan_changed');
+      }
+      const attemptDeadline = performance.now() + Math.min(1000, remaining());
+      const attemptRemaining = () => Math.max(0, Math.floor(Math.min(deadline, attemptDeadline) - performance.now()));
+      let tooltip = null;
+      let observedAt;
+      // An old card must disappear before any new hover may supply a quote.
+      await page.mouse.move(1, 1);
+      let cleared = false;
+      if (attemptRemaining()) {
+        try {
+          await page.locator('aside[aria-label="Mapa míst"] [data-component="tooltip"]:visible')
+            .waitFor({ state: 'hidden', timeout: Math.max(1, Math.min(250, attemptRemaining())) });
+          cleared = true;
+        } catch { /* The attempt remains explicitly unknown. */ }
+      }
+      if (cleared && attemptRemaining()) {
+        await guard();
+        if (JSON.stringify(await candidate.node.evaluate(checkElement, candidate.expected)) !== JSON.stringify(candidate.identity)) {
+          throw new Error('scan_changed');
+        }
+        let hovered = false;
+        try { await candidate.node.hover({ timeout: Math.max(1, Math.min(500, attemptRemaining())) }); hovered = true; }
+        catch { /* An obstructed seat is not an unavailable ticket. */ }
+        while (hovered && attemptRemaining()) {
+          await guard();
+          if (JSON.stringify(await candidate.node.evaluate(checkElement, candidate.expected)) !== JSON.stringify(candidate.identity)) {
+            throw new Error('scan_changed');
+          }
+          const observed = await candidate.node.evaluate(readTooltip, candidate.identity);
+          if (observed) {
+            // Re-read around the document guard while the same seat is hovered.
+            await guard();
+            if (JSON.stringify(await candidate.node.evaluate(checkElement, candidate.expected)) !== JSON.stringify(candidate.identity)
+                || JSON.stringify(await candidate.node.evaluate(readTooltip, candidate.identity)) !== JSON.stringify(observed)) {
+              throw new Error('scan_changed');
+            }
+            tooltip = observed;
+            observedAt = Date.now();
+            break;
+          }
+          if (attemptRemaining()) await page.waitForTimeout(Math.min(50, attemptRemaining()));
+        }
+      }
+      await guard();
+      if (JSON.stringify(await candidate.node.evaluate(checkElement, { ...candidate.expected, structureOnly: true })) !== JSON.stringify(candidate.identity)) {
+        throw new Error('scan_changed');
+      }
+      const { seat_id, row, seat } = candidate.identity;
+      results.push({ seat_id, row, seat, observed_at_ms: observedAt ?? Date.now(), tooltip,
+        outcome: tooltip ? 'quoted' : 'tooltip_unavailable' });
+    }
+    await guard();
+    const scan = {
+      section_id: sectionId, section_name: opened.inspection.section_name, limit,
+      started_at_ms: startedAt, finished_at_ms: Date.now(), candidate_count: candidates.length,
+      visible_candidate_count: visible.length, results,
+      stop_reason: results.length === visible.length ? 'visible_candidates_exhausted'
+        : results.length >= limit ? 'seat_limit' : 'time_budget',
+      coverage: 'partial_rendered_section', stock_verified: false, adjacency_verified: false,
+    };
+    await validateScanNodes(record);
+    pendingScans.set(page, { ...record, scan: JSON.stringify(scan), candidates });
+    retained = true;
+    return { state: 'scan_ready', opened: opened.opened, scan };
+  } finally {
+    if (!retained) await Promise.all([record.svg, record.block, ...candidates.map(c => c.node)].map(node => node.dispose()));
+  }
+}
+
+async function validateScanNodes(record) {
+  const current = await record.block.evaluate(checkElement, record.candidateExpected);
+  if (!current || JSON.stringify({ block_name: current.block_name,
+    entries: current.entries.map(({ visible, ...identity }) => identity) }) !== record.candidateIdentity) throw new Error('scan_changed');
+}
+
+// Prior quotes intentionally do not need to remain hovered. This assertion
+// confirms the final captured document still contains the original bound nodes.
+async function assertSectionScanCurrent(page, target, scan) {
+  const record = pendingScans.get(page);
+  pendingScans.delete(page);
+  try {
+    if (!record || record.target !== target || record.scan !== JSON.stringify(scan)
+        || !sameEvent(target, page.url()) || await inspectChallenge(page)) throw new Error('scan_changed');
+    await validateScanNodes(record);
+  } finally {
+    if (record) await Promise.all([record.svg, record.block, ...record.candidates.map(c => c.node)].map(node => node.dispose()));
+  }
+}
+
+module.exports = { inspectTicketmasterSection, assertSectionInspectionCurrent,
+  scanTicketmasterSection, assertSectionScanCurrent };

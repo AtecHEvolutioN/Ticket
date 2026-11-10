@@ -1,7 +1,9 @@
 # Inspect Czech map sections and seat prices
 
 The current source can open a numbered section in the observed Czech map layout
-and optionally hover one explicit resale seat. This is a read-only inspection:
+and optionally hover one explicit resale seat. [Section scans](section-scans.md)
+can discover resale seat candidates automatically and compare displayed prices
+between runs. This is a read-only inspection:
 section clicks change the map view; seat clicks, quantity changes, ticket searches
 and reservations are not performed. The Android APK is unchanged.
 

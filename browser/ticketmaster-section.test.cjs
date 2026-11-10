@@ -155,6 +155,8 @@ test('post-capture assertion rejects replaced seats, changed quotes and native m
   await browserTest(async context => {
     for (const change of [
       () => { const node = document.getElementById('seat_3'); node.replaceWith(node.cloneNode(true)); },
+      () => { const node = document.getElementById('main'); const replacement = node.cloneNode(false);
+        node.replaceWith(replacement); while (node.firstChild) replacement.append(node.firstChild); },
       () => { document.querySelector('[data-testid=ticketTypeInfo] span:last-child').textContent = '1 000,00 Kč za kus'; },
       () => { const modal = document.createElement('dialog'); document.body.append(modal); modal.showModal(); },
     ]) {

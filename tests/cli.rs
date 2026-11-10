@@ -572,3 +572,126 @@ fn map_section_cli_validates_hover_evidence_without_turning_it_into_stock() {
     assert!(mismatch.stdout.is_empty());
     assert!(!directory.path().join("data").exists());
 }
+
+#[test]
+fn map_scan_requires_a_section_and_bounded_limit_without_offline_or_seat_options() {
+    let directory = tempfile::tempdir().unwrap();
+    for extra in [
+        vec![],
+        vec!["--section-id", "s_12", "--limit", "0"],
+        vec!["--section-id", "s_12", "--limit", "51"],
+        vec!["--section-id", "s_12", "--html", "missing.html"],
+        vec!["--section-id", "s_12", "--seat-id", "seat-2"],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+            .current_dir(directory.path())
+            .args([
+                "map-scan",
+                "--url",
+                "https://www.ticketmaster.cz/event/example/12345678",
+            ])
+            .args(extra)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+    }
+    assert!(!directory.path().join("data").exists());
+}
+
+#[test]
+fn map_scan_cli_discovers_prices_and_records_only_validated_observations() {
+    let directory = tempfile::tempdir().unwrap();
+    let svg =
+        |html: &str| html[html.find("<svg ").unwrap()..html.find("</svg>").unwrap() + 6].to_owned();
+    let overview = svg(include_str!("fixtures/map-geometry.html"))
+        .replace("s_a", "s_12")
+        .replace("A1", "110");
+    let seats = svg(include_str!("fixtures/seat-geometry.html"));
+    let page = include_str!("fixtures/seat-map-regional.html")
+        .replace("</aside>", &format!("{overview}{seats}</aside>"));
+    std::fs::write(directory.path().join("event.html"), page).unwrap();
+    std::fs::create_dir(directory.path().join("browser")).unwrap();
+    std::fs::write(directory.path().join("browser/worker.cjs"), r#"
+        const fs=require('node:fs');
+        require('node:readline').createInterface({input:process.stdin}).on('line',line=>{
+            const r=JSON.parse(line), now=Date.now();
+            if(r.adapter!=='ticketmaster'||r.display!=='map'||r.map_section_id!=='s_12'||r.map_scan_limit!==3||r.map_seat_id!==undefined){
+                process.stdout.write(JSON.stringify({id:r.id,error:'invalid_request'})+'\n');return;
+            }
+            const tip=JSON.parse(fs.readFileSync('tooltip.json','utf8'));
+            const scan={section_id:'s_12',section_name:'110',limit:3,
+                started_at_ms:now-2,finished_at_ms:now,candidate_count:1,visible_candidate_count:1,
+                results:[{seat_id:'seat-2',row:'12',seat:'2',observed_at_ms:now-1,tooltip:tip,outcome:'quoted'}],
+                stop_reason:'visible_candidates_exhausted',coverage:'partial_rendered_section',
+                stock_verified:false,adjacency_verified:false};
+            process.stdout.write(JSON.stringify({id:r.id,status:200,adapter_state:'ready',elapsed_ms:2,
+                final_url:r.url,html:fs.readFileSync('event.html','utf8'),map_scan:scan})+'\n');
+        });
+    "#).unwrap();
+    let mut tooltip = serde_json::json!({"zone":"1. POSCHODÍ","section":"110","row":"12","seat":"2",
+        "ticket_type":"Ověřené přeprodávané vstupenky","restriction":null,"price_text":"1 234,50 Kč za kus"});
+    let tooltip_file = directory.path().join("tooltip.json");
+    std::fs::write(&tooltip_file, serde_json::to_vec(&tooltip).unwrap()).unwrap();
+    let run = |state: Option<&str>| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_ticket-watch"));
+        command
+            .current_dir(directory.path())
+            .env_remove("TICKETMASTER_API_KEY")
+            .env_remove("DISCORD_BOT_TOKEN")
+            .args([
+                "--config",
+                "missing-config.toml",
+                "map-scan",
+                "--url",
+                "https://www.ticketmaster.cz/event/synthetic-concert/1234567890",
+                "--section-id",
+                "s_12",
+                "--limit",
+                "3",
+            ]);
+        if let Some(path) = state {
+            command.args(["--state", path]);
+        }
+        command.output().unwrap()
+    };
+    let check = |output: std::process::Output| {
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    let first = check(run(None));
+    assert_eq!(first["source"], "live_browser");
+    assert_eq!(first["transport_binding"], "observed_main_document");
+    assert_eq!(first["elapsed_ms"], 2);
+    assert_eq!(first["scan"]["quoted_count"], 1);
+    assert_eq!(
+        first["scan"]["observations"][0]["quote"]["price_minor"],
+        123450
+    );
+    assert_eq!(first["scan"]["stock_verified"], false);
+    assert!(first["state_changes"].is_null());
+    assert!(!directory.path().join("data").exists());
+    let recorded = check(run(Some("scan.sqlite")));
+    assert_eq!(
+        recorded["state_changes"]["changes"][0]["kind"],
+        "first_observed"
+    );
+    let repeated = check(run(Some("scan.sqlite")));
+    assert!(
+        repeated["state_changes"]["changes"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    tooltip["row"] = "99".into();
+    std::fs::write(&tooltip_file, serde_json::to_vec(&tooltip).unwrap()).unwrap();
+    let invalid = run(Some("rejected.sqlite"));
+    assert!(!invalid.status.success());
+    assert!(invalid.stdout.is_empty());
+    assert!(!directory.path().join("rejected.sqlite").exists());
+    assert!(!directory.path().join("data").exists());
+}

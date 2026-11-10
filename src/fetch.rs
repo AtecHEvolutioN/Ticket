@@ -24,6 +24,7 @@ pub struct FetchResult {
     pub detail: String,
     pub adapter_state: Option<String>,
     pub map_inspection: Option<crate::map_inspection::MapInspection>,
+    pub map_scan: Option<crate::map_scan::BrowserMapScan>,
 }
 
 pub struct Fetcher {
@@ -73,8 +74,15 @@ impl Fetcher {
         let page = match watch.mode {
             FetchMode::Http => self.http(safe_url.as_str()).await?,
             FetchMode::Browser => {
-                self.browser(safe_url.as_str(), watch.parser.adapter, None, None, None)
-                    .await?
+                self.browser(
+                    safe_url.as_str(),
+                    watch.parser.adapter,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await?
             }
         };
         if (200..300).contains(&page.status)
@@ -91,15 +99,22 @@ impl Fetcher {
         match mode {
             FetchMode::Http => self.http(safe_url.as_str()).await,
             FetchMode::Browser => {
-                self.browser(safe_url.as_str(), PageAdapter::Selectors, None, None, None)
-                    .await
+                self.browser(
+                    safe_url.as_str(),
+                    PageAdapter::Selectors,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await
             }
         }
     }
 
     /// Inspect the event's map display without switching to ticket offers.
     pub async fn fetch_map(&self, url: &str) -> Result<FetchResult> {
-        self.fetch_map_target(url, None, None).await
+        self.fetch_map_target(url, None, None, None).await
     }
 
     /// Open one Czech map section and optionally hover one seat; never selects it.
@@ -116,7 +131,26 @@ impl Fetcher {
         if !map_identifier(section_id) || seat_id.is_some_and(|id| !map_identifier(id)) {
             bail!("Map section and seat IDs must be bounded ASCII identifiers");
         }
-        self.fetch_map_target(url, Some(section_id), seat_id).await
+        self.fetch_map_target(url, Some(section_id), seat_id, None)
+            .await
+    }
+
+    /// Inspect a bounded set of displayed resale prices in one Czech section.
+    pub async fn fetch_map_scan(
+        &self,
+        url: &str,
+        section_id: &str,
+        limit: u32,
+    ) -> Result<FetchResult> {
+        if !crate::event_identity::identity(url).is_some_and(|(host, _)| host == "ticketmaster.cz")
+        {
+            bail!("Map scanning requires a public Czech event URL");
+        }
+        if !map_identifier(section_id) || !(1..=50).contains(&limit) {
+            bail!("Map scanning requires a bounded section ID and limit from 1 to 50");
+        }
+        self.fetch_map_target(url, Some(section_id), None, Some(limit))
+            .await
     }
 
     async fn fetch_map_target(
@@ -124,6 +158,7 @@ impl Fetcher {
         url: &str,
         section_id: Option<&str>,
         seat_id: Option<&str>,
+        scan_limit: Option<u32>,
     ) -> Result<FetchResult> {
         let safe_url = validate_public_url(url)?;
         if !crate::event_identity::same_event(url, url) {
@@ -136,6 +171,7 @@ impl Fetcher {
                 Some(BrowserDisplay::Map),
                 section_id,
                 seat_id,
+                scan_limit,
             )
             .await?;
         if (200..300).contains(&page.status)
@@ -164,6 +200,7 @@ impl Fetcher {
         display: Option<BrowserDisplay>,
         map_section_id: Option<&str>,
         map_seat_id: Option<&str>,
+        map_scan_limit: Option<u32>,
     ) -> Result<FetchResult> {
         // One context and child process are reused. The worker processes one navigation at a time.
         let mut guard = self.browser.lock().await;
@@ -184,6 +221,7 @@ impl Fetcher {
             display,
             map_section_id,
             map_seat_id,
+            map_scan_limit,
         };
         worker.next_id += 1;
         // Include a bounded browser-startup allowance in addition to the navigation deadline.
@@ -293,6 +331,7 @@ async fn read_response(
             detail,
             adapter_state: None,
             map_inspection: None,
+            map_scan: None,
         });
     }
     if response
@@ -329,6 +368,7 @@ async fn read_response(
         detail: "HTTP page received".into(),
         adapter_state: None,
         map_inspection: None,
+        map_scan: None,
     })
 }
 
@@ -383,6 +423,8 @@ struct BrowserRequest<'a> {
     map_section_id: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     map_seat_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    map_scan_limit: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -436,6 +478,7 @@ struct BrowserReply {
     adapter_state: Option<String>,
     manual_intervention: Option<ManualIntervention>,
     map_inspection: Option<crate::map_inspection::MapInspection>,
+    map_scan: Option<crate::map_scan::BrowserMapScan>,
 }
 
 struct BrowserProcess {
@@ -585,7 +628,10 @@ impl BrowserProcess {
                 .as_ref()
                 .map(|state| format!("{detail}; browser adapter={state}"))
                 .unwrap_or(detail);
-            match (request.map_section_id, &reply.map_inspection) {
+            let requested_inspection = request
+                .map_section_id
+                .filter(|_| request.map_scan_limit.is_none());
+            match (requested_inspection, &reply.map_inspection) {
                 (None, Some(_)) => bail!("Unsolicited map section inspection"),
                 (Some(section_id), Some(inspection)) => {
                     if inspection.section_id != section_id
@@ -605,6 +651,26 @@ impl BrowserProcess {
                 }
                 _ => {}
             }
+            match (request.map_scan_limit, &reply.map_scan) {
+                (None, Some(_)) => bail!("Unsolicited map scan"),
+                (Some(limit), Some(scan)) => {
+                    if Some(scan.section_id.as_str()) != request.map_section_id
+                        || scan.limit != limit
+                    {
+                        bail!("Map scan target or limit mismatch");
+                    }
+                    if !(200..300).contains(&status) || adapter_state.as_deref() != Some("ready") {
+                        bail!("Map scan lacks a ready document");
+                    }
+                }
+                (Some(_), None)
+                    if (200..300).contains(&status)
+                        && adapter_state.as_deref() == Some("ready") =>
+                {
+                    bail!("Browser omitted the requested map scan");
+                }
+                _ => {}
+            }
             return Ok(FetchResult {
                 status,
                 html,
@@ -614,6 +680,7 @@ impl BrowserProcess {
                 detail,
                 adapter_state,
                 map_inspection: reply.map_inspection,
+                map_scan: reply.map_scan,
             });
         }
     }
@@ -1011,6 +1078,119 @@ mod tests {
         assert!(request.get("map_section_id").is_none());
         assert!(request.get("map_seat_id").is_none());
         assert!(ordinary.map_inspection.is_none());
+        fetcher.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn map_scan_rejects_invalid_targets_before_starting_a_browser() {
+        let mut config = Config::default();
+        config.browser.script = "/missing-map-scan-worker.cjs".into();
+        let fetcher = Fetcher::new(&config).unwrap();
+        let event = "https://www.ticketmaster.cz/event/example/12345678";
+        for (section, limit) in [
+            ("", 20),
+            ("s_1] path", 20),
+            ("s_ě", 20),
+            ("s_1", 0),
+            ("s_1", 51),
+        ] {
+            let error = fetcher
+                .fetch_map_scan(event, section, limit)
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains("bounded section ID and limit"));
+        }
+        assert!(
+            fetcher
+                .fetch_map_scan(event, &"x".repeat(129), 20)
+                .await
+                .is_err()
+        );
+        for event in [
+            "https://www.ticketmaster.pl/event/example/12345678",
+            "https://www.ticketmaster.cz/artist/12345678",
+        ] {
+            let error = fetcher.fetch_map_scan(event, "s_1", 20).await.unwrap_err();
+            assert!(error.to_string().contains("public Czech event URL"));
+        }
+        assert!(fetcher.browser.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn map_scan_protocol_requires_matching_exclusive_evidence() {
+        let mut script = tempfile::NamedTempFile::new().unwrap();
+        script.write_all(br#"
+            require('node:readline').createInterface({input:process.stdin}).on('line',line=>{
+                const r=JSON.parse(line), kind=new URL(r.url).pathname.split('/')[2];
+                const scan={section_id:kind==='wrong-section'?'s_other':r.map_section_id||'s_1',
+                    section_name:'101',limit:kind==='wrong-limit'?49:r.map_scan_limit||20,
+                    started_at_ms:1000,finished_at_ms:1001,candidate_count:0,visible_candidate_count:0,
+                    results:[],stop_reason:'visible_candidates_exhausted',coverage:'partial_rendered_section',
+                    stock_verified:false,adjacency_verified:false};
+                const inspection={section_id:'s_1',section_name:'101',seat_id:null,coverage:'section_only',
+                    tooltip:null,stock_verified:false,adjacency_verified:false};
+                process.stdout.write(JSON.stringify({id:r.id,status:kind==='plain-blocked'?403:200,
+                    html:JSON.stringify(r),final_url:kind==='wrong-event'?r.url.replace('12345678','87654321'):r.url,
+                    adapter_state:['blocked','plain-blocked'].includes(kind)?'blocked':'ready',retry_after_secs:30,
+                    map_scan:['missing','plain-blocked'].includes(kind)?undefined:scan,
+                    map_inspection:kind==='inspection'?inspection:undefined})+'\n');
+            });
+        "#).unwrap();
+        let mut config = Config::default();
+        config.browser.script = script.path().to_owned();
+        let fetcher = Fetcher::new(&config).unwrap();
+        let result = fetcher
+            .fetch_map_scan(
+                "https://www.ticketmaster.cz/event/example/12345678",
+                "s_1",
+                20,
+            )
+            .await
+            .unwrap();
+        let request: serde_json::Value = serde_json::from_str(&result.html).unwrap();
+        assert_eq!(request["adapter"], "ticketmaster");
+        assert_eq!(request["display"], "map");
+        assert_eq!(request["map_section_id"], "s_1");
+        assert_eq!(request["map_scan_limit"], 20);
+        assert!(request.get("map_seat_id").is_none());
+        assert!(result.map_inspection.is_none());
+        assert_eq!(result.map_scan.unwrap().limit, 20);
+        for (kind, message) in [
+            ("wrong-section", "target or limit mismatch"),
+            ("wrong-limit", "target or limit mismatch"),
+            ("wrong-event", "does not match the requested event"),
+            ("missing", "omitted the requested map scan"),
+            ("blocked", "lacks a ready document"),
+            ("inspection", "Unsolicited map section inspection"),
+        ] {
+            let url = format!("https://www.ticketmaster.cz/event/{kind}/12345678");
+            let error = fetcher.fetch_map_scan(&url, "s_1", 20).await.unwrap_err();
+            assert!(error.to_string().contains(message), "{kind}: {error}");
+        }
+        let ordinary = "https://www.ticketmaster.cz/event/unsolicited/12345678";
+        for result in [
+            fetcher.fetch_map(ordinary).await,
+            fetcher.fetch_url(ordinary, FetchMode::Browser).await,
+        ] {
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("Unsolicited map scan")
+            );
+        }
+        let blocked = fetcher
+            .fetch_map_scan(
+                "https://www.ticketmaster.cz/event/plain-blocked/12345678",
+                "s_1",
+                20,
+            )
+            .await
+            .unwrap();
+        assert_eq!(blocked.status, 403);
+        assert_eq!(blocked.retry_after_secs, Some(30));
+        assert_eq!(blocked.adapter_state.as_deref(), Some("blocked"));
+        assert!(blocked.map_scan.is_none());
         fetcher.shutdown().await;
     }
 

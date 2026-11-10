@@ -38,9 +38,10 @@ pub struct SectionInspection {
     pub adjacency_verified: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct DisplayedSeatQuote {
-    pub evidence: &'static str,
+    pub evidence: String,
     pub seat_id: String,
     pub zone: String,
     pub section: String,
@@ -49,8 +50,8 @@ pub struct DisplayedSeatQuote {
     pub ticket_type: String,
     pub restriction: Option<String>,
     pub price_minor: i64,
-    pub currency: &'static str,
-    pub price_basis: &'static str,
+    pub currency: String,
+    pub price_basis: String,
     pub price_text: String,
     pub fees_complete: bool,
     pub available_quantity: Option<u32>,
@@ -165,7 +166,7 @@ pub fn validate_inspection(
                 .filter(|n| (1..=100_000_000).contains(n))
                 .context("invalid or ambiguous Czech seat price")?;
             Ok(DisplayedSeatQuote {
-                evidence: "rendered_seat_hover",
+                evidence: "rendered_seat_hover".into(),
                 seat_id: seat.id.clone(),
                 zone: tip.zone.clone(),
                 section: tip.section.clone(),
@@ -174,8 +175,8 @@ pub fn validate_inspection(
                 ticket_type: tip.ticket_type.clone(),
                 restriction: tip.restriction.clone(),
                 price_minor,
-                currency: "CZK",
-                price_basis: "per_ticket",
+                currency: "CZK".into(),
+                price_basis: "per_ticket".into(),
                 price_text: tip.price_text.clone(),
                 fees_complete: false,
                 available_quantity: None,

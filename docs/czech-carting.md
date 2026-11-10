@@ -61,6 +61,9 @@ the user's current preference is cheapest, without a specified cap.
 seat identities and an observed resale hover price without selecting the seat.
 It keeps quantities, complete fees and adjacency unverified and does not feed
 those display observations into the reservation planner.
+The [section scanner](section-scans.md) can now discover resale seat IDs and
+record displayed-price changes automatically within a selected section. Its
+partial observations still do not establish a purchasable adjacent group.
 
 Captured Czech pages for KoRn, Ross Noble, and Andrea Bocelli share the category
 stepper and `findTicketsBtn` controls. Price and section filters are disabled until

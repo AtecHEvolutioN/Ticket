@@ -34,6 +34,21 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Scan displayed resale prices in one Czech map section; never selects tickets.
+    MapScan {
+        #[arg(long)]
+        url: String,
+        #[arg(long)]
+        section_id: String,
+        /// Maximum visible resale candidates to inspect in this pass.
+        #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u32).range(1..=50))]
+        limit: u32,
+        #[arg(long)]
+        headed: bool,
+        /// Record observations and compare changes in a separate local SQLite file.
+        #[arg(long)]
+        state: Option<PathBuf>,
+    },
     /// Inspect a regional map's references and rendered section outlines; never infers live seats.
     MapInspect {
         #[arg(long)]
@@ -694,6 +709,7 @@ async fn main() -> Result<()> {
             Config::default()
         }
         Command::Artists { .. }
+        | Command::MapScan { .. }
         | Command::Events { .. }
         | Command::Inspect { .. }
         | Command::CartCatalog { .. }
@@ -706,6 +722,44 @@ async fn main() -> Result<()> {
         _ => config::load(&cli.config)?,
     };
     match cli.command {
+        Command::MapScan {
+            url,
+            section_id,
+            limit,
+            headed,
+            state,
+        } => {
+            let mut browser_config = config.clone();
+            browser_config.browser.headed = headed;
+            browser_config.request_timeout_secs = 45;
+            let fetcher = Fetcher::new(&browser_config)?;
+            let result = fetcher.fetch_map_scan(&url, &section_id, limit).await;
+            fetcher.shutdown().await;
+            let page = result?;
+            if !(200..300).contains(&page.status) || page.adapter_state.as_deref() != Some("ready")
+            {
+                bail!(
+                    "HTTP {}; {}; no map scan extracted",
+                    page.status,
+                    page.detail
+                );
+            }
+            let raw = page.map_scan.context("No captured map scan evidence")?;
+            let snapshot =
+                ticket_watch::seat_map::extract_seat_map(&url, &page.final_url, &page.html)?;
+            let scan = ticket_watch::map_scan::validate_scan(
+                &snapshot,
+                &raw,
+                chrono::Utc::now().timestamp_millis(),
+            )?;
+            let state_changes = state
+                .map(|path| ticket_watch::map_scan_store::MapScanStore::open(&path)?.record(&scan))
+                .transpose()?;
+            print_json(&serde_json::json!({
+                "source":"live_browser", "transport_binding":"observed_main_document",
+                "elapsed_ms":page.elapsed_ms, "scan":scan, "state_changes":state_changes
+            }))?;
+        }
         Command::MapInspect {
             url,
             html,
@@ -1175,6 +1229,7 @@ mod observation_tests {
                 detail: "browser result".into(),
                 adapter_state: Some(state.into()),
                 map_inspection: None,
+                map_scan: None,
             };
             let result = page_observation(&watch, &page, 10);
             assert_eq!(result.availability, expected, "{state}");

@@ -1,0 +1,94 @@
+{
+  "event_url": "https://www.ticketmaster.cz/event/korn-vstupenky/1472650657",
+  "market": "CZ",
+  "section_id": "s_128",
+  "section_name": "110",
+  "scan_limit": 20,
+  "seat_id_supplied_to_command": false,
+  "command": "ticket-watch map-scan --headed --url https://www.ticketmaster.cz/event/korn-vstupenky/1472650657 --section-id s_128 --limit 20 --state <dedicated-history.sqlite>",
+  "initial_attempt": {
+    "status": 401,
+    "reason": "identification_incomplete",
+    "identification_grace_ms": 5000,
+    "history_created": false
+  },
+  "subsequent_identification_grace_ms": 15000,
+  "live_scans": [
+    {
+      "observed_at_utc": "2026-11-10T07:08:01.128000+00:00",
+      "source": "live_browser",
+      "transport_binding": "observed_main_document",
+      "page_capture_elapsed_ms": 8023,
+      "section_scan_duration_ms": 1673,
+      "candidate_count": 1,
+      "visible_candidate_count": 1,
+      "attempted_count": 1,
+      "quoted_count": 1,
+      "unattempted_count": 0,
+      "stop_reason": "visible_candidates_exhausted",
+      "displayed_quote": {
+        "seat_id": "GFIC2MJRGA5DCMR2GM",
+        "section": "110",
+        "row": "12",
+        "seat": "3",
+        "ticket_type": "Ověřené přeprodávané vstupenky",
+        "restriction": "Omezený výhled",
+        "price_minor": 243800,
+        "currency": "CZK",
+        "price_basis": "per_ticket",
+        "fees_complete": false,
+        "available_quantity": null
+      },
+      "history_change_kinds": [
+        "first_observed"
+      ]
+    },
+    {
+      "observed_at_utc": "2026-11-10T07:08:43.847000+00:00",
+      "source": "live_browser",
+      "transport_binding": "observed_main_document",
+      "page_capture_elapsed_ms": 8193,
+      "section_scan_duration_ms": 1615,
+      "candidate_count": 1,
+      "visible_candidate_count": 1,
+      "attempted_count": 1,
+      "quoted_count": 1,
+      "unattempted_count": 0,
+      "stop_reason": "visible_candidates_exhausted",
+      "displayed_quote": {
+        "seat_id": "GFIC2MJRGA5DCMR2GM",
+        "section": "110",
+        "row": "12",
+        "seat": "3",
+        "ticket_type": "Ověřené přeprodávané vstupenky",
+        "restriction": "Omezený výhled",
+        "price_minor": 243800,
+        "currency": "CZK",
+        "price_basis": "per_ticket",
+        "fees_complete": false,
+        "available_quantity": null
+      },
+      "history_change_kinds": []
+    }
+  ],
+  "verification": {
+    "rust_tests_passed": 262,
+    "browser_tests_passed": 80,
+    "browser_tests_skipped": 0,
+    "formatting": "passed",
+    "clippy": "passed",
+    "release_build": "passed",
+    "delayed_identification_and_deadline_regressions": "passed"
+  },
+  "limitations": {
+    "coverage": "partial_rendered_section",
+    "stock_verified": false,
+    "adjacency_verified": false,
+    "complete_checkout_fees_verified": false,
+    "ticket_selection_attempted": false,
+    "reservation_attempted": false,
+    "discord_messages_sent": false,
+    "continuous_polling_tested": false,
+    "android_apk_updated": false
+  }
+}
