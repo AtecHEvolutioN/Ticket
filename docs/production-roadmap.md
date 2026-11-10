@@ -14,8 +14,10 @@ experiment. This roadmap does not enable purchases, resale listings or repricing
   graceful shutdown and freshness checks. Production installation and live Discord
   delivery have not been verified.
 - Configurable ticket preferences: two adjacent tickets and cheapest eligible
-  group by default. Android saves and exports preferences; server synchronization
-  and automatic application to monitoring remain unfinished.
+  group by default. Android saves and exports preferences. A separate revisioned
+  server registry and [read-only trigger preview](monitor-trigger-preview.md)
+  evaluate stored observations against saved settings; phone synchronization,
+  durable triggers and automatic dispatch remain unfinished.
 - One experimental Czech native cart attempt, durable dispatch/event locks,
   local operator resume/review and recovery inspection. A successful hold receipt
   and usable customer checkout handoff remain unverified.

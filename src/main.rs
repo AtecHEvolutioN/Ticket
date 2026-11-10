@@ -208,10 +208,38 @@ enum Command {
     },
     /// Validate/export ticket preferences offline, or resolve the settings for one event.
     CartPreferences {
-        #[arg(long)]
+        #[arg(long, conflicts_with = "store")]
         file: Option<PathBuf>,
         #[arg(long)]
         event_url: Option<String>,
+        /// Inspect an existing revisioned server preferences registry without changing it.
+        #[arg(long)]
+        store: Option<PathBuf>,
+        /// Export only the Android-compatible document from the registry.
+        #[arg(long, requires = "store", conflicts_with = "event_url")]
+        export: bool,
+        /// Refuse to read a different registry revision than the one you reviewed.
+        #[arg(long, requires = "store", value_parser = clap::value_parser!(u64).range(1..=ticket_watch::cart::MAX_EXACT_INTEGER))]
+        expected_revision: Option<u64>,
+    },
+    /// Save validated preferences atomically; an outdated expected revision cannot overwrite edits.
+    CartPreferencesSave {
+        file: PathBuf,
+        #[arg(long)]
+        store: PathBuf,
+        /// Use zero only to create a registry; otherwise supply its current revision.
+        #[arg(long, value_parser = clap::value_parser!(u64).range(0..=ticket_watch::cart::MAX_EXACT_INTEGER))]
+        expected_revision: u64,
+    },
+    /// Preview the latest monitored signal against saved preferences; never searches or reserves.
+    CartTriggerPreview {
+        #[arg(long)]
+        watch: String,
+        #[arg(long)]
+        preferences_store: PathBuf,
+        /// Pin the settings used by this preview to a reviewed registry revision.
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..=ticket_watch::cart::MAX_EXACT_INTEGER))]
+        expected_revision: Option<u64>,
     },
     /// Inspect any selected event using the built-in Ticketmaster adapter; no config or alerts.
     Inspect {
@@ -811,6 +839,7 @@ async fn main() -> Result<()> {
         | Command::CartRecovery { .. }
         | Command::CartAbandonPrepared { .. }
         | Command::CartPreferences { .. }
+        | Command::CartPreferencesSave { .. }
         | Command::CartPlan { .. } => Config::default(),
         Command::Venues { .. }
             if cli.config == Path::new("config.toml") && !cli.config.exists() =>
@@ -1367,7 +1396,35 @@ async fn main() -> Result<()> {
                 "section_inspection":section_inspection}),
             )?;
         }
-        Command::CartPreferences { file, event_url } => {
+        Command::CartPreferences {
+            file,
+            event_url,
+            store,
+            export,
+            expected_revision,
+        } => {
+            if let Some(path) = store {
+                let saved = ticket_watch::preference_store::inspect(&path)?;
+                if expected_revision.is_some_and(|expected| expected != saved.revision) {
+                    bail!(
+                        "Preferences revision changed; inspect the current registry before continuing"
+                    );
+                }
+                if export {
+                    print_json(&saved.document)?;
+                } else if let Some(url) = event_url {
+                    let effective = ticket_watch::cart_preferences::resolve(&saved.document, &url)?;
+                    print_json(&serde_json::json!({
+                        "revision": saved.revision,
+                        "document_hash": saved.document_hash,
+                        "updated_at_ms": saved.updated_at_ms,
+                        "effective_preferences": effective,
+                    }))?;
+                } else {
+                    print_json(&saved)?;
+                }
+                return Ok(());
+            }
             let document = match file {
                 Some(path) => read_cart_preferences(&path)?,
                 None => ticket_watch::cart_preferences::PreferencesDocument::default(),
@@ -1377,6 +1434,38 @@ async fn main() -> Result<()> {
             } else {
                 print_json(&document)?;
             }
+        }
+        Command::CartPreferencesSave {
+            file,
+            store,
+            expected_revision,
+        } => {
+            let document = read_cart_preferences(&file)?;
+            let saved = ticket_watch::preference_store::import(
+                &store,
+                &document,
+                expected_revision,
+                chrono::Utc::now().timestamp_millis(),
+            )?;
+            print_json(&saved)?;
+        }
+        Command::CartTriggerPreview {
+            watch,
+            preferences_store,
+            expected_revision,
+        } => {
+            let saved = ticket_watch::preference_store::inspect(&preferences_store)?;
+            if expected_revision.is_some_and(|expected| expected != saved.revision) {
+                bail!(
+                    "Preferences revision changed; inspect the current registry before continuing"
+                );
+            }
+            print_json(&ticket_watch::monitor_trigger::preview(
+                &config,
+                &watch,
+                &saved,
+                chrono::Utc::now().timestamp_millis(),
+            )?)?;
         }
         Command::CartPlan { file, preferences } => {
             let mut input = Vec::new();

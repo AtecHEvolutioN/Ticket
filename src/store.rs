@@ -921,7 +921,7 @@ fn ensure_watch(transaction: &Transaction<'_>, watch: &Watch) -> Result<()> {
     Ok(())
 }
 
-fn fingerprint(watch: &Watch) -> Result<String> {
+pub(crate) fn fingerprint(watch: &Watch) -> Result<String> {
     let mut value = serde_json::to_value(watch)?;
     if let Some(object) = value.as_object_mut() {
         object.remove("interval_secs");

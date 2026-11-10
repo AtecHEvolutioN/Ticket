@@ -28,6 +28,12 @@ export to move them to the Rust planner. Existing page checks and notifications
 continue to use their own monitoring settings; saved cart preferences do not
 silently change alert filters or polling intervals.
 
+The current Rust source also provides a [versioned server registry and monitor
+trigger preview](monitor-trigger-preview.md). Import the export with an expected
+revision to prevent stale writes, then inspect a watch against those settings.
+This is local persistence and read-only evaluation; phone/server synchronization
+and automatic reservation dispatch remain unfinished.
+
 ## Export and use with the Rust planner
 
 The Android export and Rust command use the same versioned JSON format, shown in
