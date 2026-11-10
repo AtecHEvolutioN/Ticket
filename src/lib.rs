@@ -11,6 +11,7 @@ pub mod fetch;
 pub mod hybrid;
 pub mod map_asset;
 pub mod map_geometry;
+pub mod map_health;
 pub mod map_inspection;
 pub mod map_monitor;
 pub mod map_monitor_store;

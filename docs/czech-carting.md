@@ -31,6 +31,16 @@ A price level called “Platinum” is not automatically the same
 as the site's official Platinum ticket type. Duplicate rendered titles can group
 multiple metadata types; their shared quantity control is counted once.
 
+The catalog now exposes `event_start`, `event_time_zone` and `event_date_status`.
+A single known performance time requires consistent offset-bearing metadata.
+Unresolved or changed dates produce no usable performance instant; conflicting
+exact timestamps are rejected. The timezone name remains source metadata. These
+fields do not authenticate the age or source of an offline capture.
+The [date validation report](evidence/service-and-date-validation-2026-11-10.json)
+records successful saved-capture extraction for KoRn, Andrea Bocelli and Ross
+Noble. A capture with an open filter panel and no visible bound event heading was
+rejected; these are parser checks, not fresh availability observations.
+
 ## Evaluate an adjacent group
 
 ```bash
@@ -48,6 +58,12 @@ need that exact number of unique seats, explicit site-confirmed adjacency, a
 complete group total in CZK, and fresh matching event/session/document bindings.
 Standing tickets and consecutive-looking seat numbers do not establish adjacency.
 Unknown fees, stale quotes, category ranges, and quantity limits are insufficient.
+
+Supply `intent.expected_event_start` and `snapshot.event_start` as RFC3339
+timestamps with known offsets. The planner compares the exact UTC instants,
+including fractional seconds. Missing dates produce at most a provisional result;
+mismatched or malformed dates are refused. A matching event ID alone cannot prove
+the quote is for the intended performance.
 
 The cheapest eligible total can be called cheapest only within a complete search
 for the requested quantity. Partial or unresolved search coverage produces at
@@ -95,8 +111,9 @@ short-lived page checks. In that session, it must:
 1. Apply the explicitly requested quantity and validate the native exact-price
    filter and search order. Category minima overlap and cannot prove the cheapest
    available group.
-2. Determine whether the native search itself creates a hold. Record an attempt
-   durably **before** the first action that can reserve stock.
+2. Record an attempt durably **before** clicking Find tickets: the
+   [public-source trace](czech-reservation-flow.md) confirms that this control can
+   initiate a reservation. It is not a read-only availability probe.
 3. Reject non-adjacent results and re-read prices and availability after any
    [manual verification pause](manual-intervention.md). No solver is connected.
 4. Verify the resulting cart's event, quantity, seat grouping, complete price and
@@ -111,7 +128,8 @@ routes; the existing monitor's public-event policy remains in place. The
 [durable attempt journal](cart-journal.md) now supplies separate storage, a
 dispatch marker, idempotent outcomes and restart reconciliation. It is not yet
 connected to a native cart adapter and does not authenticate supplied receipts.
-Event date binding also remains to be added to the planner and receipt parser.
+The planner and journal now bind supplied performance instants. Native extraction
+and authentication of the receipt's date and other claims remain to be implemented.
 Session ownership and manual pauses must not stall checks for unrelated watched
 events.
 

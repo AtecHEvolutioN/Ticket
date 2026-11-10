@@ -10,6 +10,7 @@
 
 use std::collections::HashSet;
 
+use chrono::{DateTime, Datelike, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 
 /// Input/engineering limits, not provider purchase limits or stock counts.
@@ -32,6 +33,10 @@ pub struct CartPlanRequest {
 #[serde(deny_unknown_fields)]
 pub struct CartIntent {
     pub event_url: String,
+    /// Intended performance start, including its known UTC offset. Missing starts
+    /// permit offline diagnostics only; they never produce an admissible plan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_event_start: Option<String>,
     /// Deliberately optional at the input boundary: absence produces a fixed
     /// missing_quantity decision, never a default or Watch.min_quantity fallback.
     #[serde(default)]
@@ -52,6 +57,9 @@ pub struct BrowserContext {
 #[serde(deny_unknown_fields)]
 pub struct QuoteSnapshot {
     pub event_url: String,
+    /// Caller-observed performance start, not the quote observation timestamp.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_start: Option<String>,
     pub session_id: String,
     pub document_id: String,
     /// Coverage describes this exact search quantity, not all page inventory.
@@ -197,6 +205,11 @@ pub enum DecisionReason {
     InvalidQuantity,
     InvalidEventUrl,
     EventMismatch,
+    MissingExpectedEventStart,
+    MissingEventStart,
+    InvalidExpectedEventStart,
+    InvalidEventStart,
+    EventStartMismatch,
     InvalidContext,
     SessionMismatch,
     DocumentMismatch,
@@ -242,6 +255,9 @@ pub struct GroupRejection {
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct SelectedGroup {
     pub group_id: String,
+    /// Canonical UTC performance start from supplied evidence, when known.
+    /// Matching this claim never authenticates the provider or its inventory.
+    pub event_start: Option<String>,
     pub quantity: u32,
     pub total_minor: u64,
     pub currency: String,
@@ -329,7 +345,11 @@ pub fn plan(request: &CartPlanRequest, now_ms: i64) -> CartDecision {
         decision.rejected_groups = rejected_groups;
         return decision;
     };
-    let reason = if request.snapshot.coverage == Coverage::Partial {
+    let reason = if request.intent.expected_event_start.is_none() {
+        Some(DecisionReason::MissingExpectedEventStart)
+    } else if request.snapshot.event_start.is_none() {
+        Some(DecisionReason::MissingEventStart)
+    } else if request.snapshot.coverage == Coverage::Partial {
         Some(DecisionReason::PartialCoverage)
     } else if unresolved {
         Some(DecisionReason::UnresolvedCandidates)
@@ -350,6 +370,11 @@ pub fn plan(request: &CartPlanRequest, now_ms: i64) -> CartDecision {
         }),
         selected: Some(SelectedGroup {
             group_id: group.id.clone(),
+            event_start: request
+                .snapshot
+                .event_start
+                .as_deref()
+                .and_then(normalize_event_start),
             quantity,
             total_minor: *total,
             currency: "CZK".to_owned(),
@@ -384,6 +409,20 @@ fn validate_request(request: &CartPlanRequest, now_ms: i64) -> Result<(), Decisi
         .ok_or(DecisionReason::InvalidEventUrl)?;
     if intent_id != snapshot_id {
         return Err(DecisionReason::EventMismatch);
+    }
+    let expected_start = request
+        .intent
+        .expected_event_start
+        .as_deref()
+        .map(|value| normalize_event_start(value).ok_or(DecisionReason::InvalidExpectedEventStart))
+        .transpose()?;
+    let observed_start = snapshot
+        .event_start
+        .as_deref()
+        .map(|value| normalize_event_start(value).ok_or(DecisionReason::InvalidEventStart))
+        .transpose()?;
+    if expected_start.is_some() && observed_start.is_some() && expected_start != observed_start {
+        return Err(DecisionReason::EventStartMismatch);
     }
     if [
         &request.context.session_id,
@@ -458,6 +497,57 @@ fn validate_request(request: &CartPlanRequest, now_ms: i64) -> Result<(), Decisi
         }
     }
     Ok(())
+}
+
+/// Strict, bounded RFC3339 performance start with a known explicit offset.
+/// Normalize to UTC without rounding away fractional seconds. Local/date-only
+/// values, unknown `-00:00` offsets, and leap-second ambiguity fail closed.
+/// This validates the caller's claim only, never its native source authenticity.
+pub fn normalize_event_start(value: &str) -> Option<String> {
+    if !(20..=35).contains(&value.len()) || !value.is_ascii() {
+        return None;
+    }
+    let bytes = value.as_bytes();
+    if bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || bytes[10] != b'T'
+        || bytes[13] != b':'
+        || bytes[16] != b':'
+        || [0..4, 5..7, 8..10, 11..13, 14..16, 17..19]
+            .iter()
+            .any(|range| !bytes[range.clone()].iter().all(u8::is_ascii_digit))
+        || &value[17..19] > "59"
+    {
+        return None;
+    }
+    let mut suffix = &value[19..];
+    if let Some(fraction) = suffix.strip_prefix('.') {
+        let digits = fraction.bytes().take_while(u8::is_ascii_digit).count();
+        if !(1..=9).contains(&digits) {
+            return None;
+        }
+        suffix = &fraction[digits..];
+    }
+    if suffix != "Z" {
+        let offset = suffix.as_bytes();
+        if offset.len() != 6
+            || !matches!(offset[0], b'+' | b'-')
+            || offset[3] != b':'
+            || suffix == "-00:00"
+            || ![offset[1], offset[2], offset[4], offset[5]]
+                .iter()
+                .all(u8::is_ascii_digit)
+        {
+            return None;
+        }
+    }
+    let instant = DateTime::parse_from_rfc3339(value)
+        .ok()?
+        .with_timezone(&Utc);
+    if !(0..=9999).contains(&instant.year()) {
+        return None;
+    }
+    Some(instant.to_rfc3339_opts(SecondsFormat::AutoSi, true))
 }
 
 fn valid_id(value: &str) -> bool {
@@ -599,6 +689,7 @@ mod tests {
         CartPlanRequest {
             intent: CartIntent {
                 event_url: event_url.clone(),
+                expected_event_start: Some("2026-11-16T18:00:00+01:00".into()),
                 quantity: Some(2),
                 max_total_minor: None,
             },
@@ -608,6 +699,7 @@ mod tests {
             },
             snapshot: QuoteSnapshot {
                 event_url,
+                event_start: Some("2026-11-16T17:00:00Z".into()),
                 session_id: "browser-1".into(),
                 document_id: "document-1".into(),
                 requested_quantity: 2,
@@ -978,5 +1070,100 @@ mod tests {
             plan_json(b"{broken", NOW).reason,
             Some(DecisionReason::InvalidJson)
         );
+    }
+
+    #[test]
+    fn event_start_normalization_preserves_exact_instants_and_rejects_unknown_times() {
+        for (input, expected) in [
+            ("2026-11-16T18:00:00+01:00", "2026-11-16T17:00:00Z"),
+            ("2026-11-16T00:30:00+02:00", "2026-11-15T22:30:00Z"),
+            ("2026-11-16T23:30:00-02:00", "2026-11-17T01:30:00Z"),
+            ("2026-11-16T17:00:00.1Z", "2026-11-16T17:00:00.100Z"),
+            (
+                "2026-11-16T18:00:00.100000000+01:00",
+                "2026-11-16T17:00:00.100Z",
+            ),
+            (
+                "2026-11-16T17:00:00.000000001+00:00",
+                "2026-11-16T17:00:00.000000001Z",
+            ),
+        ] {
+            assert_eq!(normalize_event_start(input).as_deref(), Some(expected));
+        }
+        for input in [
+            "2026-11-16",
+            "2026-11-16T18:00:00",
+            "2026-11-16T18:00:00-00:00",
+            "2026-02-29T18:00:00Z",
+            "2026-11-16T24:00:00Z",
+            "2026-11-16T18:00:60Z",
+            "2026-11-16T18:00:00+24:00",
+            "2026-11-16T18:00:00+01:60",
+            "2026-11-16 18:00:00Z",
+            "2026-11-16T18:00:00.Z",
+            "2026-11-16T18:00:00.0000000001Z",
+            "2026-11-16T18:00:00Z ",
+            "2026-11-16T18:00:00Z\n",
+            "unknown",
+            "2026-11-16T18:00:00+0100",
+        ] {
+            assert_eq!(normalize_event_start(input), None, "{input:?}");
+        }
+    }
+
+    #[test]
+    fn missing_event_start_keeps_only_provisional_offline_diagnostics() {
+        let mut input = request();
+        input.intent.expected_event_start = None;
+        let decision = plan(&input, NOW);
+        assert_eq!(decision.outcome, PlanOutcome::Provisional);
+        assert_eq!(
+            decision.reason,
+            Some(DecisionReason::MissingExpectedEventStart)
+        );
+        assert!(decision.selected.is_some());
+        assert!(!decision.reservation_authorized);
+        input = request();
+        input.snapshot.event_start = None;
+        let decision = plan(&input, NOW);
+        assert_eq!(decision.outcome, PlanOutcome::Provisional);
+        assert_eq!(decision.reason, Some(DecisionReason::MissingEventStart));
+        assert!(decision.selected.unwrap().event_start.is_none());
+        input.intent.expected_event_start = None;
+        let json = serde_json::to_value(&input).unwrap();
+        assert!(json["intent"].get("expected_event_start").is_none());
+        assert!(json["snapshot"].get("event_start").is_none());
+        let legacy = plan_json(&serde_json::to_vec(&json).unwrap(), NOW);
+        assert_eq!(legacy.outcome, PlanOutcome::Provisional);
+        assert!(legacy.selected.is_some());
+    }
+
+    #[test]
+    fn supplied_performance_dates_must_be_valid_and_match_the_exact_instant() {
+        let mut input = request();
+        assert_eq!(
+            plan(&input, NOW).selected.unwrap().event_start.as_deref(),
+            Some("2026-11-16T17:00:00Z")
+        );
+        for source in [
+            "2026-11-17T17:00:00Z",
+            "2026-11-16T18:00:00Z",
+            "2026-11-16T17:00:00.000000001Z",
+        ] {
+            input.snapshot.event_start = Some(source.into());
+            rejected(&input, DecisionReason::EventStartMismatch);
+        }
+        input = request();
+        input.intent.expected_event_start = Some("2026-11-16".into());
+        rejected(&input, DecisionReason::InvalidExpectedEventStart);
+        input.intent.expected_event_start = None;
+        input.snapshot.event_start = Some("2026-11-16".into());
+        rejected(&input, DecisionReason::InvalidEventStart);
+        input = request();
+        input.intent.expected_event_start = Some("2026-11-16T18:00:00.1+01:00".into());
+        input.snapshot.event_start = Some("2026-11-16T17:00:00.100Z".into());
+        assert_eq!(plan(&input, NOW).outcome, PlanOutcome::Planned);
+        input.snapshot.event_start = Some("2026-11-16T17:00:00.101Z".into());
+        rejected(&input, DecisionReason::EventStartMismatch);
     }
 }

@@ -776,6 +776,25 @@ fn map_run_cli_previews_then_respects_restart_pacing_and_disabled_watches() {
     "#;
     let config_path = directory.path().join("monitor.toml");
     std::fs::write(&config_path, config).unwrap();
+    let health = || {
+        Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+            .current_dir(directory.path())
+            .env_remove("TICKET_TEST_MISSING_MAP_DISCORD_TOKEN")
+            .args([
+                "--config",
+                "monitor.toml",
+                "map-health",
+                "--max-age-secs",
+                "120",
+            ])
+            .output()
+            .unwrap()
+    };
+    let missing = health();
+    assert!(!missing.status.success());
+    let missing: serde_json::Value = serde_json::from_slice(&missing.stdout).unwrap();
+    assert_eq!(missing["status"], "not_initialized");
+    assert!(!directory.path().join("monitor.sqlite").exists());
     let run = |args: &[&str]| {
         let output = Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
             .current_dir(directory.path())
@@ -808,6 +827,17 @@ fn map_run_cli_previews_then_respects_restart_pacing_and_disabled_watches() {
     let status = run(&["map-status"]);
     assert_eq!(status[0]["watches"][0]["health"], "ok");
     assert_eq!(status[0]["watches"][0]["pending_alerts"], 1);
+    let current = health();
+    assert!(
+        current.status.success(),
+        "{}",
+        String::from_utf8_lossy(&current.stderr)
+    );
+    let current: serde_json::Value = serde_json::from_slice(&current.stdout).unwrap();
+    assert_eq!(current["healthy"], true);
+    assert_eq!(current["stock_verified"], false);
+    assert_eq!(current["delivery_verified"], false);
+    assert_eq!(current["process_running_verified"], false);
     assert!(
         status[0]["cooldowns"]["ticketmaster_cz_until_ms"]
             .as_i64()
@@ -838,6 +868,10 @@ fn map_run_cli_previews_then_respects_restart_pacing_and_disabled_watches() {
     let disabled = run(&["map-status"]);
     assert_eq!(disabled[0]["watches"][0]["enabled"], false);
     assert_eq!(disabled[0]["watches"][0]["pending_alerts"], 0);
+    let inactive = health();
+    assert!(!inactive.status.success());
+    let inactive: serde_json::Value = serde_json::from_slice(&inactive.stdout).unwrap();
+    assert_eq!(inactive["status"], "inactive");
     assert_eq!(
         std::fs::read_to_string(directory.path().join("requests.log")).unwrap(),
         "scan\n"

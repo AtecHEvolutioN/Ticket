@@ -1,0 +1,101 @@
+{
+  "verified_on": "2026-11-10",
+  "method": "offline_capture_replay_and_local_process_tests",
+  "catalog_date_replays": [
+    {
+      "event_url": "https://www.ticketmaster.cz/event/1472650657",
+      "event_name": "KoRn",
+      "event_start": "2026-11-16T18:30:00Z",
+      "event_time_zone": "Europe/Prague",
+      "event_date_status": "known_instant",
+      "source": "saved_html",
+      "ok": true,
+      "capture": "headed-offers.html"
+    },
+    {
+      "capture": "cz-bocelli-o2.html",
+      "ok": true,
+      "event_url": "https://www.ticketmaster.cz/event/andrea-bocelli-vstupenky/493115848",
+      "event_name": "Andrea Bocelli",
+      "event_start": "2027-05-27T18:00:00Z",
+      "event_time_zone": "Europe/Prague",
+      "event_date_status": "known_instant",
+      "source": "saved_html"
+    },
+    {
+      "capture": "cz-ross-noble-divadlo.html",
+      "ok": true,
+      "event_url": "https://www.ticketmaster.cz/event/ross-noble-vstupenky/1898352484",
+      "event_name": "Ross Noble",
+      "event_start": "2027-10-05T18:00:00Z",
+      "event_time_zone": "Europe/Prague",
+      "event_date_status": "known_instant",
+      "source": "saved_html"
+    }
+  ],
+  "known_rejected_capture": {
+    "state": "price/section filter left open",
+    "reason": "visible event heading not bound to embedded event; extraction refused"
+  },
+  "existing_database_health": {
+    "healthy": false,
+    "status": "unhealthy",
+    "scope": "displayed_price_observations",
+    "checked_at_ms": 1794297113400,
+    "max_age_secs": 120,
+    "enabled_watches": 1,
+    "checks": [
+      {
+        "id": "korn-cz-section-110",
+        "healthy": false,
+        "issues": [
+          "stale"
+        ],
+        "stored_health": "ok",
+        "last_success_at_ms": 1794296141330,
+        "age_ms": 972070,
+        "last_observed_at_ms": 1794296141330,
+        "next_due_ms": 1794296201535,
+        "pending_alerts": 0,
+        "expired_pending_alerts": 1,
+        "expired_alerts": 0
+      }
+    ],
+    "cooldowns": [
+      {
+        "scope": "host:ticketmaster.cz",
+        "until_ms": 1794296192806,
+        "remaining_ms": 0
+      }
+    ],
+    "stock_verified": false,
+    "adjacency_verified": false,
+    "delivery_verified": false,
+    "process_running_verified": false
+  },
+  "existing_database_health_exit_code": 1,
+  "tests": {
+    "passed": 327,
+    "failed": 0,
+    "ignored": 0,
+    "suites": 20
+  },
+  "checks": {
+    "clippy": "passed",
+    "formatting": "passed",
+    "systemd_unit_syntax": "validated with systemd-analyze 257 and substituted local executable; not installed",
+    "sigterm_cleanup": "passed subprocess regression",
+    "sigint_cleanup": "passed subprocess regression",
+    "read_only_health": "passed mutation, missing-state, schema and stale-state regressions",
+    "release_build": "passed"
+  },
+  "scope": {
+    "event_dates_are_source_metadata": true,
+    "native_receipt_authenticated": false,
+    "live_reservation_attempted": false,
+    "live_discord_message_sent": false,
+    "systemd_service_installed": false,
+    "systemd_service_started": false,
+    "android_apk_changed": false
+  }
+}

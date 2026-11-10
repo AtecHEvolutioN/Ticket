@@ -86,6 +86,8 @@ For recurring Czech section hover-price checks, use the separate
 It previews displayed-price notifications by default and needs `--send-discord`
 for live delivery. `map-status` reports its saved health and pending messages.
 These observations do not establish available ticket counts or adjacent groups.
+Use the [map service guide](map-service.md) for a dedicated systemd instance,
+explicit Discord enablement, graceful stop and source freshness checks.
 
 For custom profiles, set `adapter = "selectors"` and configure selectors against current markup you can access and inspect. Do not combine manual selectors with the built-in adapter. Status selectors must apply to the event's relevant sale scope. Offer selectors should identify actual offers with stable IDs. A verified profile with `offers_selector` also requires `offer_available_selector`: a visible, enabled purchasable signal relative to each row. A disabled button or price-only row cannot establish availability. A complete-snapshot selector must establish that the relevant listing is fully loaded: missing offers on a partial page are not sold-out evidence. A generic event-wide purchase button is insufficient.
 

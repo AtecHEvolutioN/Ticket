@@ -73,6 +73,13 @@ is separate from `database`, which
 belongs to the ordinary inventory monitor. Existing section-scan history files
 are migrated when opened by the newer code.
 
+For supervision, `map-health --max-age-secs 120` reads an existing database
+without migrating it and exits nonzero when any enabled watch is missing,
+reconfigured, blocked, unknown or stale. It checks saved observations; separately
+check whether the process is running and Discord delivery works. The
+[systemd setup](map-service.md) provides deployment templates and graceful
+SIGTERM/SIGINT shutdown. No service is installed automatically.
+
 These schedules are local to this runner. Coordinate other processes polling the
 same website; this command is not a shared rate limiter for unrelated programs.
 Polling, source refresh delays and access restrictions prevent an exact-second

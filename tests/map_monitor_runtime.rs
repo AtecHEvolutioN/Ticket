@@ -255,3 +255,86 @@ async fn continuous_scans_reuse_one_worker_and_resume_from_completion() {
         sent[0]["id"].as_u64().unwrap() + 1
     );
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn sigterm_stops_cli_cleans_browser_and_emits_lifecycle_records() {
+    assert_signal_stops_cli("-TERM").await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn sigint_stops_cli_cleans_browser_and_emits_lifecycle_records() {
+    assert_signal_stops_cli("-INT").await;
+}
+
+#[cfg(unix)]
+async fn assert_signal_stops_cli(signal: &str) {
+    let dir = tempfile::tempdir().unwrap();
+    let config = fixture(dir.path());
+    std::fs::write(dir.path().join("mode"), "hang").unwrap();
+    let config_path = dir.path().join("config.toml");
+    std::fs::write(&config_path, toml::to_string(&config).unwrap()).unwrap();
+    let stdout_path = dir.path().join("stdout");
+    let stderr_path = dir.path().join("stderr");
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+        .arg("--config")
+        .arg(&config_path)
+        .arg("map-run")
+        .stdout(std::fs::File::create(&stdout_path).unwrap())
+        .stderr(std::fs::File::create(&stderr_path).unwrap())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let pid = child.id().unwrap();
+    tokio::time::timeout(Duration::from_secs(4), async {
+        while requests(dir.path()).is_empty() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let browser_pid = std::fs::read_to_string(dir.path().join("pid")).unwrap();
+    assert!(
+        tokio::process::Command::new("kill")
+            .args([signal, &pid.to_string()])
+            .status()
+            .await
+            .unwrap()
+            .success()
+    );
+    let result = tokio::time::timeout(Duration::from_secs(8), child.wait()).await;
+    let stderr = std::fs::read_to_string(&stderr_path).unwrap();
+    let stdout = std::fs::read_to_string(&stdout_path).unwrap();
+    if result.is_err() {
+        let _ = child.kill().await;
+    }
+    let status = result
+        .unwrap_or_else(|_| {
+            panic!("{signal} must take the graceful cleanup path; stdout={stdout}; stderr={stderr}")
+        })
+        .unwrap();
+    assert!(status.success(), "{stderr}");
+    let records: Vec<serde_json::Value> = stdout
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let started = records
+        .iter()
+        .find(|item| item["event"] == "map_monitor_started")
+        .unwrap();
+    assert_eq!(started["process_id"], pid);
+    assert_eq!(started["enabled_watches"], 1);
+    assert_eq!(started["delivery_mode"], "preview_only");
+    assert_eq!(records.last().unwrap()["event"], "map_monitor_stopped");
+    assert_eq!(records.last().unwrap()["reason"], "shutdown");
+    #[cfg(target_os = "linux")]
+    assert!(!Path::new(&format!("/proc/{browser_pid}")).exists());
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(config.map_database.with_extension("lock"))
+        .unwrap();
+    lock.try_lock()
+        .expect("Shutdown signal must release the database lock");
+}

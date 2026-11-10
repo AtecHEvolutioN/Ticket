@@ -44,6 +44,11 @@ enum Command {
     },
     /// Show saved section-monitor health and pending notification counts.
     MapStatus,
+    /// Check saved observation freshness without changing state; unhealthy exits nonzero.
+    MapHealth {
+        #[arg(long, default_value_t = 120, value_parser = clap::value_parser!(u64).range(1..=31_536_000))]
+        max_age_secs: u64,
+    },
     /// Inspect a reservation-attempt journal without creating it or performing actions.
     CartJournal {
         #[arg(long)]
@@ -754,6 +759,17 @@ async fn main() -> Result<()> {
                     "discord_until_ms": store.cooldown("discord:delivery")?
                 }
             }))?;
+        }
+        Command::MapHealth { max_age_secs } => {
+            let report = ticket_watch::map_health::inspect(
+                &config,
+                max_age_secs,
+                chrono::Utc::now().timestamp_millis(),
+            )?;
+            print_json(&report)?;
+            if !report.healthy {
+                bail!("Map observation health check failed; see JSON report");
+            }
         }
         Command::CartJournal { file } => {
             print_json(&ticket_watch::cart_journal::inspect_file(&file)?)?;

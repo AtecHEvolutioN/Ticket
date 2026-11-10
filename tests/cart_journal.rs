@@ -7,14 +7,16 @@ use tempfile::tempdir;
 use ticket_watch::{cart::*, cart_journal::*};
 
 const NOW: i64 = 1_700_000_000_000;
+const START: &str = "2026-11-16T18:00:00+01:00";
+const CANONICAL_START: &str = "2026-11-16T17:00:00Z";
 const EVENT: &str = "https://www.ticketmaster.cz/event/korn-vstupenky/1472650657";
 
 fn request() -> CartPlanRequest {
     serde_json::from_value(serde_json::json!({
-        "intent":{"event_url":EVENT,"quantity":2,"max_total_minor":1000000},
+        "intent":{"event_url":EVENT,"expected_event_start":START,"quantity":2,"max_total_minor":1000000},
         "context":{"session_id":"app-session-1","document_id":"document-1"},
         "snapshot":{
-            "event_url":EVENT,"session_id":"app-session-1","document_id":"document-1",
+            "event_url":EVENT,"event_start":CANONICAL_START,"session_id":"app-session-1","document_id":"document-1",
             "requested_quantity":2,"observed_at_ms":NOW,"expires_at_ms":NOW+10000,
             "coverage":"complete_for_request","groups":[{
                 "id":"quote-1","quantity":2,"kind":"seated","availability":"confirmed",
@@ -45,6 +47,7 @@ fn context() -> ReceiptContext {
     ReceiptContext {
         attempt_id: "attempt-1".into(),
         event_url: EVENT.into(),
+        event_start: Some(START.into()),
         session_id: "app-session-1".into(),
         document_id: "document-1".into(),
         quote_id: "quote-1".into(),
@@ -87,6 +90,15 @@ fn begin_is_bound_idempotent_and_never_authorizes() {
     assert_eq!(a.state, AttemptState::Prepared);
     assert!(!a.reservation_authorized);
     assert!(!a.date_verified);
+    assert!(a.event_start_claims_match);
+    assert_eq!(
+        a.binding.expected_event_start.as_deref(),
+        Some(CANONICAL_START)
+    );
+    assert_eq!(
+        a.binding.source_event_start.as_deref(),
+        Some(CANONICAL_START)
+    );
     assert_eq!(a.evidence_basis, "caller_supplied_evidence");
     assert!(
         a.binding.adjacent_required && a.binding.cheapest_for_request && a.binding.fees_complete
@@ -494,4 +506,211 @@ fn weakened_active_attempt_constraint_is_rejected() {
         assert!(CartJournal::open(&path).is_err());
         assert!(inspect_file(&path).is_err());
     }
+}
+
+#[test]
+fn journal_rejects_missing_invalid_and_mismatched_start_claims() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cart.sqlite");
+    let mut journal = CartJournal::open(&path).unwrap();
+    for case in 0..6 {
+        let mut input = request();
+        match case {
+            0 => input.intent.expected_event_start = None,
+            1 => input.snapshot.event_start = None,
+            2 => input.intent.expected_event_start = Some("2026-11-16".into()),
+            3 => input.snapshot.event_start = Some("2026-11-16T18:00:00-00:00".into()),
+            4 => input.snapshot.event_start = Some("2026-11-17T17:00:00Z".into()),
+            _ => input.snapshot.event_start = Some("2026-11-16T17:00:00.000000001Z".into()),
+        }
+        assert!(journal.begin(&format!("bad-{case}"), &input, NOW).is_err());
+    }
+    assert!(inspect_file(&path).unwrap().is_empty());
+    assert_eq!(transition_count(&path), 0);
+}
+
+#[test]
+fn restart_binds_hold_and_no_hold_receipts_to_exact_performance_start() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cart.sqlite");
+    drop(dispatched(&path));
+    let mut journal = CartJournal::open(&path).unwrap();
+    for start in [
+        None,
+        Some("2026-11-16"),
+        Some("2026-11-16T18:00:00-00:00"),
+        Some("2026-11-17T17:00:00Z"),
+        Some("2026-11-16T18:00:00Z"),
+        Some("2026-11-16T17:00:00.000000001Z"),
+    ] {
+        let mut wrong_hold = hold();
+        wrong_hold.context.event_start = start.map(str::to_owned);
+        let mut wrong_absence = no_hold();
+        wrong_absence.context.event_start = start.map(str::to_owned);
+        assert!(
+            journal
+                .record_hold("attempt-1", &wrong_hold, NOW + 300)
+                .is_err()
+        );
+        assert!(
+            journal
+                .record_no_hold("attempt-1", &wrong_absence, NOW + 300)
+                .is_err()
+        );
+    }
+    assert_eq!(
+        inspect_file(&path).unwrap()[0].state,
+        AttemptState::NeedsReconciliation
+    );
+    assert_eq!(transition_count(&path), 2);
+    let held = journal
+        .record_hold("attempt-1", &hold(), NOW + 300)
+        .unwrap();
+    let mut equivalent = hold();
+    equivalent.context.event_start = Some(CANONICAL_START.into());
+    assert_eq!(
+        held,
+        journal
+            .record_hold("attempt-1", &equivalent, NOW + 400)
+            .unwrap()
+    );
+    drop(journal);
+    let reopened = inspect_file(&path).unwrap().remove(0);
+    assert_eq!(reopened, held);
+    assert!(reopened.event_start_claims_match);
+    assert!(!reopened.date_verified && !reopened.reservation_authorized);
+    let Some(OutcomeReceipt::Hold(receipt)) = reopened.receipt else {
+        panic!("hold missing")
+    };
+    assert_eq!(
+        receipt.context.event_start.as_deref(),
+        Some(CANONICAL_START)
+    );
+}
+
+fn make_legacy_v1(path: &Path) {
+    use sha2::{Digest, Sha256};
+    let mut old_request = request();
+    old_request.intent.expected_event_start = None;
+    old_request.snapshot.event_start = None;
+    let old_hash = format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(&old_request).unwrap())
+    );
+    let db = Connection::open(path).unwrap();
+    db.execute("UPDATE cart_attempts SET binding_json=json_remove(binding_json,'$.expected_event_start','$.source_event_start'), receipt_json=json_remove(receipt_json,'$.receipt.context.event_start'),request_hash=?1",[old_hash]).unwrap();
+    db.pragma_update(None, "user_version", 1).unwrap();
+}
+fn schema_version(path: &Path) -> i64 {
+    Connection::open(path)
+        .unwrap()
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .unwrap()
+}
+
+#[test]
+fn legacy_prepared_plan_is_inspectable_and_abandonable_but_never_dispatchable() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cart.sqlite");
+    let mut journal = CartJournal::open(&path).unwrap();
+    journal.begin("attempt-1", &request(), NOW).unwrap();
+    drop(journal);
+    make_legacy_v1(&path);
+    let legacy = inspect_file(&path).unwrap().remove(0);
+    assert_eq!(schema_version(&path), 1); // Inspection never migrates.
+    assert_eq!(legacy.state, AttemptState::Prepared);
+    assert!(!legacy.event_start_claims_match);
+    assert!(legacy.binding.expected_event_start.is_none());
+    let mut journal = CartJournal::open(&path).unwrap();
+    assert_eq!(schema_version(&path), 2);
+    let mut old_request = request();
+    old_request.intent.expected_event_start = None;
+    old_request.snapshot.event_start = None;
+    assert_eq!(
+        legacy,
+        journal.begin("attempt-1", &old_request, NOW).unwrap()
+    );
+    assert!(
+        journal
+            .mark_dispatch_started("attempt-1", NOW + 100)
+            .is_err()
+    );
+    assert!(journal.begin("attempt-2", &request(), NOW + 100).is_err());
+    journal.abandon_prepared("attempt-1", NOW + 100).unwrap();
+    assert!(
+        journal
+            .begin("attempt-2", &request(), NOW + 100)
+            .unwrap()
+            .event_start_claims_match
+    );
+}
+
+#[test]
+fn legacy_uncertain_attempt_keeps_event_locked_after_migration_and_restart() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cart.sqlite");
+    drop(dispatched(&path));
+    make_legacy_v1(&path);
+    let mut journal = CartJournal::open(&path).unwrap();
+    assert_eq!(schema_version(&path), 2);
+    assert!(
+        !journal
+            .mark_dispatch_started("attempt-1", NOW + 200)
+            .unwrap()
+            .newly_started
+    );
+    journal.mark_uncertain("attempt-1", NOW + 200).unwrap();
+    assert!(
+        journal
+            .record_hold("attempt-1", &hold(), NOW + 300)
+            .is_err()
+    );
+    assert!(
+        journal
+            .record_no_hold("attempt-1", &no_hold(), NOW + 300)
+            .is_err()
+    );
+    assert!(journal.abandon_prepared("attempt-1", NOW + 300).is_err());
+    assert!(
+        journal
+            .expire_confirmed_hold("attempt-1", NOW + 1000000)
+            .is_err()
+    );
+    assert!(journal.begin("attempt-2", &request(), NOW + 300).is_err());
+    drop(journal);
+    let reopened = inspect_file(&path).unwrap().remove(0);
+    assert_eq!(reopened.state, AttemptState::NeedsReconciliation);
+    assert!(!reopened.event_start_claims_match);
+}
+
+#[test]
+fn legacy_confirmed_hold_receipt_remains_readable_and_can_only_expire_at_its_deadline() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cart.sqlite");
+    let mut journal = dispatched(&path);
+    journal
+        .record_hold("attempt-1", &hold(), NOW + 300)
+        .unwrap();
+    drop(journal);
+    make_legacy_v1(&path);
+    let legacy = inspect_file(&path).unwrap().remove(0);
+    let Some(OutcomeReceipt::Hold(receipt)) = legacy.receipt else {
+        panic!("hold missing")
+    };
+    assert!(receipt.context.event_start.is_none());
+    assert!(!legacy.event_start_claims_match);
+    let mut journal = CartJournal::open(&path).unwrap();
+    assert!(
+        journal
+            .expire_confirmed_hold("attempt-1", NOW + 599999)
+            .is_err()
+    );
+    assert_eq!(
+        journal
+            .expire_confirmed_hold("attempt-1", NOW + 600000)
+            .unwrap()
+            .state,
+        AttemptState::Expired
+    );
+    assert_eq!(schema_version(&path), 2);
 }

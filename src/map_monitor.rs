@@ -69,8 +69,29 @@ struct ScanAttempt {
 /// Run continuously, or inspect each currently due watch at most once.
 /// Live Discord delivery is opt-in; preview mode never reads a bot token.
 pub async fn run(config: Config, once: bool, send: bool) -> Result<()> {
+    #[cfg(unix)]
+    {
+        // Register before creating state or child processes. Both terminal
+        // interrupts and service-manager stops must use the same cleanup path.
+        let mut interrupt =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+                .context("Register map monitor SIGINT handler")?;
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .context("Register map monitor SIGTERM handler")?;
+        run_with_shutdown(config, once, send, async move {
+            tokio::select! {
+                _ = interrupt.recv() => {},
+                _ = terminate.recv() => {},
+            }
+        })
+        .await
+    }
+    #[cfg(not(unix))]
     run_with_shutdown(config, once, send, async {
-        let _ = tokio::signal::ctrl_c().await;
+        if let Err(error) = tokio::signal::ctrl_c().await {
+            eprintln!("Map monitor interrupt handler failed: {error}");
+        }
     })
     .await
 }
@@ -120,6 +141,13 @@ async fn run_prepared(
     let mut shown = HashSet::new();
     let mut in_flight_delivery = None;
     let max_age_ms = milliseconds(config.alert_max_age_secs);
+    let mut stop_reason = "once_complete";
+    println!(
+        "{}",
+        json!({"event":"map_monitor_started", "timestamp_ms":now_ms(),
+        "process_id":std::process::id(), "enabled_watches":config.map_watches.iter().filter(|watch| watch.enabled).count(),
+        "delivery_mode":if live {"live_delivery"} else {"preview_only"}})
+    );
     tokio::pin!(shutdown);
     let outcome = async {
         loop {
@@ -187,7 +215,7 @@ async fn run_prepared(
             }
 
             tokio::select! {
-                _ = &mut shutdown => { eprintln!("Stopping map monitor"); break; }
+                _ = &mut shutdown => { stop_reason = "shutdown"; eprintln!("Stopping map monitor"); break; }
                 completed = fetches.join_next(), if !fetches.is_empty() => {
                     let (watch, attempt) = completed.context("Map fetch task disappeared")?.context("Map fetch task failed")?;
                     done.insert(watch.id.clone());
@@ -265,6 +293,11 @@ async fn run_prepared(
             .await;
     }
     fetcher.shutdown().await;
+    println!(
+        "{}",
+        json!({"event":"map_monitor_stopped", "timestamp_ms":now_ms(),
+        "process_id":std::process::id(), "reason":if outcome.is_err() {"failed"} else {stop_reason}})
+    );
     outcome
 }
 

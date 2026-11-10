@@ -1,0 +1,35 @@
+# Install a reviewed copy as /etc/ticket-watch/map.toml.
+# Secrets belong in /etc/ticket-watch/map.env, not in this file.
+database = "/var/lib/ticket-watch-map/inventory-unused.sqlite"
+map_database = "/var/lib/ticket-watch-map/map-monitor.sqlite"
+request_timeout_secs = 45
+per_host_interval_secs = 60
+blocked_retry_secs = 900
+unknown_retry_secs = 120
+alert_max_age_secs = 60
+
+[browser]
+node = "/usr/bin/node"
+script = "/opt/ticket-watch/browser/worker.cjs"
+executable_path = "/usr/bin/chromium"
+render_wait_ms = 1500
+headed = false
+
+[discord]
+token_env = "DISCORD_BOT_TOKEN"
+# channel_id = "YOUR_NUMERIC_CHANNEL_ID"
+mention_user_ids = []
+mention_role_ids = []
+
+[[map_watches]]
+id = "korn-cz-section-110"
+name = "KoRn - O2 arena, Prague - section 110"
+url = "https://www.ticketmaster.cz/event/korn-vstupenky/1472650657"
+section_id = "s_128"
+limit = 20
+interval_secs = 60
+# Review/replace the event and section, then enable before starting the service.
+enabled = false
+notify_initial = true
+notify_price_changes = true
+notify_details_changes = true

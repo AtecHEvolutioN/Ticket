@@ -1,0 +1,36 @@
+[Unit]
+Description=Ticket Watch Czech map display-price monitor
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=exec
+User=ticketwatch-map
+Group=ticketwatch-map
+WorkingDirectory=/opt/ticket-watch
+# Optional in preview mode. Keep this file root-owned with mode 0600.
+EnvironmentFile=-/etc/ticket-watch/map.env
+Environment=XDG_CACHE_HOME=/var/cache/ticket-watch-map
+ExecStartPre=/opt/ticket-watch/target/release/ticket-watch --config /etc/ticket-watch/map.toml validate
+# Sends no Discord messages. Enable delivery only with the documented drop-in.
+ExecStart=/opt/ticket-watch/target/release/ticket-watch --config /etc/ticket-watch/map.toml map-run
+StateDirectory=ticket-watch-map
+StateDirectoryMode=0750
+CacheDirectory=ticket-watch-map
+CacheDirectoryMode=0750
+UMask=0077
+Restart=on-failure
+RestartSec=30
+KillSignal=SIGTERM
+# Let the Rust parent finish browser cleanup first; timeout kills the whole group.
+KillMode=mixed
+TimeoutStopSec=30
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ticket-watch-map
+
+[Install]
+WantedBy=multi-user.target

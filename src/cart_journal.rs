@@ -6,8 +6,9 @@
 //! repeat that action when `newly_started` is false. A dispatched attempt remains
 //! unresolved across restarts until an explicit matching outcome is supplied.
 //! Application correlation IDs must never contain cookies, authentication tokens,
-//! checkout URLs, or private cart identifiers. Event dates are absent from the
-//! planner contract: event identity is bound, but date verification is not claimed.
+//! checkout URLs, or private cart identifiers. Performance start claims must
+//! match the intended instant, including its UTC offset. This consistency check
+//! is not independent date verification or authentication of the native source.
 
 use std::{collections::HashSet, path::Path, time::Duration};
 
@@ -19,7 +20,7 @@ use sha2::{Digest, Sha256};
 use crate::cart::{self, CartPlanRequest, PlanOutcome, QuoteFees, RankingScope, SeatIdentity};
 
 const APPLICATION_ID: i64 = 0x54434A31; // TCJ1, distinct from the inventory database.
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 const ACTIVE_INDEX_SQL: &str =
     "CREATE UNIQUE INDEX cart_one_active_event ON cart_attempts(event_key)
   WHERE state IN ('prepared','dispatch_started','needs_reconciliation','held')";
@@ -59,6 +60,12 @@ pub enum AttemptState {
 #[serde(deny_unknown_fields)]
 pub struct PlanBinding {
     pub event_url: String,
+    /// Canonical UTC instants. Optional only to preserve historical v1 rows;
+    /// new plans and outcomes require both matching, nonempty values.
+    #[serde(default)]
+    pub expected_event_start: Option<String>,
+    #[serde(default)]
+    pub source_event_start: Option<String>,
     pub session_id: String,
     pub document_id: String,
     pub quote_id: String,
@@ -87,6 +94,8 @@ pub struct AttemptRecord {
     pub evidence_basis: &'static str,
     pub reservation_authorized: bool,
     pub date_verified: bool,
+    /// Matching caller-supplied start claims, not native source authenticity.
+    pub event_start_claims_match: bool,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -104,6 +113,10 @@ pub struct DispatchResult {
 pub struct ReceiptContext {
     pub attempt_id: String,
     pub event_url: String,
+    /// Optional solely for reading legacy receipts. New outcomes must provide
+    /// the observed performance start, matching the intended exact instant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_start: Option<String>,
     pub session_id: String,
     pub document_id: String,
     pub quote_id: String,
@@ -189,7 +202,13 @@ impl CartJournal {
                 tx.pragma_update(None, "application_id", APPLICATION_ID)?;
                 tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             } else {
-                validate_schema(&tx)?;
+                let version = validate_schema(&tx)?;
+                if version == 1 {
+                    // Preserve old rows and active-event locks. Unknown legacy
+                    // dates are never fabricated, and dispatch checks below
+                    // prohibit acting on an undated prepared plan.
+                    tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+                }
             }
             tx.commit()?;
         }
@@ -242,6 +261,19 @@ impl CartJournal {
         let event_key = format!("{host}:{event_id}");
         let binding = PlanBinding {
             event_url: format!("https://{host}/event/{event_id}"),
+            expected_event_start: Some(
+                request
+                    .intent
+                    .expected_event_start
+                    .as_deref()
+                    .and_then(cart::normalize_event_start)
+                    .context("planned intent has no valid expected start")?,
+            ),
+            source_event_start: Some(
+                selected
+                    .event_start
+                    .context("planned quote has no valid event start")?,
+            ),
             session_id: request.context.session_id.clone(),
             document_id: request.context.document_id.clone(),
             quote_id: selected.group_id,
@@ -301,6 +333,10 @@ impl CartJournal {
                 newly_started: false,
             });
         }
+        ensure!(
+            stored.record.event_start_claims_match,
+            "legacy or mismatched event-start binding cannot be dispatched; abandon the unsent plan"
+        );
         ensure!(
             now_ms >= stored.record.updated_at_ms,
             "transition timestamp goes backwards"
@@ -409,6 +445,13 @@ impl CartJournal {
         let (host, event_id) = crate::event_identity::identity(&context.event_url)
             .context("invalid receipt public event URL")?;
         context.event_url = format!("https://{host}/event/{event_id}");
+        context.event_start = Some(
+            context
+                .event_start
+                .as_deref()
+                .and_then(cart::normalize_event_start)
+                .context("receipt requires a valid offset-qualified event start")?,
+        );
         let serialized = serde_json::to_string(&receipt)?;
         ensure!(
             serialized.len() <= cart::MAX_INPUT_BYTES,
@@ -510,12 +553,12 @@ pub fn inspect_file(path: &Path) -> Result<Vec<AttemptRecord>> {
     Ok(records)
 }
 
-fn validate_schema(connection: &Connection) -> Result<()> {
+fn validate_schema(connection: &Connection) -> Result<i64> {
     let application_id: i64 =
         connection.pragma_query_value(None, "application_id", |r| r.get(0))?;
     let version: i64 = connection.pragma_query_value(None, "user_version", |r| r.get(0))?;
     ensure!(
-        application_id == APPLICATION_ID && version == SCHEMA_VERSION,
+        application_id == APPLICATION_ID && (1..=SCHEMA_VERSION).contains(&version),
         "not a supported dedicated cart journal"
     );
     // Preparing these queries also rejects damaged/incomplete journal schemas.
@@ -535,7 +578,7 @@ fn validate_schema(connection: &Connection) -> Result<()> {
         index_sql.as_deref() == Some(ACTIVE_INDEX_SQL),
         "cart journal active-attempt constraint missing or altered"
     );
-    Ok(())
+    Ok(version)
 }
 
 fn load(connection: &Connection, attempt_id: &str) -> Result<Option<StoredAttempt>> {
@@ -573,21 +616,25 @@ fn load(connection: &Connection, attempt_id: &str) -> Result<Option<StoredAttemp
         "abandoned_before_dispatch" => AttemptState::AbandonedBeforeDispatch,
         _ => bail!("unknown cart journal state"),
     };
+    let binding: PlanBinding = serde_json::from_str(&binding_json)?;
+    let receipt: Option<OutcomeReceipt> = receipt_json
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()?;
+    let event_start_claims_match = matching_start_claims(&binding, receipt.as_ref());
     Ok(Some(StoredAttempt {
         record: AttemptRecord {
             attempt_id: attempt_id.to_owned(),
             state,
-            binding: serde_json::from_str(&binding_json)?,
+            binding,
             created_at_ms,
             updated_at_ms,
             dispatch_at_ms,
-            receipt: receipt_json
-                .as_deref()
-                .map(serde_json::from_str)
-                .transpose()?,
+            receipt,
             evidence_basis: "caller_supplied_evidence",
             reservation_authorized: false,
             date_verified: false,
+            event_start_claims_match,
         },
         raw_state,
         request_hash,
@@ -614,6 +661,10 @@ fn validate_receipt(record: &AttemptRecord, receipt: &OutcomeReceipt, now_ms: i6
         OutcomeReceipt::NoHold(v) => &v.context,
     };
     let binding = &record.binding;
+    ensure!(
+        matching_start_claims(binding, Some(receipt)),
+        "receipt performance start does not match a complete intended event-start binding"
+    );
     ensure!(
         context.attempt_id == record.attempt_id,
         "receipt attempt mismatch"
@@ -675,6 +726,36 @@ fn validate_receipt(record: &AttemptRecord, receipt: &OutcomeReceipt, now_ms: i6
         }
     }
     Ok(())
+}
+
+fn matching_start_claims(binding: &PlanBinding, receipt: Option<&OutcomeReceipt>) -> bool {
+    let Some(expected) = binding
+        .expected_event_start
+        .as_deref()
+        .and_then(cart::normalize_event_start)
+    else {
+        return false;
+    };
+    let source = binding
+        .source_event_start
+        .as_deref()
+        .and_then(cart::normalize_event_start);
+    if source.as_ref() != Some(&expected) {
+        return false;
+    }
+    if let Some(receipt) = receipt {
+        let context = match receipt {
+            OutcomeReceipt::Hold(v) => &v.context,
+            OutcomeReceipt::NoHold(v) => &v.context,
+        };
+        return context
+            .event_start
+            .as_deref()
+            .and_then(cart::normalize_event_start)
+            .as_ref()
+            == Some(&expected);
+    }
+    true
 }
 
 fn sorted_seats(mut seats: Vec<SeatIdentity>) -> Vec<SeatIdentity> {

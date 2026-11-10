@@ -34,11 +34,25 @@ pub enum CatalogSeating {
     Unknown,
 }
 
+/// Date configuration does not authenticate a live quote or prove a performance
+/// has not changed since this document was captured.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfiguredDateStatus {
+    KnownInstant,
+    Missing,
+    Unresolved,
+    EventChanged,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct CzCartCatalog {
     pub event_url: String,
     pub event_id: String,
     pub event_name: String,
+    pub event_start: Option<String>,
+    pub event_time_zone: Option<String>,
+    pub event_date_status: ConfiguredDateStatus,
     pub currency: String,
     pub evidence: CatalogEvidence,
     pub scope: CatalogScope,
@@ -224,6 +238,7 @@ pub fn extract_cz_cart_catalog(
     verify_query_binding(state, selection, &event_id)?;
 
     let event_name = label(&event["name"])?;
+    let (event_start, event_time_zone, event_date_status) = configured_date(event)?;
     let headings: BTreeSet<_> = doc
         .select(&select("h1"))
         .filter(|e| !hidden_element(*e))
@@ -403,6 +418,9 @@ pub fn extract_cz_cart_catalog(
         event_url: format!("https://www.ticketmaster.cz/event/{event_id}"),
         event_id,
         event_name,
+        event_start,
+        event_time_zone,
+        event_date_status,
         currency: "CZK".into(),
         evidence: CatalogEvidence::ConfigurationOnly,
         scope: CatalogScope::PrimaryConfiguration,
@@ -418,6 +436,53 @@ pub fn extract_cz_cart_catalog(
         price_levels,
         sections,
     })
+}
+
+fn configured_date(
+    event: &Value,
+) -> Result<(Option<String>, Option<String>, ConfiguredDateStatus)> {
+    let time_zone = match event.get("timeZone").filter(|v| !v.is_null()) {
+        Some(value) => {
+            let zone = label(value)?;
+            ensure!(
+                zone.len() <= 100
+                    && zone.bytes().all(
+                        |b| b.is_ascii_alphanumeric() || matches!(b, b'/' | b'_' | b'-' | b'+')
+                    ),
+                "invalid configured event time zone"
+            );
+            // The timezone name is retained as source metadata. The absolute
+            // instant below must carry its own offset; no offset is guessed.
+            Some(zone)
+        }
+        None => None,
+    };
+    let Some(dates) = event.get("dates").filter(|v| !v.is_null()) else {
+        return Ok((None, time_zone, ConfiguredDateStatus::Missing));
+    };
+    ensure!(dates.is_object(), "invalid configured event dates");
+    if event
+        .get("eventChangeStatus")
+        .is_some_and(|v| !v.is_null() && v != "none")
+    {
+        return Ok((None, time_zone, ConfiguredDateStatus::EventChanged));
+    }
+    if dates["dateStatus"] != "singleDate"
+        || dates["dateDisplay"] != "showDateTime"
+        || event["eventChangeStatus"] != "none"
+    {
+        return Ok((None, time_zone, ConfiguredDateStatus::Unresolved));
+    }
+    let normalize = |value: &Value| {
+        value
+            .as_str()
+            .and_then(crate::cart::normalize_event_start)
+            .context("configured event start needs an exact timestamp with known offset")
+    };
+    let start = normalize(&dates["startDate"])?;
+    let event_date = normalize(&dates["eventDate"])?;
+    ensure!(start == event_date, "configured event start dates disagree");
+    Ok((Some(start), time_zone, ConfiguredDateStatus::KnownInstant))
 }
 
 fn verify_query_binding(state: &Value, selection: &Value, event_id: &str) -> Result<()> {

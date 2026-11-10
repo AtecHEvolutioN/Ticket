@@ -1,0 +1,6 @@
+# Opt-in override; not loaded until installed as:
+# /etc/systemd/system/ticket-watch-map.service.d/20-discord.conf
+# Configure the numeric channel ID and private token file before using it.
+[Service]
+ExecStart=
+ExecStart=/opt/ticket-watch/target/release/ticket-watch --config /etc/ticket-watch/map.toml map-run --send-discord

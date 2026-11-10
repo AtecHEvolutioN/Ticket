@@ -1,0 +1,115 @@
+{
+  "reviewed_on": "2026-11-10",
+  "event_url": "https://www.ticketmaster.cz/event/korn-vstupenky/1472650657",
+  "method": "saved_capture_and_public_frontend_source_review",
+  "live_browser_started": false,
+  "private_api_requested": false,
+  "find_tickets_clicked": false,
+  "reservation_attempted": false,
+  "payment_attempted": false,
+  "actual_reserve_response_observed": false,
+  "actual_checkout_document_observed": false,
+  "public_assets": [
+    {
+      "url": "https://uk.tmconst.com/rc-04de43be/_next/static/chunks/pages/event/%5BeventId%5D-395b18d5fdb04a5d.js",
+      "bytes": 458567,
+      "sha256": "ab3f8c498d461d475044d50bf1bb886480ca03d03d5bb3ea6eaf3990e0e303ce",
+      "purpose": "Find tickets control, reservation view and timer rendering"
+    },
+    {
+      "url": "https://uk.tmconst.com/rc-04de43be/_next/static/chunks/9757-9da451f3f0f3b9dc.js",
+      "bytes": 144332,
+      "sha256": "d83c4c59b4910271d4048a15db9981ad7f9f472752625cf2bfd3da1f4d10c117",
+      "purpose": "Reservation actions, SDK handoff and response normalizers"
+    }
+  ],
+  "saved_capture_context": {
+    "seat_inspection_checked_at": "2026-11-10T06:39:47.230Z",
+    "control_inspection_checked_at": "2026-11-09T22:54:16.745Z",
+    "platform": "MFOL",
+    "event_source_name": "MFX",
+    "feature_flags": {
+      "checkoutSdk": true,
+      "checkoutSdkHighDemand": false,
+      "useCheckoutDeliveryOptionsAndFees": false
+    },
+    "reserve_stage": null,
+    "reserve_info_present": false,
+    "basket_item_count": 0,
+    "has_accepted_non_adjacent": false,
+    "feature_flags_and_state_are_historical": true
+  },
+  "source_call_chain": [
+    {
+      "location": "event page bundle: button[data-testid=findTicketsBtn]",
+      "observation": "The enabled quantity/type path dispatches module 45064 export Pd, locally named H."
+    },
+    {
+      "location": "chunk 9757: module 45064, Pd/H",
+      "observation": "Information, non-adjacent-seat and accessibility dialogs can precede RESERVE_START. The action then enters SDK or platform-specific reservation processing."
+    },
+    {
+      "location": "chunk 9757: module 45064, local function Y",
+      "observation": "The MFOL branch can invoke module 38136 export YR, which calls CheckoutSDK.checkout with selected ticket types, quantities, price filters and section filters. The fallback invokes module 6864 export ru."
+    },
+    {
+      "location": "chunk 9757: module 6864, exports ru/U7",
+      "observation": "The legacy MFOL reservation helper uses an authenticated POST. An OK response supplies a redirect link; NO_AVAILABILITY_ERROR and non-adjacent/block-size errors use separate paths. No request was made during this review."
+    },
+    {
+      "location": "chunk 9757: module 45064",
+      "observation": "BIGGEST_SEAT_BLOCK_ERROR, NON_ADJACENT_SEATS_REQUIRED_ERROR and one SDK error path can open the acceptNonAdjacent dialog after reservation processing begins."
+    },
+    {
+      "location": "chunk 9757: module 45064 and event page timer component",
+      "observation": "Some successful response branches dispatch TIMER_START when normalized response.timer exists. The event page can render the translated reservation timer. These branches do not prove that this Czech event currently uses that view."
+    }
+  ],
+  "reservation_boundary": {
+    "control": "button[data-testid=findTicketsBtn]",
+    "classification": "potentially_reserving_action",
+    "journal_requirement": "Persist the attempt and dispatch marker before activating Find tickets. A dialog, timeout or navigation alone cannot establish a hold or a safe retry.",
+    "read_only_search_confirmed": false
+  },
+  "static_response_candidates": [
+    {
+      "source": "module 6864, legacy MFOL",
+      "fields": ["statusCode", "links[].href", "info.code", "info.ticketTypeId"],
+      "limitation": "Only the event-to-checkout handoff is described here. No actual Czech checkout receipt, complete price, seat group or hold expiry was captured."
+    },
+    {
+      "source": "module 74268, CO2 normalizer rf",
+      "fields": ["ticketOrderItems[].expirationTime", "ticketOrderItems[].exactMatch", "ticketOrderItems[].isGeneralAdmission", "ticketOrderItems[].row", "ticketOrderItems[].section", "ticketOrderItems[].seatNames", "ticketOrderItems[].ticketTypes[].quantity", "ticketOrderItems[].ticketTypes[].priceDetails"],
+      "limitation": "Static support for another checkout response shape; applicability to this Czech flow and complete checkout fee coverage are unverified. Exact match is not promoted to adjacency."
+    },
+    {
+      "source": "module 74268, GCO normalizer pW",
+      "fields": ["expiresAt", "tickets[].isExactMatch", "tickets[].quantity", "tickets[].seats", "tickets[].ticketUnitPrice.amount"],
+      "limitation": "No actual response observed. A ticket unit price does not establish the complete fee-inclusive group total."
+    },
+    {
+      "source": "module 75768, legacy TMOL normalizer pU",
+      "fields": ["data.cart.reservation_timer", "data.cart.seats", "data.cart.ticket_type_quantities", "data.cart.ticket_type_grand_total", "data.exact_match", "data.bbg_expanded_event.date"],
+      "limitation": "Separate platform branch; do not implement a Czech receipt parser from these names. The code supports alternate-date results, so a later receipt must bind the actual event date."
+    }
+  ],
+  "native_control_evidence": {
+    "quantity": "[data-testid=quantityStepper] [role=spinbutton] with aria-valuenow/min/max",
+    "filters": "Visible Všechny ceny and Všechny sekce buttons; [data-testid=panelPriceSection] contains labeled checkboxes",
+    "panel_close": "[data-testid=panelClose] or [data-testid=panelBack]; the saved Escape attempt did not restore the visible form",
+    "selection_is_not_hold": "The offline demo quantity produced Vstupenek v košíku: 1 without a reservation request.",
+    "service_fee_is_not_complete_total": "Cena zahrnuje servisní poplatek only describes the displayed service fee."
+  },
+  "remaining_evidence": [
+    "Explicit user purchase quantity; the offline demo quantity is not authorization.",
+    "Fresh actual native checkout response and rendered receipt bound to the same event, event date, document and persistent session.",
+    "Exact requested quantity, seat identities and affirmative site evidence of adjacency; absence of a warning is insufficient.",
+    "Complete fee-inclusive group total and currency, with verified meaning of any price fields.",
+    "Actual reservation or hold reference, fresh expiry and a read-only same-session reconciliation path after ambiguous dispatch.",
+    "Evidence for exhaustive cheapest-group search; configured category minima and one reserved result do not establish it."
+  ],
+  "stock_verified": false,
+  "adjacency_verified": false,
+  "complete_checkout_fees_verified": false,
+  "hold_verified": false
+}

@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 use ticket_watch::cart_catalog::{
-    CatalogEvidence, CatalogScope, CatalogSeating, extract_cz_cart_catalog,
+    CatalogEvidence, CatalogScope, CatalogSeating, ConfiguredDateStatus, extract_cz_cart_catalog,
 };
 
 const URL: &str = "https://www.ticketmaster.cz/event/synthetic-vstupenky/1234567890";
@@ -42,6 +42,8 @@ fn exact_configuration_retains_all_categories_without_inventing_inventory() {
     assert_eq!(result.event_id, "1234567890");
     assert_eq!(result.event_name, "Synthetic concert");
     assert_eq!(result.currency, "CZK");
+    assert_eq!(result.event_date_status, ConfiguredDateStatus::Missing);
+    assert!(result.event_start.is_none());
     assert_eq!(result.event_ticket_limit, 6);
     assert_eq!(result.current_selected_count, 0);
     assert_eq!(result.categories.len(), 5);
@@ -67,6 +69,86 @@ fn exact_configuration_retains_all_categories_without_inventing_inventory() {
         .find(|c| c.title == premium.title)
         .unwrap();
     assert_eq!(display.category_ids, ["10", "11"]);
+}
+
+fn with_date(value: &mut Value) {
+    let event = &mut state(value)["eventInfo"];
+    event["timeZone"] = json!("Europe/Prague");
+    event["eventChangeStatus"] = json!("none");
+    event["dates"] = json!({
+        "dateStatus":"singleDate", "dateDisplay":"showDateTime",
+        "eventDate":"2026-11-16T18:30:00Z", "startDate":"2026-11-16T19:30:00+01:00"
+    });
+}
+
+#[test]
+fn configured_date_matches_exact_instants_without_claiming_stock_or_hold() {
+    let html = change_metadata(with_date);
+    let result = extract_cz_cart_catalog(URL, URL, &html).unwrap();
+    assert_eq!(result.event_start.as_deref(), Some("2026-11-16T18:30:00Z"));
+    assert_eq!(result.event_time_zone.as_deref(), Some("Europe/Prague"));
+    assert_eq!(result.event_date_status, ConfiguredDateStatus::KnownInstant);
+    assert!(!result.stock_verified && !result.hold_verified);
+}
+
+#[test]
+fn unresolved_or_changed_event_dates_do_not_supply_a_cart_instant() {
+    for (field, value, expected) in [
+        ("dateDisplay", "showDate", ConfiguredDateStatus::Unresolved),
+        (
+            "dateStatus",
+            "multipleDates",
+            ConfiguredDateStatus::Unresolved,
+        ),
+        (
+            "eventChangeStatus",
+            "rescheduled",
+            ConfiguredDateStatus::EventChanged,
+        ),
+        (
+            "eventChangeStatus",
+            "cancelled",
+            ConfiguredDateStatus::EventChanged,
+        ),
+    ] {
+        let html = change_metadata(|metadata| {
+            with_date(metadata);
+            let event = &mut state(metadata)["eventInfo"];
+            if field == "eventChangeStatus" {
+                event[field] = json!(value);
+            } else {
+                event["dates"][field] = json!(value);
+            }
+        });
+        let result = extract_cz_cart_catalog(URL, URL, &html).unwrap();
+        assert!(result.event_start.is_none());
+        assert_eq!(result.event_date_status, expected);
+        assert_eq!(result.categories.len(), 5);
+    }
+}
+
+#[test]
+fn exact_configured_dates_reject_conflicts_unknown_offsets_and_invalid_times() {
+    for bad in [
+        "2026-11-17T18:30:00Z",
+        "2026-11-16",
+        "2026-11-16T18:30:00",
+        "2026-11-16T18:30:00-00:00",
+        "2026-02-30T18:30:00Z",
+        "2026-11-16T18:30:60Z",
+        "2026-11-16T18:30:00.000000001Z",
+    ] {
+        let html = change_metadata(|metadata| {
+            with_date(metadata);
+            state(metadata)["eventInfo"]["dates"]["eventDate"] = json!(bad);
+        });
+        assert!(extract_cz_cart_catalog(URL, URL, &html).is_err(), "{bad}");
+    }
+    let html = change_metadata(|metadata| {
+        with_date(metadata);
+        state(metadata)["eventInfo"]["timeZone"] = json!("Europe/Prague\nother");
+    });
+    assert!(extract_cz_cart_catalog(URL, URL, &html).is_err());
 }
 
 #[test]
