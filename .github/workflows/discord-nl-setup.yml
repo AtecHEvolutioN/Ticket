@@ -1,0 +1,39 @@
+name: Set up Netherlands Discord channels
+
+# Operator initiated only; creates missing channels, never sends messages.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: discord-nl-channel-setup
+  cancel-in-progress: false
+
+jobs:
+  setup:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Check out the exact requested main commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Create or reuse the NL category and nine channels
+        # Verify the token application and preflight every name/parent conflict.
+        # Each confirmed public ID is logged before the next creation request.
+        # Stop on uncertain outcomes; inspect Discord before an explicit rerun.
+        env:
+          DISCORD_APPLICATION_ID: '1569720679757127740'
+          DISCORD_GUILD_ID: '1569717598709350491'
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_SETUP_BOT_TOKEN }}
+        run: node apps/discord/scripts/provision-nl-layout.mjs --apply
