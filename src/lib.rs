@@ -1,5 +1,6 @@
 pub mod cart;
 pub mod cart_catalog;
+pub mod cart_journal;
 pub mod catalog;
 pub mod config;
 pub mod database;
@@ -11,6 +12,8 @@ pub mod hybrid;
 pub mod map_asset;
 pub mod map_geometry;
 pub mod map_inspection;
+pub mod map_monitor;
+pub mod map_monitor_store;
 pub mod map_scan;
 pub mod map_scan_store;
 pub mod model;

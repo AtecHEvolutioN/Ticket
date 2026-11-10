@@ -81,6 +81,12 @@ The shipped watch is a disabled placeholder. Replace its URL and labels, enable 
 
 Captures may contain session-related data. Keep them local and redact them before sharing. Payment/cart URLs and credential-bearing URLs are rejected as watch targets.
 
+For recurring Czech section hover-price checks, use the separate
+[`map-run` setup](map-monitor.md) and `config.map-monitor.example.toml`.
+It previews displayed-price notifications by default and needs `--send-discord`
+for live delivery. `map-status` reports its saved health and pending messages.
+These observations do not establish available ticket counts or adjacent groups.
+
 For custom profiles, set `adapter = "selectors"` and configure selectors against current markup you can access and inspect. Do not combine manual selectors with the built-in adapter. Status selectors must apply to the event's relevant sale scope. Offer selectors should identify actual offers with stable IDs. A verified profile with `offers_selector` also requires `offer_available_selector`: a visible, enabled purchasable signal relative to each row. A disabled button or price-only row cannot establish availability. A complete-snapshot selector must establish that the relevant listing is fully loaded: missing offers on a partial page are not sold-out evidence. A generic event-wide purchase button is insufficient.
 
 Set `quantity_kind` to `listing`, `remaining`, `selectable`, or `unknown` according to the source. A quantity dropdown always becomes `selectable`, irrespective of the configured stock meaning. Only listing/reported remaining quantities can satisfy `min_quantity`. The older `quantity_is_stock = true` setting maps an otherwise unknown kind to `remaining`; prefer the explicit field for new profiles.

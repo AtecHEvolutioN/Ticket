@@ -37,6 +37,25 @@ pub enum Delivery {
 }
 
 impl Discord {
+    /// Credential-free loopback client for shared local fixture tests only.
+    #[cfg(test)]
+    pub(crate) fn for_test(config: &DiscordConfig, endpoint: String) -> Self {
+        let url = url::Url::parse(&endpoint).expect("Fixture endpoint must be a URL");
+        assert_eq!(url.scheme(), "http");
+        assert_eq!(url.host_str(), Some("127.0.0.1"));
+        Self {
+            client: Client::builder()
+                .no_proxy()
+                .redirect(reqwest::redirect::Policy::none())
+                .timeout(Duration::from_secs(20))
+                .build()
+                .unwrap(),
+            config: clone_config(config),
+            endpoint,
+            next_send: Instant::now(),
+        }
+    }
+
     /// Construct only when live sending was explicitly enabled. `preview` needs no token.
     pub fn new(config: &DiscordConfig) -> Result<Self> {
         let channel = config
@@ -191,6 +210,13 @@ impl Discord {
         })
     }
 
+    /// Persist this delay after every response, including a successful send that
+    /// exhausts its route bucket, so a restart cannot discard the known limiter.
+    pub fn cooldown_secs(&self) -> Option<u64> {
+        let remaining = self.next_send.saturating_duration_since(Instant::now());
+        (!remaining.is_zero()).then(|| ceil_seconds(remaining))
+    }
+
     fn set_cooldown(&mut self, delay: Duration) {
         if let Some(deadline) = Instant::now().checked_add(delay) {
             self.next_send = self.next_send.max(deadline);
@@ -224,17 +250,32 @@ fn clone_config(config: &DiscordConfig) -> DiscordConfig {
 /// Produce the exact payload without reading credentials or making a network call.
 pub fn preview(pending: &PendingAlert, cfg: &DiscordConfig) -> Value {
     let alert = &pending.payload;
+    let display_signal = match alert.kind.as_str() {
+        "displayed_price_observed" => Some("Displayed resale price observed"),
+        "displayed_price_changed" => Some("Displayed resale price changed"),
+        "displayed_details_changed" => Some("Displayed seat details changed"),
+        _ => None,
+    };
+    let display_only = display_signal.is_some();
     let (content, users, roles) = mentions(cfg);
     let mut fields = Vec::new();
     for (index, offer) in alert.offers.iter().take(MAX_OFFERS).enumerate() {
+        let label = if display_only { "Seat price" } else { "Offer" };
         let name = match offer.section.as_deref() {
-            Some(section) => format!("Offer {} · {}", index + 1, clean(section, 120)),
-            None => format!("Offer {}", index + 1),
+            Some(section) => format!("{label} {} · {}", index + 1, clean(section, 120)),
+            None => format!("{label} {}", index + 1),
         };
         let mut lines = Vec::new();
         for (label, value) in [
             ("Type", offer.ticket_type.as_deref()),
-            ("Inventory", offer.inventory.as_deref()),
+            (
+                if display_only {
+                    "Restriction"
+                } else {
+                    "Inventory"
+                },
+                offer.inventory.as_deref(),
+            ),
             ("Row", offer.row.as_deref()),
             ("Seats", offer.seats.as_deref()),
             ("Price as shown", offer.price_text.as_deref()),
@@ -244,7 +285,9 @@ pub fn preview(pending: &PendingAlert, cfg: &DiscordConfig) -> Value {
                 lines.push(format!("{label}: {}", clean(value, 110)));
             }
         }
-        if let Some(quantity) = offer.quantity {
+        if display_only {
+            lines.push("Available quantity: not verified".into());
+        } else if let Some(quantity) = offer.quantity {
             lines.push(match offer.quantity_kind {
                 QuantityKind::Listing => format!("Tickets in this listing: {quantity}"),
                 QuantityKind::Remaining => format!("Reported remaining for this offer: {quantity}"),
@@ -264,34 +307,43 @@ pub fn preview(pending: &PendingAlert, cfg: &DiscordConfig) -> Value {
             }
             .into(),
         );
-        lines.push(
+        lines.push(if display_only {
+            "Complete fees: not verified".into()
+        } else {
             match offer.fees {
                 FeeScope::Included => "Fees: included in the displayed price",
                 FeeScope::Excluded => "Fees: extra",
                 FeeScope::Unknown => "Fees: not reported",
             }
-            .into(),
-        );
+            .into()
+        });
+        if display_only {
+            lines.push("Availability and adjacency: not verified".into());
+        }
         fields.push(
             json!({"name": name, "value": truncate(&lines.join("\n"), 600), "inline": false}),
         );
     }
     if alert.offers.len() > MAX_OFFERS {
-        fields.push(json!({"name": "Additional offers", "value": format!("{} more matches; open the event for the current listing.", alert.offers.len() - MAX_OFFERS), "inline": false}));
+        fields.push(if display_only {
+            json!({"name": "Additional displayed seats", "value": format!("{} more observations; open the event for current details.", alert.offers.len() - MAX_OFFERS), "inline": false})
+        } else {
+            json!({"name": "Additional offers", "value": format!("{} more matches; open the event for the current listing.", alert.offers.len() - MAX_OFFERS), "inline": false})
+        });
     }
     let description = format!(
         "{}\n{}\nSignal: {}\n\n{}",
         clean(&alert.artist, 150),
         clean(&alert.location, 200),
-        clean(&alert.kind, 80),
+        clean(display_signal.unwrap_or(&alert.kind), 80),
         clean(&alert.detail, 650)
     );
     let mut embed = json!({
-        "title": clean(&alert.event_name, 250),
+        "title": if display_only { format!("Displayed resale price · {}", clean(&alert.event_name, 220)) } else { clean(&alert.event_name, 250) },
         "description": description,
         "color": 3447003,
         "fields": fields,
-        "footer": {"text": "Observed offers; tickets are not reserved. Total event stock is not reported; offer quantities are not summed."},
+        "footer": {"text": if display_only { "Displayed prices only. Availability, quantity, complete fees and adjacency are unverified. Tickets are not reserved." } else { "Observed offers; tickets are not reserved. Total event stock is not reported; offer quantities are not summed." }},
     });
     if let Ok(url) = crate::config::validate_public_url(&alert.event_url) {
         embed["url"] = Value::String(url.to_string());
@@ -508,6 +560,70 @@ mod tests {
     }
 
     #[test]
+    fn displayed_price_alerts_keep_stock_and_complete_fees_unverified() {
+        let mut pending = pending();
+        pending.payload.event_name = "KoRn @everyone".into();
+        pending.payload.event_url = "https://www.ticketmaster.cz/event/korn/1472650657".into();
+        pending.payload.offers[0].inventory = Some("Omezený výhled".into());
+        pending.payload.offers[0].price_text = Some("2 438,00 Kč za kus".into());
+        pending.payload.offers[0].currency = Some("CZK".into());
+        // Display-only kinds cannot accidentally promote these legacy fields.
+        pending.payload.offers[0].quantity = Some(7);
+        pending.payload.offers[0].quantity_kind = QuantityKind::Remaining;
+        pending.payload.offers[0].fees = FeeScope::Included;
+        for (kind, signal) in [
+            (
+                "displayed_price_observed",
+                "Displayed resale price observed",
+            ),
+            ("displayed_price_changed", "Displayed resale price changed"),
+            (
+                "displayed_details_changed",
+                "Displayed seat details changed",
+            ),
+        ] {
+            pending.payload.kind = kind.into();
+            let payload = preview(&pending, &config());
+            let embed = &payload["embeds"][0];
+            assert!(
+                embed["title"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("Displayed resale price")
+            );
+            assert!(!embed["title"].as_str().unwrap().contains("@everyone"));
+            assert!(embed["description"].as_str().unwrap().contains(signal));
+            assert!(
+                embed["fields"][0]["name"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("Seat price")
+            );
+            let row = embed["fields"][0]["value"].as_str().unwrap();
+            assert!(row.contains("Restriction: Omezený výhled"));
+            assert!(row.contains("2 438,00 Kč za kus"));
+            assert!(row.contains("Currency: CZK"));
+            assert!(row.contains("Price basis: per ticket"));
+            assert!(row.contains("Available quantity: not verified"));
+            assert!(row.contains("Complete fees: not verified"));
+            assert!(!row.contains("Reported remaining") && !row.contains("Fees: included"));
+            assert!(
+                embed["footer"]["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains("adjacency are unverified")
+            );
+            assert_eq!(payload["allowed_mentions"]["parse"], json!([]));
+            assert_eq!(
+                payload["allowed_mentions"]["users"],
+                json!(["111111111111111111"])
+            );
+            assert_eq!(payload["enforce_nonce"], true);
+            assert_eq!(payload["nonce"], preview(&pending, &config())["nonce"]);
+        }
+    }
+
+    #[test]
     fn selectable_quantities_and_total_prices_are_labelled_without_stock_totals() {
         let mut pending = pending();
         pending.payload.offers[0].quantity_kind = QuantityKind::Selectable;
@@ -649,12 +765,7 @@ mod tests {
             stream.write_all(response.as_bytes()).await.unwrap();
             payload
         });
-        let discord = Discord {
-            client: Client::builder().no_proxy().build().unwrap(),
-            config: config(),
-            endpoint: format!("http://{addr}/messages"),
-            next_send: Instant::now(),
-        };
+        let discord = Discord::for_test(&config(), format!("http://{addr}/messages"));
         (discord, task)
     }
 
@@ -682,12 +793,14 @@ mod tests {
             r#"{"id":"123456789012345678"}"#,
         )
         .await;
+        assert_eq!(discord.cooldown_secs(), None);
         assert_eq!(
             discord.send(&pending()).await.unwrap(),
             Delivery::Sent {
                 message_id: "123456789012345678".into()
             }
         );
+        assert_eq!(discord.cooldown_secs(), Some(4));
         assert!(matches!(
             discord.send(&pending()).await.unwrap(),
             Delivery::Retry { after_secs: 4, .. }

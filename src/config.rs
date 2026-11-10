@@ -10,6 +10,7 @@ use url::Url;
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub database: PathBuf,
+    pub map_database: PathBuf,
     pub request_timeout_secs: u64,
     pub per_host_interval_secs: u64,
     pub blocked_retry_secs: u64,
@@ -20,6 +21,7 @@ pub struct Config {
     pub browser: BrowserConfig,
     pub discord: DiscordConfig,
     pub watches: Vec<Watch>,
+    pub map_watches: Vec<MapWatch>,
     pub catalog: CatalogConfig,
     pub subscriptions: Vec<Subscription>,
     pub profiles: Vec<WebsiteProfile>,
@@ -29,6 +31,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             database: "data/ticket.sqlite".into(),
+            map_database: "data/map-monitor.sqlite".into(),
             request_timeout_secs: 20,
             per_host_interval_secs: 60,
             blocked_retry_secs: 900,
@@ -39,9 +42,43 @@ impl Default for Config {
             browser: BrowserConfig::default(),
             discord: DiscordConfig::default(),
             watches: vec![],
+            map_watches: vec![],
             catalog: CatalogConfig::default(),
             subscriptions: vec![],
             profiles: vec![],
+        }
+    }
+}
+
+/// One selected section's displayed-price checks; never a purchase instruction.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct MapWatch {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+    pub section_id: String,
+    pub limit: u32,
+    pub interval_secs: u64,
+    pub enabled: bool,
+    pub notify_initial: bool,
+    pub notify_price_changes: bool,
+    pub notify_details_changes: bool,
+}
+
+impl Default for MapWatch {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            url: String::new(),
+            section_id: String::new(),
+            limit: 20,
+            interval_secs: 60,
+            enabled: true,
+            notify_initial: false,
+            notify_price_changes: true,
+            notify_details_changes: false,
         }
     }
 }
@@ -312,18 +349,26 @@ pub fn load(path: &Path) -> Result<Config> {
     let raw = std::fs::read_to_string(path)
         .with_context(|| format!("Read configuration {}", path.display()))?;
     let mut config: Config = toml::from_str(&raw).context("Invalid TOML configuration")?;
-    validate(&config)?;
     let root = path.parent().unwrap_or(Path::new("."));
     if config.database.is_relative() {
         config.database = root.join(&config.database);
     }
+    if config.map_database.is_relative() {
+        config.map_database = root.join(&config.map_database);
+    }
     if config.browser.script.is_relative() {
         config.browser.script = root.join(&config.browser.script);
     }
+    validate(&config)?;
     Ok(config)
 }
 
 pub fn validate(config: &Config) -> Result<()> {
+    if normalized_database_path(&config.database)?
+        == normalized_database_path(&config.map_database)?
+    {
+        bail!("Map monitoring requires a separate map_database from the inventory database");
+    }
     if config.request_timeout_secs == 0
         || config.request_timeout_secs > 120
         || config.per_host_interval_secs == 0
@@ -369,6 +414,39 @@ pub fn validate(config: &Config) -> Result<()> {
             .all(|b| b.is_ascii_alphanumeric() || b == b'_')
     {
         bail!("Discord token_env must be an environment variable name, never the token itself");
+    }
+    if config.map_watches.len() > 1000 {
+        bail!("Configure at most 1000 map watches");
+    }
+    let mut map_ids = HashSet::new();
+    let mut map_targets = HashSet::new();
+    for watch in &config.map_watches {
+        if !safe_id(&watch.id) || !map_ids.insert(watch.id.as_str()) {
+            bail!(
+                "Each map watch needs a unique bounded id using letters, digits, hyphens or underscores"
+            );
+        }
+        if !bounded_label(&watch.name, 500)
+            || watch.section_id.is_empty()
+            || watch.section_id.len() > 128
+            || !watch
+                .section_id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+            || !(1..=50).contains(&watch.limit)
+            || !(1..=31_536_000).contains(&watch.interval_secs)
+        {
+            bail!(
+                "Map watch {} has an invalid name, section id, scan limit or interval",
+                watch.id
+            );
+        }
+        let (host, event) = crate::event_identity::identity(&watch.url)
+            .filter(|(host, _)| host == "ticketmaster.cz")
+            .context("Map watches require a supported public Czech event URL")?;
+        if watch.enabled && !map_targets.insert((host, event, watch.section_id.as_str())) {
+            bail!("Duplicate active map target: use one watch per event section");
+        }
     }
     let mut ids = HashSet::new();
     let mut urls = HashSet::new();
@@ -467,6 +545,30 @@ pub fn validate(config: &Config) -> Result<()> {
     }
     validate_catalog(config)?;
     Ok(())
+}
+
+fn normalized_database_path(path: &Path) -> Result<PathBuf> {
+    if path.as_os_str().is_empty() {
+        bail!("Database paths must not be empty");
+    }
+    let absolute = if path.is_absolute() {
+        path.to_owned()
+    } else {
+        std::env::current_dir()
+            .context("Resolve database path")?
+            .join(path)
+    };
+    let mut normalized = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    Ok(normalized)
 }
 
 fn safe_id(id: &str) -> bool {
@@ -578,6 +680,123 @@ fn validate_catalog(config: &Config) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn map_configuration() -> Config {
+        Config {
+            map_watches: vec![MapWatch {
+                id: "korn-section-110".into(),
+                name: "KoRn section 110".into(),
+                url: "https://www.ticketmaster.cz/event/korn/1472650657".into(),
+                section_id: "s_128".into(),
+                ..MapWatch::default()
+            }],
+            ..Config::default()
+        }
+    }
+
+    #[test]
+    fn map_defaults_preserve_existing_configurations_without_requiring_credentials() {
+        let config: Config = toml::from_str("database = 'data/old.sqlite'").unwrap();
+        assert!(config.map_watches.is_empty());
+        assert_eq!(config.map_database, Path::new("data/map-monitor.sqlite"));
+        assert!(validate(&config).is_ok());
+        let config = map_configuration();
+        assert!(validate(&config).is_ok());
+        assert!(config.discord.channel_id.is_none());
+        assert_eq!(config.map_watches[0].limit, 20);
+        assert_eq!(config.map_watches[0].interval_secs, 60);
+        assert!(!config.map_watches[0].notify_initial);
+        assert!(config.map_watches[0].notify_price_changes);
+        assert!(!config.map_watches[0].notify_details_changes);
+        assert!(toml::from_str::<MapWatch>("section_ids = 's_128'").is_err());
+    }
+
+    #[test]
+    fn map_watches_bind_czech_events_sections_and_bounded_scan_parameters() {
+        for url in [
+            "https://www.ticketmaster.pl/event/korn/1472650657",
+            "https://www.ticketmaster.cz/artist/1472650657",
+            "https://www.ticketmaster.cz/event/korn/1472650657/checkout",
+            "https://www.ticketmaster.cz/event/korn/1472650657?token=secret",
+        ] {
+            let mut config = map_configuration();
+            config.map_watches[0].url = url.into();
+            assert!(validate(&config).is_err(), "{url}");
+        }
+        for id in [
+            "".to_owned(),
+            "s_1] *".into(),
+            "s_ě".into(),
+            "x".repeat(129),
+        ] {
+            let mut config = map_configuration();
+            config.map_watches[0].section_id = id;
+            assert!(validate(&config).is_err());
+        }
+        for limit in [0, 51] {
+            let mut config = map_configuration();
+            config.map_watches[0].limit = limit;
+            assert!(validate(&config).is_err());
+        }
+        for interval in [0, 31_536_001] {
+            let mut config = map_configuration();
+            config.map_watches[0].interval_secs = interval;
+            assert!(validate(&config).is_err());
+        }
+        for name in [
+            "".to_owned(),
+            "   ".into(),
+            "x".repeat(501),
+            "bad\nname".into(),
+        ] {
+            let mut config = map_configuration();
+            config.map_watches[0].name = name;
+            assert!(validate(&config).is_err());
+        }
+        let mut config = map_configuration();
+        config.map_watches[0].id = "x".repeat(101);
+        assert!(validate(&config).is_err());
+    }
+
+    #[test]
+    fn map_watch_identity_deduplicates_url_aliases_but_allows_different_sections() {
+        let mut config = map_configuration();
+        let mut second = config.map_watches[0].clone();
+        second.id = "other".into();
+        second.url = "https://ticketmaster.cz/event/another-slug/1472650657?language=en".into();
+        config.map_watches.push(second);
+        assert!(validate(&config).is_err());
+        config.map_watches[1].section_id = "s_129".into();
+        assert!(validate(&config).is_ok());
+        config.map_watches[1].id = config.map_watches[0].id.clone();
+        assert!(validate(&config).is_err());
+        config.map_watches[1].id = "disabled-copy".into();
+        config.map_watches[1].section_id = "s_128".into();
+        config.map_watches[1].enabled = false;
+        assert!(validate(&config).is_ok());
+    }
+
+    #[test]
+    fn map_history_path_is_separate_after_lexical_and_config_relative_resolution() {
+        let mut config = Config {
+            database: "data/inventory.sqlite".into(),
+            map_database: "./data/unused/../inventory.sqlite".into(),
+            ..Config::default()
+        };
+        assert!(validate(&config).is_err());
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        config.database = directory.path().join("inventory.sqlite");
+        config.map_database = "inventory.sqlite".into();
+        std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
+        assert!(load(&path).is_err());
+        config.map_database = "prices.sqlite".into();
+        std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
+        let loaded = load(&path).unwrap();
+        assert_eq!(loaded.map_database, directory.path().join("prices.sqlite"));
+        assert_eq!(loaded.database, directory.path().join("inventory.sqlite"));
+    }
+
     #[test]
     fn excludes_checkout_and_untrusted_hosts() {
         for url in [

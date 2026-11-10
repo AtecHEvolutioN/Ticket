@@ -74,9 +74,10 @@ conflicting or overlapping older observations are rejected.
 
 Run the command again to obtain another scan and its changes. This is a one-pass
 command: it does not schedule polling, send Discord messages, or initiate carting.
-The next integration needs scheduling with host cooldowns, explicit notification
-semantics for displayed prices, and fresh purchasability/group validation before
-any reservation flow. No exact-second delivery guarantee is established.
+Use the [section monitor](map-monitor.md) for scheduling and explicit Discord
+delivery of displayed-price observations. Fresh purchasability/group validation
+is still required before any reservation flow. No exact-second delivery guarantee
+is established.
 
 ## Live validation
 

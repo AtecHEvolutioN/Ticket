@@ -695,3 +695,152 @@ fn map_scan_cli_discovers_prices_and_records_only_validated_observations() {
     assert!(!directory.path().join("rejected.sqlite").exists());
     assert!(!directory.path().join("data").exists());
 }
+
+#[test]
+fn new_status_commands_do_not_create_missing_databases() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(
+        directory.path().join("monitor.toml"),
+        "map_database='absent.sqlite'\n",
+    )
+    .unwrap();
+    for args in [
+        vec!["--config", "monitor.toml", "map-status"],
+        vec![
+            "--config",
+            "missing.toml",
+            "cart-journal",
+            "--file",
+            "absent.sqlite",
+        ],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+            .current_dir(directory.path())
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(!directory.path().join("absent.sqlite").exists());
+        assert!(!directory.path().join("data").exists());
+    }
+}
+
+#[test]
+fn map_run_cli_previews_then_respects_restart_pacing_and_disabled_watches() {
+    let directory = tempfile::tempdir().unwrap();
+    let svg =
+        |html: &str| html[html.find("<svg ").unwrap()..html.find("</svg>").unwrap() + 6].to_owned();
+    let overview = svg(include_str!("fixtures/map-geometry.html"))
+        .replace("s_a", "s_12")
+        .replace("A1", "110");
+    let seats = svg(include_str!("fixtures/seat-geometry.html"));
+    let page = include_str!("fixtures/seat-map-regional.html")
+        .replace("</aside>", &format!("{overview}{seats}</aside>"));
+    std::fs::write(directory.path().join("event.html"), page).unwrap();
+    std::fs::create_dir(directory.path().join("browser")).unwrap();
+    std::fs::write(directory.path().join("browser/worker.cjs"), r#"
+        const fs=require('node:fs');
+        require('node:readline').createInterface({input:process.stdin}).on('line',line=>{
+            const r=JSON.parse(line), now=Date.now();
+            fs.appendFileSync('requests.log','scan\n');
+            if(r.adapter!=='ticketmaster'||r.display!=='map'||r.map_section_id!=='s_12'||r.map_scan_limit!==3){
+                process.stdout.write(JSON.stringify({id:r.id,error:'invalid_request'})+'\n');return;
+            }
+            const scan={section_id:'s_12',section_name:'110',limit:3,
+                started_at_ms:now-2,finished_at_ms:now,candidate_count:1,visible_candidate_count:1,
+                results:[{seat_id:'seat-2',row:'12',seat:'2',observed_at_ms:now-1,outcome:'quoted',
+                    tooltip:{zone:'1. POSCHODÍ',section:'110',row:'12',seat:'2',
+                        ticket_type:'Ověřené přeprodávané vstupenky',restriction:null,
+                        price_text:'1 234,50 Kč za kus'}}],
+                stop_reason:'visible_candidates_exhausted',coverage:'partial_rendered_section',
+                stock_verified:false,adjacency_verified:false};
+            process.stdout.write(JSON.stringify({id:r.id,status:200,adapter_state:'ready',elapsed_ms:2,
+                final_url:r.url,html:fs.readFileSync('event.html','utf8'),map_scan:scan})+'\n');
+        });
+    "#).unwrap();
+    let config = r#"
+        map_database='monitor.sqlite'
+        per_host_interval_secs=3600
+        [discord]
+        token_env='TICKET_TEST_MISSING_MAP_DISCORD_TOKEN'
+        [[map_watches]]
+        id='synthetic-section'
+        name='Synthetic section 110'
+        url='https://www.ticketmaster.cz/event/synthetic-concert/1234567890'
+        section_id='s_12'
+        limit=3
+        interval_secs=3600
+        enabled=true
+        notify_initial=true
+    "#;
+    let config_path = directory.path().join("monitor.toml");
+    std::fs::write(&config_path, config).unwrap();
+    let run = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+            .current_dir(directory.path())
+            .env_remove("TICKETMASTER_API_KEY")
+            .env_remove("DISCORD_BOT_TOKEN")
+            .env_remove("TICKET_TEST_MISSING_MAP_DISCORD_TOKEN")
+            .args(["--config", "monitor.toml"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::Deserializer::from_slice(&output.stdout)
+            .into_iter::<serde_json::Value>()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    };
+    let first = run(&["map-run", "--once"]);
+    let preview = first
+        .iter()
+        .find(|entry| entry.get("outbox_id").is_some())
+        .unwrap();
+    assert_eq!(preview["mode"], "preview_only");
+    let payload = preview["payload"].to_string();
+    assert!(payload.contains("1 234,50 Kč za kus"), "{payload}");
+    assert!(payload.contains("unverified"), "{payload}");
+    let status = run(&["map-status"]);
+    assert_eq!(status[0]["watches"][0]["health"], "ok");
+    assert_eq!(status[0]["watches"][0]["pending_alerts"], 1);
+    assert!(
+        status[0]["cooldowns"]["ticketmaster_cz_until_ms"]
+            .as_i64()
+            .unwrap()
+            > status[0]["watches"][0]["last_observed_at_ms"]
+                .as_i64()
+                .unwrap()
+    );
+
+    let repeated = run(&["map-run", "--once"]);
+    assert!(repeated.iter().any(|entry| entry["completed_watches"] == 0));
+    let second_preview = repeated
+        .iter()
+        .find(|entry| entry.get("outbox_id").is_some())
+        .unwrap();
+    assert_eq!(preview["outbox_id"], second_preview["outbox_id"]);
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join("requests.log")).unwrap(),
+        "scan\n"
+    );
+
+    std::fs::write(
+        &config_path,
+        config.replace("enabled=true", "enabled=false"),
+    )
+    .unwrap();
+    run(&["map-run", "--once"]);
+    let disabled = run(&["map-status"]);
+    assert_eq!(disabled[0]["watches"][0]["enabled"], false);
+    assert_eq!(disabled[0]["watches"][0]["pending_alerts"], 0);
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join("requests.log")).unwrap(),
+        "scan\n"
+    );
+    assert!(!directory.path().join("data/ticket.sqlite").exists());
+}

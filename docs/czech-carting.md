@@ -107,9 +107,13 @@ short-lived page checks. In that session, it must:
    verified hold, using public event links. Payment remains with the user.
 
 The cart runner needs narrowly validated navigation rules for observed Czech cart
-routes; the existing monitor's public-event policy remains in place. Its durable
-attempt journal must be separate from alert deduplication. Session ownership and
-manual pauses must not stall checks for unrelated watched events.
+routes; the existing monitor's public-event policy remains in place. The
+[durable attempt journal](cart-journal.md) now supplies separate storage, a
+dispatch marker, idempotent outcomes and restart reconciliation. It is not yet
+connected to a native cart adapter and does not authenticate supplied receipts.
+Event date binding also remains to be added to the planner and receipt parser.
+Session ownership and manual pauses must not stall checks for unrelated watched
+events.
 
 Before production, validate this flow on more Czech layouts, exercise crash and
 timeout recovery, and measure successful-check age, quote-to-action time, verified

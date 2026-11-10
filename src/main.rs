@@ -34,6 +34,21 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Monitor configured Czech sections; preview Discord messages unless sending is enabled.
+    MapRun {
+        #[arg(long)]
+        once: bool,
+        /// Send displayed-price observations to the configured Discord channel.
+        #[arg(long)]
+        send_discord: bool,
+    },
+    /// Show saved section-monitor health and pending notification counts.
+    MapStatus,
+    /// Inspect a reservation-attempt journal without creating it or performing actions.
+    CartJournal {
+        #[arg(long)]
+        file: PathBuf,
+    },
     /// Scan displayed resale prices in one Czech map section; never selects tickets.
     MapScan {
         #[arg(long)]
@@ -713,6 +728,7 @@ async fn main() -> Result<()> {
         | Command::Events { .. }
         | Command::Inspect { .. }
         | Command::CartCatalog { .. }
+        | Command::CartJournal { .. }
         | Command::CartPlan { .. } => Config::default(),
         Command::Venues { .. }
             if cli.config == Path::new("config.toml") && !cli.config.exists() =>
@@ -722,6 +738,26 @@ async fn main() -> Result<()> {
         _ => config::load(&cli.config)?,
     };
     match cli.command {
+        Command::MapRun { once, send_discord } => {
+            ticket_watch::map_monitor::run(config, once, send_discord).await?;
+        }
+        Command::MapStatus => {
+            if !config.map_database.is_file() {
+                bail!("Map monitor database does not exist; run map-run first");
+            }
+            let store =
+                ticket_watch::map_monitor_store::MapMonitorStore::open(&config.map_database)?;
+            print_json(&serde_json::json!({
+                "watches": store.status()?,
+                "cooldowns": {
+                    "ticketmaster_cz_until_ms": store.cooldown("host:ticketmaster.cz")?,
+                    "discord_until_ms": store.cooldown("discord:delivery")?
+                }
+            }))?;
+        }
+        Command::CartJournal { file } => {
+            print_json(&ticket_watch::cart_journal::inspect_file(&file)?)?;
+        }
         Command::MapScan {
             url,
             section_id,
@@ -1055,9 +1091,10 @@ async fn main() -> Result<()> {
         }
         Command::Validate => {
             println!(
-                "Configuration valid: {} manual watches, {} subscriptions; default mode is preview-only",
+                "Configuration valid: {} manual watches, {} subscriptions, {} map watches; default mode is preview-only",
                 config.watches.len(),
-                config.subscriptions.len()
+                config.subscriptions.len(),
+                config.map_watches.len()
             );
         }
         Command::List => {

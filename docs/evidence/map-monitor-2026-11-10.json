@@ -1,0 +1,81 @@
+{
+  "event_url": "https://www.ticketmaster.cz/event/korn-vstupenky/1472650657",
+  "market": "CZ",
+  "section_id": "s_128",
+  "section_name": "110",
+  "command": "ticket-watch --config <private-config.toml> map-run --once",
+  "observed_at_utc": "2026-11-10T07:35:41.535000+00:00",
+  "mode": "preview_only",
+  "live_scan": {
+    "candidate_count": 1,
+    "elapsed_ms": 8129,
+    "enqueued": 1,
+    "health": "ok",
+    "next_due_ms": 1794296201535,
+    "observed_at_ms": 1794296141535,
+    "quoted_count": 1,
+    "watch_id": "korn-cz-section-110"
+  },
+  "displayed_quote": {
+    "evidence": "rendered_seat_hover",
+    "seat_id": "GFIC2MJRGA5DCMR2GM",
+    "zone": "1. POSCHODÍ",
+    "section": "110",
+    "row": "12",
+    "seat": "3",
+    "ticket_type": "Ověřené přeprodávané vstupenky",
+    "restriction": "Omezený výhled",
+    "price_minor": 243800,
+    "currency": "CZK",
+    "price_basis": "per_ticket",
+    "price_text": "2 438,00 Kč za kus",
+    "fees_complete": false,
+    "available_quantity": null
+  },
+  "discord_messages_sent": 0,
+  "restart_check": {
+    "completed_watches": 0,
+    "skipped_due_or_cooldown": [
+      "korn-cz-section-110"
+    ],
+    "same_pending_message": true,
+    "same_retry_nonce": true
+  },
+  "saved_status": {
+    "cooldowns": {
+      "discord_until_ms": null,
+      "ticketmaster_cz_until_ms": 1794296192806
+    },
+    "watches": [
+      {
+        "enabled": true,
+        "health": "ok",
+        "id": "korn-cz-section-110",
+        "last_observed_at_ms": 1794296141330,
+        "last_success_at_ms": 1794296141330,
+        "next_due_ms": 1794296201535,
+        "pending_alerts": 1
+      }
+    ]
+  },
+  "verification": {
+    "rust_tests_passed": 303,
+    "rust_tests_failed": 0,
+    "rust_tests_ignored": 0,
+    "formatting": "passed",
+    "clippy": "passed",
+    "release_build": "passed",
+    "discord_transport": "local HTTP fixtures; no live Discord delivery",
+    "cart_journal": "synthetic consistency and restart tests; no native cart adapter"
+  },
+  "limitations": {
+    "stock_verified": false,
+    "adjacency_verified": false,
+    "fees_complete": false,
+    "tickets_selected": 0,
+    "tickets_reserved": 0,
+    "event_date_verified_for_cart": false,
+    "continuous_service_deployed": false,
+    "android_apk_changed": false
+  }
+}
