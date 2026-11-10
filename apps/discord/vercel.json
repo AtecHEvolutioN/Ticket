@@ -4,6 +4,12 @@
   "installCommand": "npm ci --ignore-scripts",
   "buildCommand": "npm test",
   "outputDirectory": "public",
+  "env": {
+    "DISCORD_APPLICATION_ID": "1569720679757127740",
+    "DISCORD_PUBLIC_KEY": "8a6b4ec3cc73ce3261e6116b5534788cbd86c5df74e3a35541ad58e4767d23b0",
+    "DISCORD_GUILD_ID": "1569717598709350491",
+    "DISCORD_ALLOWED_USER_IDS": "133350475020894208"
+  },
   "regions": ["fra1"],
   "functions": {
     "api/*.js": {

@@ -95,7 +95,17 @@ Deploy the Git repository with **Root Directory `apps/discord`**. The app uses
 Node.js 24 with no third-party runtime dependencies. Its build runs the signed
 interaction and registration tests. It has no cron, bot token or database.
 
-Set these Vercel **production** environment variables, then redeploy:
+This application's `vercel.json` currently supplies the four **public** Discord
+settings below through deployment configuration, so a Git deployment can configure
+the endpoint without project API access. The application code still reads and
+validates environment variables; no bot token is included. These IDs and the
+public verification key are visible in the repository.
+
+For another Discord application, replace those values or remove the `env` block
+and set these Vercel **production** environment variables, then redeploy. Dashboard
+configuration is preferred when project access is available; Vercel marks the
+`env` configuration field as deprecated. Never add a bot token or any other
+secret to `vercel.json`.
 
 | Name | Value |
 | --- | --- |
