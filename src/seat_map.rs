@@ -36,7 +36,8 @@ pub struct StaticMapReference {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct MapSection {
     pub id: String,
-    pub title: String,
+    /// A blank configured name is unknown; the bound section ID is still useful.
+    pub title: Option<String>,
     pub raw_id: Option<String>,
 }
 
@@ -121,7 +122,9 @@ pub fn extract_seat_map(
         scripts.len() == 1 && scripts[0].value().attr("type") == Some("application/json"),
         "unsupported seat map metadata format"
     );
-    let raw = scripts[0].inner_html();
+    // JSON lives in a raw-text script. HTML serialization can change source
+    // characters (for example U+00A0 into "&nbsp;"), manufacturing a label.
+    let raw = scripts[0].text().collect::<String>();
     ensure!(
         raw.len() <= MAX_JSON_BYTES,
         "seat map metadata exceeds size limit"
@@ -311,7 +314,8 @@ pub fn extract_seat_map(
         }
     }
     let rendered_seats = crate::seat_geometry::extract_rendered_seats(regions[0])?;
-    let rendered_geometry = crate::map_geometry::extract_svg_geometry(regions[0])?;
+    let rendered_geometry =
+        crate::map_geometry::extract_svg_geometry_for_site(regions[0], &site_host)?;
     let evidence = if rendered_seats.is_some() {
         "rendered_seats_and_configuration"
     } else if rendered_geometry.is_some() {
@@ -378,7 +382,7 @@ fn configured_sections(
                     id.clone(),
                     MapSection {
                         id,
-                        title: label(&section["title"])?,
+                        title: optional_label(&section["title"])?,
                         raw_id
                     }
                 )
@@ -593,14 +597,16 @@ fn identifier(value: &Value) -> Result<String> {
     Ok(value.to_owned())
 }
 fn label(value: &Value) -> Result<String> {
+    optional_label(value)?.context("empty map label")
+}
+fn optional_label(value: &Value) -> Result<Option<String>> {
     let value = value.as_str().context("missing map label")?;
     ensure!(
         value.len() <= 600 && !value.chars().any(char::is_control),
         "invalid map label"
     );
     let label = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    ensure!(!label.is_empty(), "empty map label");
-    Ok(label)
+    Ok((!label.is_empty()).then_some(label))
 }
 fn array(value: &Value, limit: usize) -> Result<&Vec<Value>> {
     let values = value

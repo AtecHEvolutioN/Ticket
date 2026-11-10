@@ -699,6 +699,15 @@ pub(crate) fn event_matches(value: &Value, expected: &Url) -> bool {
         .and_then(Value::as_str)
         .or_else(|| value.get("@id").and_then(Value::as_str));
     candidate
+        // Empty, query-only and fragment-only references inherit the watched
+        // event's path when resolved, but supply no event identity themselves.
+        .filter(|raw| {
+            // URL resolution strips some C0 controls that str::trim retains.
+            // Reject controls before either normalization can erase them.
+            !raw.chars().any(char::is_control)
+                && !raw.trim().is_empty()
+                && !raw.trim().starts_with(['#', '?'])
+        })
         .and_then(|raw| canonical_event_url(raw, Some(expected)))
         .and_then(|url| event_identity(&url))
         .zip(event_identity(expected))
@@ -1113,6 +1122,48 @@ price_decimal_separator = ","
             Availability::Unknown
         );
         assert_eq!(parse(&w, r#"<script type="application/ld+json">{"@type":"Event","offers":{"url":"https://www.ticketmaster.pl/event/korn-bilety/496543017","availability":"InStock"}}</script>"#, 100).availability, Availability::Unknown);
+    }
+
+    #[test]
+    fn metadata_cannot_inherit_event_identity_from_empty_query_or_fragment_references() {
+        let mut watch = watch();
+        watch.parser.selectors_verified = false;
+        for field in ["url", "@id"] {
+            for reference in [
+                "",
+                " ",
+                "\t\n",
+                "#event",
+                "?language=en-us",
+                "  #event",
+                "  ?language=en-us",
+                "\0",
+                "\0#event",
+                "\0?language=en-us",
+                "\u{1}#event",
+                "\u{1}?language=en-us",
+                "/event/korn-bilety/496543017\0",
+                "/event/korn-bilety/496543017\t",
+            ] {
+                let event = serde_json::json!({"@type":"Event",field:reference,"offers":{"availability":"https://schema.org/InStock"}});
+                let html = format!("<script type='application/ld+json'>{event}</script>");
+                let result = parse(&watch, &html, 100);
+                assert_eq!(
+                    result.availability,
+                    Availability::Unknown,
+                    "{field}: {reference:?}"
+                );
+                assert_eq!(result.evidence, Evidence::None);
+            }
+            let event = serde_json::json!({"@type":"Event",field:"/event/korn-bilety/496543017","offers":{"availability":"https://schema.org/InStock"}});
+            let result = parse(
+                &watch,
+                &format!("<script type='application/ld+json'>{event}</script>"),
+                100,
+            );
+            assert_eq!(result.availability, Availability::Available);
+            assert_eq!(result.evidence, Evidence::Metadata);
+        }
     }
 
     #[test]

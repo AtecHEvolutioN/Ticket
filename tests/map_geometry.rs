@@ -1,7 +1,11 @@
 use scraper::{Html, Selector};
-use ticket_watch::map_geometry::{MapGeometry, PathCommand, extract_svg_geometry, render_svg};
+use ticket_watch::map_geometry::{
+    LabelPolicy, MapGeometry, PathCommand, extract_svg_geometry, extract_svg_geometry_for_site,
+    render_svg,
+};
 
 const PAGE: &str = include_str!("fixtures/map-geometry.html");
+const NL_PAGE: &str = include_str!("fixtures/map-geometry-nl.html");
 fn extract(page: &str) -> anyhow::Result<Option<MapGeometry>> {
     let document = Html::parse_document(page);
     let region = document
@@ -9,6 +13,14 @@ fn extract(page: &str) -> anyhow::Result<Option<MapGeometry>> {
         .next()
         .unwrap();
     extract_svg_geometry(region)
+}
+fn extract_for_site(page: &str, host: &str) -> anyhow::Result<Option<MapGeometry>> {
+    let document = Html::parse_document(page);
+    let region = document
+        .select(&Selector::parse("aside").unwrap())
+        .next()
+        .unwrap();
+    extract_svg_geometry_for_site(region, host)
 }
 fn duplicate(page: &str, change: impl FnOnce(&str) -> String) -> String {
     let start = page.find("<svg data-component").unwrap();
@@ -218,4 +230,188 @@ fn safe_export_rebuilds_shapes_and_escapes_text_without_source_markup() {
     let mut bad = map;
     bad.sections[0].path.pop();
     assert!(render_svg(&bad).is_err());
+}
+
+#[test]
+fn netherlands_aliases_keep_source_names_and_every_bound_label_placement() {
+    let map = extract_for_site(NL_PAGE, "ticketmaster.nl")
+        .unwrap()
+        .unwrap();
+    assert_eq!(map.label_policy, LabelPolicy::NetherlandsObservedAliases);
+    assert_eq!(map.sections.len(), 5);
+    let vak = map.sections.iter().find(|s| s.id == "s_vak").unwrap();
+    assert_eq!(vak.name, "Vak127");
+    assert_eq!(vak.label.as_ref().unwrap().lines[0].text, "127");
+    assert!(vak.additional_labels.is_empty());
+    let circle = map.sections.iter().find(|s| s.id == "s_circle").unwrap();
+    assert_eq!(circle.name, "INNER CIRCLE - Standing Room Only");
+    assert_eq!(circle.additional_labels.len(), 1);
+    assert_eq!(circle.label.as_ref().unwrap().lines[0].anchor.y, 350.0);
+    assert_eq!(circle.additional_labels[0].lines[0].anchor.y, 500.0);
+    let exported = render_svg(&map).unwrap();
+    assert_eq!(exported.matches("<path ").count(), 5);
+    assert_eq!(exported.matches("<text ").count(), 6);
+    assert!(exported.contains("<title>Vak127</title>"));
+    assert!(exported.contains("<title>INNER CIRCLE - Standing Room Only</title>"));
+    assert!(exported.contains("y=\"350\"") && exported.contains("y=\"500\""));
+    assert!(!map.stock_verified && !map.adjacency_verified && !map.individual_seats_verified);
+    let moved = NL_PAGE.replace("x=\"400\" y=\"500\"", "x=\"400\" y=\"510\"");
+    assert_ne!(
+        map.geometry_fingerprint,
+        extract_for_site(&moved, "ticketmaster.nl")
+            .unwrap()
+            .unwrap()
+            .geometry_fingerprint
+    );
+    let two = extract_for_site(&duplicate(NL_PAGE, str::to_owned), "ticketmaster.nl")
+        .unwrap()
+        .unwrap();
+    assert_eq!(two.rendered_copies, 2);
+    assert_eq!(two.geometry_fingerprint, map.geometry_fingerprint);
+    let conflicted = duplicate(NL_PAGE, |svg| {
+        svg.replace("x=\"400\" y=\"500\"", "x=\"400\" y=\"510\"")
+    });
+    assert!(extract_for_site(&conflicted, "ticketmaster.nl").is_err());
+}
+
+#[test]
+fn netherlands_label_aliases_require_validated_market_and_exact_observed_spelling() {
+    assert!(extract(NL_PAGE).is_err());
+    for host in [
+        "ticketmaster.cz",
+        "ticketmaster.pl",
+        "ticketmaster.co.uk",
+        "untrusted.example",
+    ] {
+        assert!(
+            extract_for_site(NL_PAGE, host).is_err(),
+            "accepted aliases on {host}"
+        );
+    }
+    for changed in [
+        NL_PAGE.replace("Vak127", "Vak227"),
+        NL_PAGE.replace("Vak127", "Vak0127"),
+        NL_PAGE.replace("Vak127", "vak127"),
+        NL_PAGE.replace("SKYBOXEN 601", "BOX 601"),
+        NL_PAGE.replace("SKYBOXEN 601", "SKYBOXEN 602"),
+        NL_PAGE.replace("Standing Room Only", "Standing Tickets"),
+        NL_PAGE.replace("STAANPLAATSEN", "STANDING"),
+        NL_PAGE.replace("data-label-id=\"s_vak\"", "data-label-id=\"missing\""),
+    ] {
+        assert!(extract_for_site(&changed, "ticketmaster.nl").is_err());
+    }
+    let mut map = extract_for_site(NL_PAGE, "ticketmaster.nl")
+        .unwrap()
+        .unwrap();
+    map.label_policy = LabelPolicy::Exact;
+    assert!(render_svg(&map).is_err());
+}
+
+#[test]
+fn additional_netherlands_labels_are_bounded_distinct_and_same_text() {
+    for changed in [
+        NL_PAGE.replace("x=\"400\" y=\"500\"", "x=\"400\" y=\"350\""),
+        NL_PAGE.replacen(
+            ">INNER CIRCLE</tspan>",
+            ">INNER CIRCLE - Standing Room Only</tspan>",
+            1,
+        ),
+        NL_PAGE.replacen(">INNER CIRCLE</tspan>", ">OUTER CIRCLE</tspan>", 1),
+    ] {
+        assert!(extract_for_site(&changed, "ticketmaster.nl").is_err());
+    }
+    let repeated = (1..=7).map(|n| format!(
+        "<text data-component=\"svg__label\" data-label-id=\"s_circle\" font-size=\"20\"><tspan x=\"400\" y=\"{}\" dy=\"1em\">INNER CIRCLE</tspan></text>",
+        500 + n * 10)).collect::<String>();
+    let too_many = NL_PAGE.replace("</g>\n</svg>", &format!("{repeated}</g>\n</svg>"));
+    assert!(extract_for_site(&too_many, "ticketmaster.nl").is_err());
+    let at_limit = too_many.replace(
+        "<text data-component=\"svg__label\" data-label-id=\"s_circle\" font-size=\"20\"><tspan x=\"400\" y=\"570\" dy=\"1em\">INNER CIRCLE</tspan></text>",
+        "",
+    );
+    let bounded = extract_for_site(&at_limit, "ticketmaster.nl")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        bounded
+            .sections
+            .iter()
+            .find(|s| s.id == "s_circle")
+            .unwrap()
+            .additional_labels
+            .len(),
+        7
+    );
+    assert!(render_svg(&bounded).is_ok());
+    let exact_names = NL_PAGE
+        .replace("Vak127", "127")
+        .replace("SKYBOXEN 601", "601")
+        .replace(" - Standing Room Only", "")
+        .replace(" - STAANPLAATSEN", "");
+    assert!(
+        extract(&exact_names).is_err(),
+        "Exact mode still refuses repeated labels even when every name matches"
+    );
+    assert!(extract_for_site(&exact_names, "ticketmaster.nl").is_ok());
+    let map = extract_for_site(NL_PAGE, "ticketmaster.nl")
+        .unwrap()
+        .unwrap();
+    let mut changed = map.clone();
+    let circle = changed
+        .sections
+        .iter_mut()
+        .find(|s| s.id == "s_circle")
+        .unwrap();
+    circle
+        .additional_labels
+        .push(circle.additional_labels[0].clone());
+    assert!(render_svg(&changed).is_err());
+    let mut changed = map;
+    changed
+        .sections
+        .iter_mut()
+        .find(|s| s.id == "s_circle")
+        .unwrap()
+        .label = None;
+    assert!(render_svg(&changed).is_err());
+}
+
+#[test]
+fn seat_map_passes_only_the_bound_netherlands_market_to_geometry() {
+    let base = include_str!("fixtures/seat-map-regional.html");
+    let marker = "<script id=\"__NEXT_DATA__\" type=\"application/json\">";
+    let start = base.find(marker).unwrap() + marker.len();
+    let end = start + base[start..].find("</script>").unwrap();
+    let mut data: serde_json::Value = serde_json::from_str(&base[start..end]).unwrap();
+    let state = &mut data["props"]["pageProps"]["initialReduxState"];
+    state["config"]["countryCode"] = serde_json::json!("NL");
+    state["eventInfo"]["marketCode"] = serde_json::json!("NL");
+    state["eventInfo"]["venue"]["country"] = serde_json::json!("NL");
+    let info = state["eventInfo"].clone();
+    for query in state["api"]["queries"]
+        .as_object_mut()
+        .unwrap()
+        .values_mut()
+    {
+        if query["endpointName"] == "eventInfo" {
+            query["data"] = info.clone();
+        }
+    }
+    let page = format!("{}{}{}", &base[..start], data, &base[end..])
+        .replace("ticketmaster.cz", "ticketmaster.nl");
+    let svg_start = NL_PAGE.find("<svg ").unwrap();
+    let svg_end = NL_PAGE.find("</svg>").unwrap() + "</svg>".len();
+    let page = page.replace(
+        "</aside>",
+        &format!("{}</aside>", &NL_PAGE[svg_start..svg_end]),
+    );
+    let url = "https://www.ticketmaster.nl/event/synthetic-concert/1234567890";
+    let map = ticket_watch::seat_map::extract_seat_map(url, url, &page).unwrap();
+    assert_eq!(
+        map.rendered_geometry.unwrap().label_policy,
+        LabelPolicy::NetherlandsObservedAliases
+    );
+    assert!(!map.stock_verified && !map.adjacency_verified && !map.geometry_verified);
+    let conflicted = page.replace("\"marketCode\":\"NL\"", "\"marketCode\":\"CZ\"");
+    assert!(ticket_watch::seat_map::extract_seat_map(url, url, &conflicted).is_err());
 }

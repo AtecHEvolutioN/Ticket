@@ -672,6 +672,7 @@ impl BrowserProcess {
                     "navigation_timeout",
                     "navigation_failed",
                     "unsafe_redirect",
+                    "queue_redirect",
                     "body_too_large",
                     "invalid_request",
                     "capture_failed",
@@ -1083,6 +1084,63 @@ mod tests {
         assert_eq!(second.html, "2");
         fetcher.shutdown().await;
         assert!(fetcher.browser.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn browser_queue_error_is_fixed_and_does_not_retry_or_expose_unknown_errors() {
+        let requests = tempfile::NamedTempFile::new().unwrap();
+        let mut script = tempfile::NamedTempFile::new().unwrap();
+        let request_path = serde_json::to_string(requests.path()).unwrap();
+        let body = format!(
+            r#"
+            const fs = require('node:fs');
+            const lines = require('node:readline').createInterface({{input:process.stdin}});
+            lines.on('line', line => {{
+                const r = JSON.parse(line);
+                fs.appendFileSync({request_path}, 'request\n');
+                process.stdout.write(JSON.stringify({{id:r.id,error:r.url.includes('/queue/')
+                    ? 'queue_redirect' : 'private-session-error-value'}})+'\n');
+            }});
+            "#
+        );
+        script.write_all(body.as_bytes()).unwrap();
+        let mut config = Config::default();
+        config.browser.script = script.path().into();
+        let fetcher = Fetcher::new(&config).unwrap();
+        let known = fetcher
+            .fetch_url(
+                "https://www.ticketmaster.it/event/queue/12345678",
+                FetchMode::Browser,
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+        assert_eq!(known, "Browser capture: queue_redirect");
+        assert_eq!(
+            std::fs::read_to_string(requests.path())
+                .unwrap()
+                .lines()
+                .count(),
+            1
+        );
+        let unknown = fetcher
+            .fetch_url(
+                "https://www.ticketmaster.it/event/unknown/12345678",
+                FetchMode::Browser,
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+        assert_eq!(unknown, "Browser capture: worker_failed");
+        assert!(!unknown.contains("private-session"));
+        assert_eq!(
+            std::fs::read_to_string(requests.path())
+                .unwrap()
+                .lines()
+                .count(),
+            2
+        );
+        fetcher.shutdown().await;
     }
 
     #[tokio::test]

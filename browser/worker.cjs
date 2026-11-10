@@ -12,6 +12,7 @@ const { inspectTicketmasterCartControls, assertCartControlsCurrent,
   releaseCartControlsInspection } = require('./ticketmaster-cart-controls.cjs');
 const { inspectChallenge, responseIntervention } = require('./manual-intervention.cjs');
 const { observeDocuments } = require('./document-lifecycle.cjs');
+const { blockReviewedQueue } = require('./queue-boundary.cjs');
 const ALLOWED_DOMAINS = new Set([
   'ticketmaster.pl', 'ticketmaster.cz', 'ticketmaster.com', 'ticketmaster.co.uk',
   'ticketmaster.de', 'ticketmaster.at', 'ticketmaster.ch', 'ticketmaster.be',
@@ -182,6 +183,7 @@ async function capture(context, request, cartIsolation) {
   page.setDefaultTimeout?.(request.timeout_ms);
   let unsafeRedirect = false;
   let documents;
+  let queueBoundary;
   let deadlineTimer;
   let stopped = false;
   let initialIdentification;
@@ -236,6 +238,7 @@ async function capture(context, request, cartIsolation) {
       }
       return route.fallback();
     });
+    queueBoundary = await blockReviewedQueue(context, page, target.href);
     if (!remaining()) throw new Error('navigation_timeout');
     const response = await page.goto(target.href, { waitUntil: 'domcontentloaded', timeout: remaining() });
     if (!response) throw new Error('navigation_failed');
@@ -391,9 +394,12 @@ async function capture(context, request, cartIsolation) {
   } catch (error) {
     let code = 'navigation_failed';
     const blocked = documents?.lastCommittedResponse();
-    if (unsafeRedirect || error.message === 'unsafe_redirect') code = 'unsafe_redirect';
-    else if (blocked && [403, 429].includes(blocked.status)) {
-      return errorReply(blocked, responseIntervention(blocked.status, blocked.headers));
+    if (queueBoundary?.blocked) code = 'queue_redirect';
+    else if (unsafeRedirect || error.message === 'unsafe_redirect') code = 'unsafe_redirect';
+    else if (blocked && [401, 403, 429].includes(blocked.status)) {
+      const reason = blocked.status === 401 && blocked.headers['tm-bl']?.trim() === '1'
+        ? 'identification_incomplete' : responseIntervention(blocked.status, blocked.headers);
+      return errorReply(blocked, reason);
     }
     else if (identificationPending) return incompleteIdentification();
     else if (error.name === 'TimeoutError' || error.message === 'navigation_timeout') code = 'navigation_timeout';
@@ -405,6 +411,7 @@ async function capture(context, request, cartIsolation) {
     if (request.display === 'cart_controls') await releaseCartControlsInspection(page).catch(() => {});
     await documents?.close().catch(() => {});
     await page.close().catch(() => {});
+    await queueBoundary?.close().catch(() => {});
   }
 }
 

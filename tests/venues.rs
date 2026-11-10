@@ -268,16 +268,46 @@ fn imports_roll_back_and_presets_survive_reopening_existing_database() {
 fn observed_venue_seed_is_valid_reference_metadata_only() {
     let presets: Vec<VenuePreset> =
         serde_json::from_str(include_str!("../examples/venue-presets.json")).unwrap();
-    assert_eq!(presets.len(), 21);
+    assert_eq!(presets.len(), 29);
     let mut db = Store::open(Path::new(":memory:")).unwrap();
     let imported = db.venue_import(&presets).unwrap();
-    assert_eq!(imported.len(), 21);
-    assert!(
+    assert_eq!(imported.len(), 29);
+    assert_eq!(
         imported
             .iter()
-            .all(|p| p.layouts.is_empty() && p.provider_venue_id.is_none())
+            .filter(|p| p.provider_venue_id.is_some())
+            .count(),
+        10
     );
-    assert_eq!(db.venue_list().unwrap().len(), 21);
+    assert_eq!(imported.iter().map(|p| p.layouts.len()).sum::<usize>(), 6);
+    assert!(imported.iter().flat_map(|p| &p.layouts).all(|layout| {
+        layout.verified_at.is_none()
+            && layout.adapter.as_deref() == Some("ticketmaster-static-map-v1")
+            && layout.map_url.is_some()
+            && layout
+                .sections
+                .iter()
+                .all(|name| !name.is_empty() && name != "&nbsp;")
+    }));
+    assert_eq!(db.venue_list().unwrap().len(), 29);
+    assert!(db.status().unwrap().is_empty());
+    for preset in &imported {
+        let data = serde_json::to_value(preset).unwrap();
+        for field in [
+            "price",
+            "prices",
+            "availability",
+            "quantity",
+            "capacity",
+            "offers",
+            "ticket_types",
+        ] {
+            assert!(data.get(field).is_none());
+            for layout in data["layouts"].as_array().unwrap() {
+                assert!(layout.get(field).is_none());
+            }
+        }
+    }
 }
 
 fn map_layout(fingerprint: char, map_url: &str, sections: &[&str]) -> VenueLayout {

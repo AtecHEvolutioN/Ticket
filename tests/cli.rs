@@ -526,7 +526,7 @@ fn venue_presets_import_idempotently_and_match_without_a_key_or_network() {
     let first = run(&["venues", "import", seed.to_str().unwrap()]);
     let second = run(&["venues", "import", seed.to_str().unwrap()]);
     assert_eq!(first, second);
-    assert_eq!(run(&["venues", "list"]).as_array().unwrap().len(), 21);
+    assert_eq!(run(&["venues", "list"]).as_array().unwrap().len(), 29);
     let venue = run(&[
         "venues",
         "match",
@@ -774,6 +774,47 @@ fn cart_plan_refuses_missing_quantity_and_oversized_input_without_side_effects()
     std::fs::write(&file, vec![b'x'; ticket_watch::cart::MAX_INPUT_BYTES + 1]).unwrap();
     assert_eq!(run()["reason"], "input_too_large");
     assert!(!directory.path().join("data").exists());
+}
+
+#[test]
+fn saved_map_presets_omit_blank_source_names_without_losing_section_ids() {
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("event.html");
+    let fixture = include_str!("fixtures/seat-map-regional.html")
+        .replace("1. POSCHODÍ", "\u{a0}")
+        .replace("Plocha", "Balcony & Gallery");
+    std::fs::write(&file, fixture).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+        .current_dir(directory.path())
+        .env_remove("TICKETMASTER_API_KEY")
+        .env_remove("DISCORD_BOT_TOKEN")
+        .args([
+            "map-inspect",
+            "--url",
+            "https://www.ticketmaster.cz/event/synthetic-concert/1234567890",
+            "--html",
+            file.to_str().unwrap(),
+            "--save-layout",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(report["map"]["configured_sections"][0]["title"].is_null());
+    assert_eq!(report["map"]["configured_sections"][0]["id"], "1P");
+    assert_eq!(
+        report["map"]["price_section_mappings"][0]["section_id"],
+        "1P"
+    );
+    let layout = &report["saved_venue"]["layouts"][0];
+    assert_eq!(layout["sections"], serde_json::json!(["Balcony & Gallery"]));
+    assert!(layout["verified_at"].is_null());
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("&nbsp;"));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("&amp;"));
 }
 
 #[test]

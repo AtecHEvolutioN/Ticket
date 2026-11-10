@@ -1,0 +1,645 @@
+{
+  "schema_version": 1,
+  "audit_date": "2026-11-10",
+  "method": "ordinary_headed_chromium_map_overviews_then_offline_parser_replay",
+  "summary": {
+    "events": 11,
+    "successful_http_captures": 11,
+    "distinct_bound_venues": 10,
+    "venues_with_svg_or_static_map": 8,
+    "svg_maps": 7,
+    "rendered_sections": 231,
+    "rendered_label_placements": 232,
+    "static_reference_only": 1,
+    "map_reference_absent": 2,
+    "sale_schedule_views": 1,
+    "draft_static_layouts_exported": 6
+  },
+  "section_clicks": 0,
+  "seat_clicks": 0,
+  "ticket_search_actions": 0,
+  "reservation_actions": 0,
+  "stock_verified": false,
+  "adjacency_verified": false,
+  "exports": [
+    {
+      "event_id": "nl-monster-jam-381518243",
+      "file": "docs/maps/nl-gelredome-monster-jam.svg",
+      "sha256": "1cb15f40a3de9dd31be0cb03d10bac5cdc34d7d39d9e685b48dabd75692baa4e"
+    },
+    {
+      "event_id": "nl-u2-1118978501",
+      "file": "docs/maps/nl-johan-cruijff-arena-u2.svg",
+      "sha256": "8aa9b4485c7784256fffadb536d29551c9eb734ceb38807604cdcf9e1a7e5971"
+    }
+  ],
+  "venue_presets": "docs/evidence/nl-venue-presets-2026-11-10.json",
+  "limits": [
+    "Section outlines and labels are event-specific observations, not verified seat topology or available inventory.",
+    "Six static layout references remain drafts; four venues have metadata-only preset entries. No static reference was invented from an SVG.",
+    "Section opening, seat hover, scheduled section scanning and carting remain Czech-only.",
+    "Additional label placements are bounded and retain exact observed text. Dutch aliases do not apply to other markets.",
+    "No raw DOM, screenshots, cookies, private checkout identifiers or session tokens are published."
+  ],
+  "events": [
+    {
+      "id": "nl-monster-jam-381518243",
+      "artist": "Monster Jam",
+      "event_url": "https://www.ticketmaster.nl/event/monster-jam-2027-tickets/381518243",
+      "venue": "GelreDome",
+      "city": "Arnhem",
+      "country": "NL",
+      "state": "mapped_svg_sections",
+      "capture": {
+        "schema_version": 1,
+        "event_url": "https://www.ticketmaster.nl/event/monster-jam-2027-tickets/381518243",
+        "final_url": "https://www.ticketmaster.nl/event/monster-jam-2027-tickets/381518243",
+        "captured_at": "2026-11-10T13:06:51.433Z",
+        "rendered": true,
+        "status": 200,
+        "adapter_state": "ready",
+        "adapter_reason": "map_svg",
+        "manual_intervention": null,
+        "retry_after_secs": null,
+        "elapsed_ms": 7445,
+        "html_bytes": 706636,
+        "capture_sha256": "ccfef0b2c64e0c496ce52a0b983135f6711fefbb22b4e9f7d89b3e4b1335cd73"
+      },
+      "initial_state": "map_parser_error",
+      "bound_venue": {
+        "city": "Arnhem",
+        "country": "NL",
+        "discovery_id": "Z198xZbpZ6Fe",
+        "name": "GelreDome",
+        "regional_id": "669"
+      },
+      "static_map": null,
+      "configured_sections": [
+        {
+          "id": "1",
+          "raw_id": "1",
+          "title": "1e Ring"
+        },
+        {
+          "id": "2",
+          "raw_id": "2",
+          "title": "2e Ring"
+        },
+        {
+          "id": "4",
+          "raw_id": "4",
+          "title": "4e Etage"
+        },
+        {
+          "id": "5",
+          "raw_id": "5",
+          "title": "5e Etage"
+        }
+      ],
+      "rendered_sections": 73,
+      "rendered_label_placements": 73,
+      "geometry_fingerprint": "geometry-7873863f01f46ecd90406f1924ab78f6b50187c0bce88f41f98490e4114f1971",
+      "geometry_label_policy": "netherlands_observed_aliases",
+      "stock_verified": false,
+      "adjacency_verified": false,
+      "geometry_verified": false
+    },
+    {
+      "id": "nl-gypsy-jazz-festival-1816750465",
+      "artist": "Gypsy Jazz Festival",
+      "event_url": "https://www.ticketmaster.nl/event/gypsy-jazz-festival-2027-tickets/1816750465?language=en-us",
+      "venue": "Musis Sacrum",
+      "city": "Arnhem",
+      "country": "NL",
+      "state": "mapped_svg_sections",
+      "capture": {
+        "schema_version": 1,
+        "event_url": "https://www.ticketmaster.nl/event/gypsy-jazz-festival-2027-tickets/1816750465?language=en-us",
+        "final_url": "https://www.ticketmaster.nl/event/gypsy-jazz-festival-2027-tickets/1816750465?language=en-us",
+        "captured_at": "2026-11-10T13:06:57.976Z",
+        "rendered": true,
+        "status": 200,
+        "adapter_state": "ready",
+        "adapter_reason": "map_svg",
+        "manual_intervention": null,
+        "retry_after_secs": null,
+        "elapsed_ms": 4421,
+        "html_bytes": 629424,
+        "capture_sha256": "b77c942e3ca054ee36dac290017ec22aae56881c4c7756037e7a12202bd38269"
+      },
+      "initial_state": "mapped_svg_sections",
+      "bound_venue": {
+        "city": "Arnhem",
+        "country": "NL",
+        "discovery_id": "Z598xZbpZed1e",
+        "name": "Musis Sacrum",
+        "regional_id": "1291"
+      },
+      "static_map": null,
+      "configured_sections": [
+        {
+          "id": "FBL",
+          "raw_id": "FBL",
+          "title": "Frontbalkon Links"
+        },
+        {
+          "id": "FBM",
+          "raw_id": "FBM",
+          "title": "Frontbalkon Midden"
+        },
+        {
+          "id": "FBR",
+          "raw_id": "FBR",
+          "title": "Frontbalkon Rechts"
+        },
+        {
+          "id": "RL",
+          "raw_id": "RL",
+          "title": "Zaal"
+        },
+        {
+          "id": "ZBL",
+          "raw_id": "ZBL",
+          "title": "Zijbalkon Links"
+        },
+        {
+          "id": "ZBR",
+          "raw_id": "ZBR",
+          "title": "Zijbalkon Rechts"
+        },
+        {
+          "id": "ZL",
+          "raw_id": "ZL",
+          "title": "Zaal"
+        }
+      ],
+      "rendered_sections": 4,
+      "rendered_label_placements": 4,
+      "geometry_fingerprint": "geometry-eeecf383bbdc80c82d63a543e9c9841ffbc1950206c9a866523ae04f4220152d",
+      "geometry_label_policy": "netherlands_observed_aliases",
+      "stock_verified": false,
+      "adjacency_verified": false,
+      "geometry_verified": false
+    },
+    {
+      "id": "nl-physical-graffiti-1627972756",
+      "artist": "Physical Graffiti",
+      "event_url": "https://www.ticketmaster.nl/event/physical-graffiti-led-zeppelin-over-europe-2027-tickets/1627972756?language=en-nl",
+      "venue": "Poppodium Q-Factory",
+      "city": "Amsterdam",
+      "country": "NL",
+      "state": "map_reference_absent",
+      "capture": {
+        "schema_version": 1,
+        "event_url": "https://www.ticketmaster.nl/event/physical-graffiti-led-zeppelin-over-europe-2027-tickets/1627972756?language=en-nl",
+        "final_url": "https://www.ticketmaster.nl/event/physical-graffiti-led-zeppelin-over-europe-2027-tickets/1627972756?language=en-nl",
+        "captured_at": "2026-11-10T13:07:14.396Z",
+        "rendered": true,
+        "status": 200,
+        "adapter_state": "unsupported",
+        "adapter_reason": "map_unavailable",
+        "manual_intervention": null,
+        "retry_after_secs": null,
+        "elapsed_ms": 14357,
+        "html_bytes": 633787,
+        "capture_sha256": "b474712a9762c2d3e4e6484a5f3104c2dae3cb4b1bb1b0501e74c6a27ff680ce"
+      },
+      "initial_state": "map_reference_absent",
+      "bound_venue": {
+        "city": "Amsterdam",
+        "country": "NL",
+        "discovery_id": "Z598xZbpZ7FAk",
+        "name": "Poppodium Q-Factory",
+        "regional_id": "3745"
+      },
+      "static_map": null,
+      "configured_sections": [
+        {
+          "id": "QFA",
+          "raw_id": "QFA",
+          "title": "Staanplaatsen"
+        }
+      ],
+      "rendered_sections": 0,
+      "rendered_label_placements": 0,
+      "geometry_fingerprint": null,
+      "geometry_label_policy": null,
+      "stock_verified": false,
+      "adjacency_verified": false,
+      "geometry_verified": false
+    },
+    {
+      "id": "nl-thy-art-is-murder-1909691373",
+      "artist": "Thy Art Is Murder",
+      "event_url": "https://www.ticketmaster.nl/event/thy-art-is-murder-tickets/1909691373?language=en-us",
+      "venue": "Dynamo",
+      "city": "Eindhoven",
+      "country": "NL",
+      "state": "map_reference_absent",
+      "capture": {
+        "schema_version": 1,
+        "event_url": "https://www.ticketmaster.nl/event/thy-art-is-murder-tickets/1909691373?language=en-us",
+        "final_url": "https://www.ticketmaster.nl/event/thy-art-is-murder-tickets/1909691373?language=en-us",
+        "captured_at": "2026-11-10T13:07:31.582Z",
+        "rendered": true,
+        "status": 200,
+        "adapter_state": "unsupported",
+        "adapter_reason": "map_unavailable",
+        "manual_intervention": null,
+        "retry_after_secs": null,
+        "elapsed_ms": 15106,
+        "html_bytes": 613439,
+        "capture_sha256": "b6badc87534b80d792bcd676e9b66c00505b5dabd5618ebf6074322503eb208f"
+      },
+      "initial_state": "map_reference_absent",
+      "bound_venue": {
+        "city": "Eindhoven",
+        "country": "NL",
+        "discovery_id": "Z598xZbpZ76ke",
+        "name": "Dynamo",
+        "regional_id": "4613"
+      },
+      "static_map": null,
+      "configured_sections": [
+        {
+          "id": "DYN",
+          "raw_id": "DYN",
+          "title": "Geen plaats omschrijving"
+        }
+      ],
+      "rendered_sections": 0,
+      "rendered_label_placements": 0,
+      "geometry_fingerprint": null,
+      "geometry_label_policy": null,
+      "stock_verified": false,
+      "adjacency_verified": false,
+      "geometry_verified": false
+    },
+    {
+      "id": "nl-10cc-593318371",
+      "artist": "10cc",
+      "event_url": "https://www.ticketmaster.nl/event/10cc-tickets/593318371?language=en-us",
+      "venue": "TivoliVredenburg",
+      "city": "Utrecht",
+      "country": "NL",
+      "state": "mapped_svg_sections",
+      "capture": {
+        "schema_version": 1,
+        "event_url": "https://www.ticketmaster.nl/event/10cc-tickets/593318371?language=en-us",
+        "final_url": "https://www.ticketmaster.nl/event/10cc-tickets/593318371?language=en-us",
+        "captured_at": "2026-11-10T13:07:38.292Z",
+        "rendered": true,
+        "status": 200,
+        "adapter_state": "ready",
+        "adapter_reason": "map_svg",
+        "manual_intervention": null,
+        "retry_after_secs": null,
+        "elapsed_ms": 4452,
+        "html_bytes": 633790,
+        "capture_sha256": "3fa65881d70dc87aee8f0dda7cf3362e6ad695b08b9c9cc265061492e9b9cd80"
+      },
+      "initial_state": "mapped_svg_sections",
+      "bound_venue": {
+        "city": "Utrecht",
+        "country": "NL",
+        "discovery_id": "Z598xZbpZ77de",
+        "name": "TivoliVredenburg",
+        "regional_id": "3321"
+      },
+      "static_map": {
+        "layout_fingerprint": "map-5c962a58a4a115a2fea65f9600c34658d1d9424517bd9853f96819a47c910d12",
+        "url": "https://media.ticketmaster.eu/netherlands/b3da81f0fbc3cffde394bd9fe9265de8.jpg"
+      },
+      "configured_sections": [
+        {
+          "id": "GZ",
+          "raw_id": "GZ",
+          "title": "Grote Zaal"
+        }
+      ],
+      "rendered_sections": 11,
+      "rendered_label_placements": 11,
+      "geometry_fingerprint": "geometry-cdfb63113bb7bdcab2fb2c4b99e181635cdd235d8603e8f8087089ddea56444f",
+      "geometry_label_policy": "netherlands_observed_aliases",
+      "stock_verified": false,
+      "adjacency_verified": false,
+      "geometry_verified": false
+    },
+    {
+      "id": "nl-new-wave-1861749472",
+      "artist": "New Wave",
+      "event_url": "https://www.ticketmaster.nl/event/new-wave-all-stars-tickets/1861749472?language=en-us",
+      "venue": "Ziggo Dome",
+      "city": "Amsterdam",
+      "country": "NL",
+      "state": "mapped_svg_sections",
+      "capture": {
+        "schema_version": 1,
+        "event_url": "https://www.ticketmaster.nl/event/new-wave-all-stars-tickets/1861749472?language=en-us",
+        "final_url": "https://www.ticketmaster.nl/event/new-wave-all-stars-tickets/1861749472?language=en-us",
+        "captured_at": "2026-11-10T13:07:44.878Z",
+        "rendered": true,
+        "status": 200,
+        "adapter_state": "ready",
+        "adapter_reason": "map_svg",
+        "manual_intervention": null,
+        "retry_after_secs": null,
+        "elapsed_ms": 4456,
+        "html_bytes": 670189,
+        "capture_sha256": "9fc47a90307a65f6a07865c098161565c4c12ae588b682b5cecc7cd68a5a9dd0"
+      },
+      "initial_state": "mapped_svg_sections",
+      "bound_venue": {
+        "city": "Amsterdam",
+        "country": "NL",
+        "discovery_id": "Z598xZbpZdFeF",
+        "name": "Ziggo Dome",
+        "regional_id": "2717"
+      },
+      "static_map": {
+        "layout_fingerprint": "map-b42c9e26bd655ad6e3aa0b4865f80c31c7669fa9f0c474d0d861da5dbe8304a9",
+        "url": "https://media.ticketmaster.eu/netherlands/3975324150ab783bf80460a538eda0f5.jpg"
+      },
+      "configured_sections": [
+        {
+          "id": "1",
+          "raw_id": "1",
+          "title": "1e Ring"
+        },
+        {
+          "id": "2",
+          "raw_id": "2",
+          "title": "2e Ring"
+        },
+        {
+          "id": "V",
+          "raw_id": "V",
+          "title": "Vloer"
+        }
+      ],
+      "rendered_sections": 29,
+      "rendered_label_placements": 29,
+      "geometry_fingerprint": "geometry-fae8b55ee1ccda1404847c07dc2fc7321c85762bd3f3f1c3796a58b4c7598b16",
+      "geometry_label_policy": "netherlands_observed_aliases",
+      "stock_verified": false,
+      "adjacency_verified": false,
+      "geometry_verified": false
+    },
+    {
+      "id": "nl-u2-1118978501",
+      "artist": "U2",
+      "event_url": "https://www.ticketmaster.nl/event/u2-the-greatest-show-on-earth-world-tour-tickets/1118978501?language=en-us",
+      "venue": "Johan Cruijff ArenA",
+      "city": "Amsterdam",
+      "country": "NL",
+      "state": "mapped_svg_sections",
+      "capture": {
+        "schema_version": 1,
+        "event_url": "https://www.ticketmaster.nl/event/u2-the-greatest-show-on-earth-world-tour-tickets/1118978501?language=en-us",
+        "final_url": "https://www.ticketmaster.nl/event/u2-the-greatest-show-on-earth-world-tour-tickets/1118978501?language=en-us",
+        "captured_at": "2026-11-10T13:07:51.144Z",
+        "rendered": true,
+        "status": 200,
+        "adapter_state": "ready",
+        "adapter_reason": "map_svg",
+        "manual_intervention": null,
+        "retry_after_secs": null,
+        "elapsed_ms": 4221,
+        "html_bytes": 849536,
+        "capture_sha256": "11c4ba3ff54b706fa09cc8473ec09075bd1fc394c19057fbe44f6561c295a07e"
+      },
+      "initial_state": "map_parser_error",
+      "bound_venue": {
+        "city": "Amsterdam",
+        "country": "NL",
+        "discovery_id": "Z198xZbpZevF",
+        "name": "Johan Cruijff ArenA",
+        "regional_id": "107"
+      },
+      "static_map": {
+        "layout_fingerprint": "map-b06d32e425f354b5382d6171622ee2ca13e867330bf5503776e3f1a0fac3b02a",
+        "url": "https://media.ticketmaster.eu/netherlands/040b3d16de7747deca99a5774bce135f.jpg"
+      },
+      "configured_sections": [
+        {
+          "id": "1",
+          "raw_id": "1",
+          "title": "Eerste ring"
+        },
+        {
+          "id": "2",
+          "raw_id": "2",
+          "title": "Tweede ring"
+        },
+        {
+          "id": "R",
+          "raw_id": "R",
+          "title": "Platform"
+        },
+        {
+          "id": "V",
+          "raw_id": "V",
+          "title": "Vloer"
+        }
+      ],
+      "rendered_sections": 106,
+      "rendered_label_placements": 107,
+      "geometry_fingerprint": "geometry-1e8569f278bae826641de8b7076b424ad187e362544054c81031bdab6e3fe515",
+      "geometry_label_policy": "netherlands_observed_aliases",
+      "stock_verified": false,
+      "adjacency_verified": false,
+      "geometry_verified": false
+    },
+    {
+      "id": "nl-the-last-internationale-247738701",
+      "artist": "The Last Internationale",
+      "event_url": "https://www.ticketmaster.nl/event/the-last-internationale-tickets/247738701?language=en-us",
+      "venue": "Melkweg",
+      "city": "Amsterdam",
+      "country": "NL",
+      "state": "mapped_static_reference",
+      "capture": {
+        "schema_version": 1,
+        "event_url": "https://www.ticketmaster.nl/event/the-last-internationale-tickets/247738701?language=en-us",
+        "final_url": "https://www.ticketmaster.nl/event/the-last-internationale-tickets/247738701?language=en-us",
+        "captured_at": "2026-11-10T13:08:08.152Z",
+        "rendered": true,
+        "status": 200,
+        "adapter_state": "unsupported",
+        "adapter_reason": "map_unavailable",
+        "manual_intervention": null,
+        "retry_after_secs": null,
+        "elapsed_ms": 14947,
+        "html_bytes": 626023,
+        "capture_sha256": "67cb00cd1b2d939194d5dd9492f48a64fb3cfec86be63ceca377bd538655070b"
+      },
+      "initial_state": "mapped_static_reference",
+      "bound_venue": {
+        "city": "Amsterdam",
+        "country": "NL",
+        "discovery_id": "Z598xZbpZd6ak",
+        "name": "Melkweg",
+        "regional_id": "2685"
+      },
+      "static_map": {
+        "layout_fingerprint": "map-631144cbd1bd5cb1140328931b7086895322a7bec746db4f91fa2149720ea376",
+        "url": "https://media.ticketmaster.eu/netherlands/a565f16b5cbb05314daa6794a42f33e6.jpg"
+      },
+      "configured_sections": [
+        {
+          "id": "OU",
+          "raw_id": "OU",
+          "title": null
+        }
+      ],
+      "rendered_sections": 0,
+      "rendered_label_placements": 0,
+      "geometry_fingerprint": null,
+      "geometry_label_policy": null,
+      "stock_verified": false,
+      "adjacency_verified": false,
+      "geometry_verified": false
+    },
+    {
+      "id": "nl-famke-louise-221736388",
+      "artist": "Famke Louise",
+      "event_url": "https://www.ticketmaster.nl/event/famke-louise-1-0-tickets/221736388?language=en-us",
+      "venue": "AFAS Live",
+      "city": "Amsterdam",
+      "country": "NL",
+      "state": "mapped_svg_sections",
+      "capture": {
+        "schema_version": 1,
+        "event_url": "https://www.ticketmaster.nl/event/famke-louise-1-0-tickets/221736388?language=en-us",
+        "final_url": "https://www.ticketmaster.nl/event/famke-louise-1-0-tickets/221736388?language=en-us",
+        "captured_at": "2026-11-10T13:08:14.668Z",
+        "rendered": true,
+        "status": 200,
+        "adapter_state": "ready",
+        "adapter_reason": "map_svg",
+        "manual_intervention": null,
+        "retry_after_secs": null,
+        "elapsed_ms": 4466,
+        "html_bytes": 635167,
+        "capture_sha256": "97b5379b4499fda43622f1f6dbb69203919f25be015d4919191fadc3f794346a"
+      },
+      "initial_state": "mapped_svg_sections",
+      "bound_venue": {
+        "city": "Amsterdam",
+        "country": "NL",
+        "discovery_id": "Z598xZbpZAdAF",
+        "name": "AFAS Live",
+        "regional_id": "4247"
+      },
+      "static_map": {
+        "layout_fingerprint": "map-82c52353d918bd79d3a710e085dd038c11d5874861d04e958bd3a72e6f49f6a7",
+        "url": "https://media.ticketmaster.eu/netherlands/b89d63a583936c5aadf2e8940e9386c4.jpg"
+      },
+      "configured_sections": [
+        {
+          "id": "BB",
+          "raw_id": "BB",
+          "title": "AFAS Live"
+        }
+      ],
+      "rendered_sections": 3,
+      "rendered_label_placements": 3,
+      "geometry_fingerprint": "geometry-1b0432f8107d065d12842ec5266d7cbae653a3599e061b97182f47032dffd9b5",
+      "geometry_label_policy": "netherlands_observed_aliases",
+      "stock_verified": false,
+      "adjacency_verified": false,
+      "geometry_verified": false
+    },
+    {
+      "id": "nl-papa-roach-1833751571",
+      "artist": "Papa Roach",
+      "event_url": "https://www.ticketmaster.nl/event/papa-roach--rise-of-the-roach-tickets/1833751571",
+      "venue": "RTM Stage - Rotterdam Ahoy",
+      "city": "Rotterdam",
+      "country": "NL",
+      "state": "mapped_svg_sections",
+      "capture": {
+        "schema_version": 1,
+        "event_url": "https://www.ticketmaster.nl/event/papa-roach--rise-of-the-roach-tickets/1833751571",
+        "final_url": "https://www.ticketmaster.nl/event/papa-roach--rise-of-the-roach-tickets/1833751571",
+        "captured_at": "2026-11-10T13:08:21.604Z",
+        "rendered": true,
+        "status": 200,
+        "adapter_state": "ready",
+        "adapter_reason": "map_svg",
+        "manual_intervention": null,
+        "retry_after_secs": null,
+        "elapsed_ms": 4883,
+        "html_bytes": 635406,
+        "capture_sha256": "8a14be1b0e3205ae0cc08d9a4399bc317debddc5412340e49b9b8d99ce0092e3"
+      },
+      "initial_state": "mapped_svg_sections",
+      "bound_venue": {
+        "city": "Rotterdam",
+        "country": "NL",
+        "discovery_id": "Z598xZbpZA1ee",
+        "name": "RTM Stage - Rotterdam Ahoy",
+        "regional_id": "4913"
+      },
+      "static_map": {
+        "layout_fingerprint": "map-c400c317bf938f0a783eabcdc82c6860cf2a54f5a36b1c9a1640ac23fd1054f1",
+        "url": "https://media.ticketmaster.eu/netherlands/d8947bb2f8def0da7e9258b8683ef104.jpg"
+      },
+      "configured_sections": [
+        {
+          "id": "B",
+          "raw_id": "B",
+          "title": "Begane grond"
+        },
+        {
+          "id": "V2",
+          "raw_id": "V2",
+          "title": "Verdieping 2"
+        },
+        {
+          "id": "V3",
+          "raw_id": "V3",
+          "title": "Verdieping 3"
+        },
+        {
+          "id": "V4",
+          "raw_id": "V4",
+          "title": "Verdieping 4"
+        }
+      ],
+      "rendered_sections": 5,
+      "rendered_label_placements": 5,
+      "geometry_fingerprint": "geometry-1af7b3b2f10d00052baf83f5c40c3d76bd07f0601277b63c9e43822df7065cdf",
+      "geometry_label_policy": "netherlands_observed_aliases",
+      "stock_verified": false,
+      "adjacency_verified": false,
+      "geometry_verified": false
+    },
+    {
+      "id": "nl-jamiroquai-ziggo",
+      "artist": "Jamiroquai",
+      "event_url": "https://www.ticketmaster.nl/event/jamiroquai-tickets/1823751680",
+      "venue": "Ziggo Dome",
+      "city": "Amsterdam",
+      "country": "NL",
+      "state": "map_parser_error",
+      "capture": {
+        "schema_version": 1,
+        "event_url": "https://www.ticketmaster.nl/event/jamiroquai-tickets/1823751680",
+        "final_url": "https://www.ticketmaster.nl/event/jamiroquai-tickets/1823751680",
+        "captured_at": "2026-11-10T13:08:30.195Z",
+        "rendered": true,
+        "status": 200,
+        "adapter_state": "unsupported",
+        "adapter_reason": "unsupported_layout",
+        "manual_intervention": null,
+        "retry_after_secs": null,
+        "elapsed_ms": 6547,
+        "html_bytes": 708931,
+        "capture_sha256": "282b40e93f6aeb10e97856079744a94316457c5738ae9326ec17879d0009ef11"
+      },
+      "initial_state": "map_parser_error",
+      "reviewed_page_state": "sale_schedule_visible"
+    }
+  ]
+}

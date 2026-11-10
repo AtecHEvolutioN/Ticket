@@ -35,7 +35,7 @@ test('adapter opt-in rejects arbitrary actions and non-event requests', () => {
   assert.throws(() => parseArgs(['--url', url, '--output', '/tmp/event.html', '--adapter', 'checkout']));
 });
 
-test('captured Czech, Spanish and Dutch labels open only their display controls', { skip: !enabled }, async () => {
+test('captured Czech, Spanish, Dutch and German labels open only their display controls', { skip: !enabled }, async () => {
   const { chromium } = require('playwright');
   const browser = await chromium.launch({ headless: true,
     ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}) });
@@ -45,6 +45,7 @@ test('captured Czech, Spanish and Dutch labels open only their display controls'
       ['cz', 'Nejlepší dostupné', 'Odmítnout vše'],
       ['es', 'Ver lo mejor disponible', false],
       ['nl', 'Best beschikbaar', 'Alles weigeren'],
+      ['de', 'Beste verfügbare Plätze', 'Alle ablehnen'],
     ];
     await context.route('**/*', route => {
       const [country, label, consent] = cases.find(([country]) => new URL(route.request().url()).hostname.endsWith(`.${country}`));

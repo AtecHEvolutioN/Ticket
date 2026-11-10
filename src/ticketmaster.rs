@@ -22,6 +22,8 @@ use url::Url;
 
 const LIMIT: usize = 1000;
 const REGIONAL: &str = "ticketmaster-regional-v1";
+const GLOBAL_DISPLAY: &str = "ticketmaster-global-display-v1";
+const ITALIAN_DISPLAY: &str = "ticketmaster-italian-display-v1";
 const CURRENCIES: &[&str] = &[
     "USD", "EUR", "GBP", "PLN", "CZK", "CHF", "SEK", "NOK", "DKK", "AUD", "CAD", "NZD", "ZAR",
     "MXN", "JPY", "CNY", "HUF", "RON", "BGN",
@@ -235,6 +237,64 @@ fn page_currency(watch: &Watch, doc: &Html) -> CurrencyHint {
         Err(())
     } else {
         Ok(scan.codes.into_iter().next())
+    }
+}
+
+fn global_display_currency(watch: &Watch, doc: &Html) -> CurrencyHint {
+    let metadata = page_currency(watch, doc)?;
+    let inputs = doc
+        .select(&selector("input[id]"))
+        .take(257)
+        .collect::<Vec<_>>();
+    let labels = doc
+        .select(&selector("label[for]"))
+        .take(65)
+        .collect::<Vec<_>>();
+    if inputs.len() > 256 || labels.len() > 64 {
+        return Err(());
+    }
+    let mut minimum = None;
+    let mut maximum = None;
+    for label in labels.into_iter().filter(|node| visible(*node)) {
+        let text = visible_text(label);
+        let (destination, name) = if let Some(name) = text.strip_prefix("Minimum ticket price in ")
+        {
+            (&mut minimum, name)
+        } else if let Some(name) = text.strip_prefix("Maximum ticket price in ") {
+            (&mut maximum, name)
+        } else {
+            continue;
+        };
+        let target = label.value().attr("for").ok_or(())?;
+        let matched = inputs
+            .iter()
+            .copied()
+            .filter(|input| input.value().attr("id") == Some(target))
+            .take(2)
+            .collect::<Vec<_>>();
+        if target.is_empty()
+            || matched.len() != 1
+            || !visible(matched[0])
+            || matched[0]
+                .value()
+                .attr("type")
+                .is_some_and(|kind| kind != "text")
+            || destination.replace(name.to_owned()).is_some()
+        {
+            return Err(());
+        }
+    }
+    match (minimum.as_deref(), maximum.as_deref()) {
+        (None, None) => Ok(metadata),
+        // Explicit accessible labels observed on global US pages. Never infer
+        // the currency from the hostname, '$', filter values or event metadata
+        // lacking identity. Unknown/contradictory label shapes stay unknown.
+        (Some("US Dollars"), Some("US Dollars"))
+            if metadata.as_deref().is_none_or(|code| code == "USD") =>
+        {
+            Ok(Some("USD".into()))
+        }
+        _ => Err(()),
     }
 }
 
@@ -487,6 +547,283 @@ fn parse_category(
     })
 }
 
+/// These price-card layouts do not expose a verified listing quantity or a
+/// complete purchase contract. Read displayed prices only, never live offers.
+fn display_event_matches(watch: &Watch, doc: &Html, italian: bool) -> bool {
+    let Some(expected) = canonical_event_url(&watch.url, None) else {
+        return false;
+    };
+    let expected_identity = event_identity(&expected);
+    if expected_identity.is_none()
+        || (italian
+            && expected.host_str().map(|s| s.trim_start_matches("www.")) != Some("ticketmaster.it"))
+    {
+        return false;
+    }
+    let canonical = doc
+        .select(&selector("link[rel='canonical']"))
+        .take(2)
+        .collect::<Vec<_>>();
+    let links = if canonical.is_empty() && italian {
+        // The reviewed Italian page has no canonical, but its Italian/English
+        // alternates name the same event. Blank JSON-LD URLs cannot bind it.
+        doc.select(&selector("link[rel='alternate'][hreflang]"))
+            .take(17)
+            .collect::<Vec<_>>()
+    } else {
+        if canonical.len() != 1 {
+            return false;
+        }
+        canonical
+    };
+    !links.is_empty()
+        && links.len() <= 16
+        && links.into_iter().all(|link| {
+            link.value()
+                .attr("href")
+                .filter(|raw| {
+                    !raw.chars().any(char::is_control)
+                        && !raw.trim().is_empty()
+                        && !raw.trim().starts_with(['#', '?'])
+                })
+                .and_then(|raw| canonical_event_url(raw, Some(&expected)))
+                .and_then(|url| event_identity(&url))
+                == expected_identity
+        })
+}
+
+fn one_visible<'a>(root: ElementRef<'a>, css: &str) -> Option<ElementRef<'a>> {
+    let nodes = root
+        .select(&selector(css))
+        .filter(|node| visible(*node))
+        .take(2)
+        .collect::<Vec<_>>();
+    (nodes.len() == 1).then(|| nodes[0])
+}
+
+fn bounded_label(text: String) -> Option<String> {
+    (!text.is_empty() && text.len() <= 1000 && !text.chars().any(char::is_control)).then_some(text)
+}
+
+fn display_locked(row: ElementRef<'_>) -> bool {
+    row.value().attr("disabled").is_some()
+        || row.select(&selector("[data-bdd]")).any(|node| {
+            node.value()
+                .attr("data-bdd")
+                .is_some_and(|value| value.to_ascii_lowercase().contains("lock"))
+        })
+        || row
+            .select(&selector("button,[role='button']"))
+            .filter(|node| visible(*node))
+            .any(|node| {
+                let text = visible_text(node).to_ascii_lowercase();
+                text.contains("unlock")
+                    || text.contains("offer code")
+                    || text.contains("presale code")
+            })
+}
+
+fn global_display_category(
+    watch: &Watch,
+    row: ElementRef<'_>,
+    hint: &CurrencyHint,
+) -> Option<TicketCategory> {
+    if !visible(row) || display_locked(row) || row.value().attr("aria-haspopup") != Some("dialog") {
+        return None;
+    }
+    one_visible(row, "[data-analytics='offer-card']")?;
+    one_visible(row, "[data-bdd='quick-pick-ticket-info']")?;
+    let kind = row.value().attr("data-bdd")?;
+    let branding = if kind == "quick-picks-list-item-resale" {
+        "[data-bdd='quick-picks-resale-branding']"
+    } else if kind
+        .strip_prefix("quick-picks-list-item-primary-")
+        .and_then(number)
+        .is_some()
+    {
+        "[data-bdd='branding-ticket-text']"
+    } else {
+        return None;
+    };
+    let ticket_type = bounded_label(visible_text(one_visible(row, branding)?))?;
+    let price_text = bounded_label(visible_text(one_visible(
+        row,
+        "[data-bdd='quick-pick-price-button']",
+    )?))?;
+    if row
+        .value()
+        .attr("data-price")?
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        != price_text
+    {
+        return None;
+    }
+    let description = one_visible(row, "[data-bdd='quick-pick-item-desc']")?;
+    let description_text = visible_text(description);
+    if description.value().attr("aria-label")? != description_text {
+        return None;
+    }
+    let (section, seat_row) = description_text
+        .strip_prefix("Sec ")?
+        .split_once(" • Row ")?;
+    let section = bounded_label(section.trim().to_owned())?;
+    let seat_row = bounded_label(seat_row.trim().to_owned())?;
+    if section.contains('•')
+        || seat_row.contains('•')
+        || !price_text.chars().any(|c| c.is_ascii_digit())
+    {
+        return None;
+    }
+    let currency = currency(&price_text, watch.currency.as_deref(), hint);
+    let (price_min_minor, price_max_minor) = price_range(&price_text, currency.as_deref());
+    Some(TicketCategory {
+        // Different displayed quotes can share a type, section and row. Keep
+        // their prices separate without treating card counts as ticket counts.
+        key: key(&[
+            GLOBAL_DISPLAY,
+            &ticket_type,
+            &section,
+            &seat_row,
+            &price_text,
+        ]),
+        ticket_type,
+        section: Some(section),
+        row: Some(seat_row),
+        price_text: Some(price_text),
+        price_min_minor,
+        price_max_minor,
+        currency,
+        selectable_quantity: None,
+    })
+}
+
+fn italian_display_category(
+    watch: &Watch,
+    row: ElementRef<'_>,
+    hint: &CurrencyHint,
+) -> Option<TicketCategory> {
+    if !visible(row) || display_locked(row) || row.value().classes().any(|class| class == "maxCart")
+    {
+        return None;
+    }
+    // Semantic classes and structure from the Italian selection list; no
+    // generated CSS class, artist name, event ID or CDN image is a selector.
+    one_visible(row, ":scope > .edpSeatMap")?;
+    let info = one_visible(row, ".ticketInfoDiv")?;
+    let price = one_visible(info, ".priceTicket")?;
+    let description = one_visible(row, "dl")?;
+    let names = description
+        .select(&selector("span"))
+        .filter(|node| {
+            visible(*node)
+                && node
+                    .children()
+                    .filter_map(ElementRef::wrap)
+                    .next()
+                    .is_none()
+        })
+        .map(visible_text)
+        .filter(|text| !text.is_empty())
+        .take(2)
+        .collect::<Vec<_>>();
+    if names.len() != 1 {
+        return None;
+    }
+    let ticket_type = bounded_label(names[0].clone())?;
+    // Keep the visible '+ fees' control text, but parse only the displayed price
+    // span's own amount. This does not establish a final price including fees.
+    let price_text = bounded_label(visible_text(price))?;
+    let amount_text = text_without_buttons(price);
+    if !amount_text.chars().any(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let currency = currency(&amount_text, watch.currency.as_deref(), hint);
+    let (price_min_minor, price_max_minor) = if let Some((low, high)) = amount_text
+        .strip_prefix("from ")
+        .and_then(|s| s.split_once(" to "))
+    {
+        match currency
+            .as_deref()
+            .and_then(|code| Some((amount(low, code)?, amount(high, code)?)))
+        {
+            Some((low, high)) if low <= high => (Some(low), Some(high)),
+            _ => (None, None),
+        }
+    } else {
+        price_range(&amount_text, currency.as_deref())
+    };
+    Some(TicketCategory {
+        key: key(&[ITALIAN_DISPLAY, &ticket_type, &price_text]),
+        ticket_type,
+        section: None,
+        row: None,
+        price_text: Some(price_text),
+        price_min_minor,
+        price_max_minor,
+        currency,
+        selectable_quantity: None,
+    })
+}
+
+fn display_categories(watch: &Watch, doc: &Html, observed_at: i64) -> Option<Observation> {
+    let global = doc
+        .select(&selector(
+            "li[role='menuitem'][data-bdd^='quick-picks-list-item-']",
+        ))
+        .take(LIMIT + 1)
+        .collect::<Vec<_>>();
+    let italian = doc
+        .select(&selector(".ticketSelectionList > div"))
+        .take(LIMIT + 1)
+        .collect::<Vec<_>>();
+    let (rows, adapter, is_italian) = if !global.is_empty() {
+        (global, GLOBAL_DISPLAY, false)
+    } else if !italian.is_empty() {
+        (italian, ITALIAN_DISPLAY, true)
+    } else {
+        return None;
+    };
+    let mut observation = Observation::unknown(
+        &watch.id,
+        observed_at,
+        "displayed Ticketmaster price cards; inventory unknown",
+    );
+    observation.adapter = Some(adapter.into());
+    if rows.len() > LIMIT || !display_event_matches(watch, doc, is_italian) {
+        observation.detail =
+            "Ticketmaster price-card event binding or component limit failed; inventory unknown"
+                .into();
+        return Some(observation);
+    }
+    let hint = if is_italian {
+        page_currency(watch, doc)
+    } else {
+        global_display_currency(watch, doc)
+    };
+    let mut categories = BTreeMap::new();
+    let mut skipped = 0;
+    for row in rows {
+        let category = if is_italian {
+            italian_display_category(watch, row, &hint)
+        } else {
+            global_display_category(watch, row, &hint)
+        };
+        if let Some(category) = category {
+            categories.insert(category.key.clone(), category);
+        } else {
+            skipped += 1;
+        }
+    }
+    observation.ticket_categories = categories.into_values().collect();
+    observation.detail = format!(
+        "Ticketmaster price-card layout: {} displayed price rows, {skipped} unrecognized or inactive rows; unit basis, complete fees, stock and available quantities are not established; snapshot is incomplete",
+        observation.ticket_categories.len()
+    );
+    Some(observation)
+}
+
 pub(crate) fn parse(watch: &Watch, doc: &Html, observed_at: i64) -> Observation {
     let mut observation = Observation::unknown(
         &watch.id,
@@ -504,6 +841,9 @@ pub(crate) fn parse(watch: &Watch, doc: &Html, observed_at: i64) -> Observation 
         return observation;
     }
     if infos.is_empty() {
+        if let Some(display) = display_categories(watch, doc, observed_at) {
+            return display;
+        }
         if doc
             .select(&selector("li[role='menuitem'][data-listing-id]"))
             .any(visible)

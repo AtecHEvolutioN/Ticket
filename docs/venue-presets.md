@@ -6,10 +6,12 @@ public source events, and separately named layout references. It lives in the
 existing SQLite database, separate from observations and the notification outbox.
 
 The starter catalog in [venue-presets.json](../examples/venue-presets.json) contains
-the 21 venues from the broader coverage check. Their seating layouts are empty:
-the captures establish venue identities, not permanent seating geometry. City
-names retain their observed spelling; for example, `Praha 9` is not silently
-treated as `Prague`.
+29 venues from the coverage checks, including ten Dutch venues. Six Dutch entries
+have draft static map references from the [Netherlands audit](netherlands-mapping.md);
+all layout review timestamps remain unset. Other entries retain venue metadata
+without invented layouts. The captures establish reference data, not permanent
+seating geometry or inventory. City names retain their observed spelling; for
+example, `Praha 9` is not silently treated as `Prague`.
 
 ## Use the registry
 

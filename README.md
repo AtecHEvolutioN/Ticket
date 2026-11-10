@@ -2,16 +2,17 @@
 
 Rust monitoring that combines **Ticketmaster Discovery API searches** with **website availability checks**. Choose artists and locations; Discovery finds matching events, and the website adapter checks those events for observable ticket availability before sending Discord alerts.
 
-**Current status:** selected events use a reusable Ticketmaster layout adapter, with no artist names, event IDs, or generated CSS classes in its extraction rules. It reads displayed categories/ranges and explicit resale listing quantities from the recognized regional layout. Browser mode opens known best-available tabs automatically. Unknown layouts and blocked access remain explicit; this is not verified support for every Ticketmaster market. See [event adapters](docs/event-adapters.md) and the [21-event, 12-country coverage report](docs/coverage-2026-11-09.md). No production service or live Discord delivery has been deployed.
+**Current status:** selected events use reusable Ticketmaster layout adapters, with no artist names, event IDs, or generated CSS classes in their extraction rules. They read displayed categories/ranges and explicit resale listing quantities from recognized layouts. Browser mode opens known best-available tabs automatically. Unknown layouts and blocked access remain explicit; this is not verified support for every Ticketmaster market. The latest [92-event, 14-country coverage report](docs/coverage-2026-11-10.md) records 242 priced category rows across 75 events. See [event adapters](docs/event-adapters.md) for inventory limits. No production service or live Discord delivery has been deployed.
 
 ## Downloads
 
 The [0.7.0-test release](https://github.com/AtecHEvolutioN/Ticket/releases/tag/v0.7.0-test)
-contains the tested builds and SHA-256 checksums:
+contains the tested app/bot builds and SHA-256 checksums. The venue catalog is
+maintained separately on `main`:
 
 - [Android APK](https://github.com/AtecHEvolutioN/Ticket/raw/refs/tags/v0.7.0-test/downloads/ticket-watch-android.apk) — Android 8.0 or newer; editable ticket preferences, manual page checks and venue presets.
 - [Linux x86_64 bot](https://github.com/AtecHEvolutioN/Ticket/raw/refs/tags/v0.7.0-test/downloads/ticket-watch-bot-linux-x86_64.tar.gz) — continuous monitoring after configuration, offline preference import and cart planning; glibc 2.39 or newer.
-- [21-venue starter database](https://github.com/AtecHEvolutioN/Ticket/raw/refs/heads/main/downloads/venue-presets.sqlite) — a fresh database with venue metadata and no saved watches. To add venues to an existing monitor, import [the JSON seed](examples/venue-presets.json) using [the venue commands](docs/venue-presets.md).
+- [29-venue starter database](https://github.com/AtecHEvolutioN/Ticket/raw/refs/heads/main/downloads/venue-presets.sqlite) — venue metadata and six draft Dutch static layouts, with no saved watches. To add venues to an existing monitor, import [the JSON seed](examples/venue-presets.json) using [the venue commands](docs/venue-presets.md).
 
 Release verification: 360 Rust tests, Clippy, and 364 offline Android assertions
 passed, including actual Android export → Rust planner checks. Android verification
@@ -81,8 +82,9 @@ Catalog refreshes preserve matching cached watches through partial failures and 
 ## Implemented behavior
 
 - [Ticket preferences](docs/ticket-preferences.md): two adjacent tickets and cheapest eligible total by default. Android saves global defaults and per-event overrides for quantity, optional total budget, currency, adjacency, ticket type, category ID, section and row. Export to `cart-plan --preferences` to apply the choices to supplied quotes. Preferences do not activate automatic carting or change availability-alert filters.
-- Reusable venue presets in SQLite, with scoped venue identity and separate named layout references. Discovery catalog refreshes register venue metadata; [venue commands](docs/venue-presets.md) import, list, inspect, and match presets without network access. The starter catalog contains 21 venues with no invented seating layouts.
+- Reusable venue presets in SQLite, with scoped venue identity and separate named layout references. Discovery catalog refreshes register venue metadata; [venue commands](docs/venue-presets.md) import, list, inspect, and match presets without network access. The starter catalog contains 29 venues and six draft Dutch static map references; no seating layout is invented.
 - [Map scraping](docs/seat-maps.md): `map-inspect` preserves the native map view, extracts supported SVG section outlines, and exports a clean map with `--geometry-svg`. It also reads static references/configured zones, downloads public images and saves draft venue layouts on request. Neither outlines nor map colors establish live seats or adjacency. These map commands run in the Rust service, not the Android inspector.
+- [Netherlands mapping](docs/netherlands-mapping.md): 11 events across ten venues were checked; seven SVG overviews expose 231 sections and 232 label placements. Dutch section-name aliases and repeated label positions are preserved, with clean arena SVG exports and draft venue presets. Section/seat interaction and carting remain Czech-only.
 - [Czech seat inspection](docs/seat-inspection.md): optional `--section-id` opens a numbered section; `--seat-id` hovers an explicit resale seat to read its row, number, restrictions and per-ticket price. Rendered seat counts stay separate from available quantities. No seat selection or reservation occurs.
 - [Section price scans](docs/section-scans.md): `map-scan` discovers resale seat candidates automatically, reads bounded hover prices in one browser session, and optionally records observation changes in a separate SQLite history. Missing seats remain unknown; these scans do not send alerts or create carts.
 - [Scheduled section monitoring](docs/map-monitor.md): `map-run` schedules selected sections, persists cooldowns and queues displayed-price notifications for Discord. Preview is the default; `--send-discord` enables delivery to your configured channel. These messages do not claim verified stock or reserve tickets.
@@ -112,6 +114,10 @@ Catalog refreshes preserve matching cached watches through partial failures and 
 - Read-only API metadata stays separate from observed website inventory; generated watches cannot enable metadata-based stock alerts.
 
 Server watch selection currently uses TOML and the CLI. Android preferences can be exported to the offline planner but are not synchronized with the server. Discord slash commands, scheduled-sale timers, monitor-triggered carting, and multi-node operation are not implemented. Successful parsing of one market does not establish worldwide coverage or a latency guarantee.
+
+The [production roadmap](docs/production-roadmap.md) tracks the remaining Discord,
+cart receipt, automation and deployment work, followed by the planned MCP market
+research and resale experiment. The MCP and trading features are not implemented.
 
 ## Development and operations
 

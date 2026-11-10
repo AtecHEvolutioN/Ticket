@@ -442,7 +442,7 @@ fn map_preset(
                 .as_deref()
                 .unwrap_or_default()
                 .iter()
-                .map(|section| section.title.clone())
+                .filter_map(|section| section.title.clone())
                 .collect::<std::collections::BTreeSet<_>>()
                 .into_iter()
                 .collect(),

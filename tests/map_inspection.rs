@@ -53,6 +53,15 @@ fn displayed_seat_quote_is_bound_to_explicit_labels_and_keeps_stock_unknown() {
 }
 
 #[test]
+fn an_unknown_configured_zone_name_cannot_validate_a_hover_quote() {
+    let mut map = snapshot();
+    for zone in map.configured_sections.as_mut().unwrap() {
+        zone.title = None;
+    }
+    assert!(validate_inspection(&map, &evidence()).is_err());
+}
+
+#[test]
 fn mismatched_section_seat_and_tooltip_never_create_a_quote() {
     let snapshot = snapshot();
     for field in ["section", "row", "seat", "zone", "ticket_type"] {

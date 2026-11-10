@@ -124,6 +124,42 @@ fn no_asset_or_unloaded_sections_remain_unknown_not_empty_inventory() {
 }
 
 #[test]
+fn raw_json_blank_section_names_stay_unknown_and_keep_ids_and_mappings() {
+    let page = change_metadata(|value| {
+        state(value)["ticketSelection"]["sections"][0]["title"] = json!("\u{a0}");
+        state(value)["ticketSelection"]["sections"][1]["title"] = json!("Balcony & Gallery");
+        sync_query(value, "ticketSelection");
+    });
+    let map = extract_seat_map(URL, URL, &page).unwrap();
+    let sections = map.configured_sections.as_ref().unwrap();
+    assert_eq!(sections[0].id, "1P");
+    assert_eq!(sections[0].raw_id.as_deref(), Some("1P"));
+    assert_eq!(sections[0].title, None);
+    assert_eq!(sections[1].title.as_deref(), Some("Balcony & Gallery"));
+    let mappings = map.price_section_mappings.as_ref().unwrap();
+    assert_eq!(mappings.len(), 2);
+    assert_eq!(mappings[0].section_id, "1P");
+    assert_eq!(mappings[0].price_id, "1");
+    assert!(serde_json::to_value(&map).unwrap()["configured_sections"][0]["title"].is_null());
+    assert!(!serde_json::to_string(&map).unwrap().contains("&nbsp;"));
+    let whitespace = page.replace('\u{a0}', "   ");
+    assert_eq!(fingerprint(&page), fingerprint(&whitespace));
+    assert_ne!(fingerprint(PAGE), fingerprint(&page));
+    for invalid in [
+        Value::Null,
+        json!(17),
+        json!("\u{1}"),
+        json!("x".repeat(601)),
+    ] {
+        let page = change_metadata(|value| {
+            state(value)["ticketSelection"]["sections"][0]["title"] = invalid;
+            sync_query(value, "ticketSelection");
+        });
+        assert!(extract_seat_map(URL, URL, &page).is_err());
+    }
+}
+
+#[test]
 fn accepts_observed_protocol_relative_uk_and_australian_images() {
     for (host, market, country, id, url, discovery) in [
         (

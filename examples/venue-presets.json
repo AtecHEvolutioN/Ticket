@@ -1,212 +1,393 @@
 [
   {
-    "site_host": "ticketmaster.com.au",
-    "name": "The Tivoli",
-    "city": "Brisbane, QLD",
-    "country": "AU",
-    "source_event_urls": [
-      "https://www.ticketmaster.com.au/sevendust-brisbane-17-02-2027/event/130065628C7B2F46"
-    ],
-    "layouts": []
-  },
-  {
-    "site_host": "ticketmaster.com.au",
-    "name": "Athenaeum Theatre One",
-    "city": "Melbourne, VIC",
-    "country": "AU",
-    "source_event_urls": [
-      "https://www.ticketmaster.com.au/bron-lewis-melbourne-24-03-2027/event/13006562DF40CCDE"
-    ],
-    "layouts": []
-  },
-  {
     "site_host": "ticketmaster.be",
     "name": "Cirque Royal - Koninklijk Circus",
     "city": "Brussels",
     "country": "BE",
+    "layouts": [],
     "source_event_urls": [
-      "https://www.ticketmaster.be/event/mon-laferte-tickets/622908318"
-    ],
-    "layouts": []
+      "https://ticketmaster.be/event/mon-laferte-tickets/622908318"
+    ]
   },
   {
     "site_host": "ticketmaster.be",
     "name": "Vorst Nationaal/Forest National",
     "city": "Forest (Brussels)",
     "country": "BE",
+    "layouts": [],
     "source_event_urls": [
-      "https://www.ticketmaster.be/event/john-summit--europe-ctrl-escape-arena-tour-tickets/206059935"
-    ],
-    "layouts": []
+      "https://ticketmaster.be/event/john-summit--europe-ctrl-escape-arena-tour-tickets/206059935"
+    ]
   },
   {
     "site_host": "ticketmaster.ca",
     "name": "RBC Amphitheatre",
     "city": "Toronto, ON",
     "country": "CA",
+    "layouts": [],
     "source_event_urls": [
-      "https://www.ticketmaster.ca/kings-of-leon-toronto-ontario-06-02-2027/event/1000656470D028EE"
-    ],
-    "layouts": []
+      "https://ticketmaster.ca/kings-of-leon-toronto-ontario-06-02-2027/event/1000656470D028EE"
+    ]
   },
   {
     "site_host": "ticketmaster.ca",
     "name": "Rogers Stadium",
     "city": "Toronto, ON",
     "country": "CA",
+    "layouts": [],
     "source_event_urls": [
-      "https://www.ticketmaster.ca/bon-jovi-forever-tour-toronto-ontario-08-07-2027/event/1000655B041F7CCB"
-    ],
-    "layouts": []
-  },
-  {
-    "site_host": "ticketmaster.cz",
-    "name": "Divadlo U Hasičů",
-    "city": "Praha 2",
-    "country": "CZ",
-    "source_event_urls": [
-      "https://www.ticketmaster.cz/event/ross-noble-vstupenky/1898352484"
-    ],
-    "layouts": []
-  },
-  {
-    "site_host": "ticketmaster.cz",
-    "name": "O2 arena",
-    "city": "Praha 9",
-    "country": "CZ",
-    "source_event_urls": [
-      "https://www.ticketmaster.cz/event/andrea-bocelli-vstupenky/493115848"
-    ],
-    "layouts": []
-  },
-  {
-    "site_host": "ticketmaster.de",
-    "name": "Waldbühne",
-    "city": "Berlin",
-    "country": "DE",
-    "source_event_urls": [
-      "https://www.ticketmaster.de/event/noah-kahan-the-last-of-the-bugs-world-tour-tickets/1306451961"
-    ],
-    "layouts": []
-  },
-  {
-    "site_host": "ticketmaster.de",
-    "name": "Kranhalle",
-    "city": "München",
-    "country": "DE",
-    "source_event_urls": [
-      "https://www.ticketmaster.de/event/meltt-tickets/2066123927"
-    ],
-    "layouts": []
-  },
-  {
-    "site_host": "ticketmaster.es",
-    "name": "Movistar Arena",
-    "city": "Madrid",
-    "country": "ES",
-    "source_event_urls": [
-      "https://www.ticketmaster.es/event/mon-laferte-entradas/1776378129"
-    ],
-    "layouts": []
+      "https://ticketmaster.ca/bon-jovi-forever-tour-toronto-ontario-08-07-2027/event/1000655B041F7CCB"
+    ]
   },
   {
     "site_host": "ticketmaster.co.uk",
     "name": "O2 Academy Islington",
     "city": "London",
     "country": "GB",
+    "layouts": [],
     "source_event_urls": [
-      "https://www.ticketmaster.co.uk/from-the-jam-london-04-09-2027/event/3E00654CFB936CA4"
-    ],
-    "layouts": []
+      "https://ticketmaster.co.uk/from-the-jam-london-04-09-2027/event/3E00654CFB936CA4"
+    ]
   },
   {
     "site_host": "ticketmaster.co.uk",
     "name": "Tottenham Hotspur Stadium",
     "city": "London",
     "country": "GB",
+    "layouts": [],
     "source_event_urls": [
-      "https://www.ticketmaster.co.uk/u2-the-greatest-show-on-earth-london-18-06-2027/event/3500655683001AA0"
-    ],
-    "layouts": []
-  },
-  {
-    "site_host": "ticketmaster.it",
-    "name": "Unipol Dome",
-    "city": "Milano",
-    "country": "IT",
-    "source_event_urls": [
-      "https://www.ticketmaster.it/biglietti/hilary-duff-the-lucky-me-tour-milano-10-05-2027/event/segp4wi4du5m"
-    ],
-    "layouts": []
-  },
-  {
-    "site_host": "ticketmaster.nl",
-    "name": "Ziggo Dome",
-    "city": "Amsterdam",
-    "country": "NL",
-    "source_event_urls": [
-      "https://www.ticketmaster.nl/event/jamiroquai-tickets/1823751680"
-    ],
-    "layouts": []
-  },
-  {
-    "site_host": "ticketmaster.nl",
-    "name": "TivoliVredenburg",
-    "city": "Utrecht",
-    "country": "NL",
-    "source_event_urls": [
-      "https://www.ticketmaster.nl/event/10cc-tickets/593318371"
-    ],
-    "layouts": []
-  },
-  {
-    "site_host": "ticketmaster.pl",
-    "name": "ERGO ARENA",
-    "city": "Gdańsk/Sopot",
-    "country": "PL",
-    "source_event_urls": [
-      "https://www.ticketmaster.pl/event/sting-30-tour-bilety/1047384207"
-    ],
-    "layouts": []
-  },
-  {
-    "site_host": "ticketmaster.pl",
-    "name": "COS Torwar",
-    "city": "Warszawa",
-    "country": "PL",
-    "source_event_urls": [
-      "https://www.ticketmaster.pl/event/hollywood-undead-eu-uk-2027-bilety/224274430"
-    ],
-    "layouts": []
-  },
-  {
-    "site_host": "ticketmaster.se",
-    "name": "Debaser Strand",
-    "city": "Stockholm",
-    "country": "SE",
-    "source_event_urls": [
-      "https://www.ticketmaster.se/event/dirty-honey-biljetter/1940251376"
-    ],
-    "layouts": []
+      "https://ticketmaster.co.uk/u2-the-greatest-show-on-earth-london-18-06-2027/event/3500655683001AA0"
+    ]
   },
   {
     "site_host": "ticketmaster.com",
     "name": "Gillette Stadium",
     "city": "Foxborough, MA",
     "country": "US",
+    "layouts": [],
     "source_event_urls": [
-      "https://www.ticketmaster.com/luke-combs-my-kinda-saturday-night-foxborough-massachusetts-05-01-2027/event/0100650A23A974B2"
-    ],
-    "layouts": []
+      "https://ticketmaster.com/luke-combs-my-kinda-saturday-night-foxborough-massachusetts-05-01-2027/event/0100650A23A974B2"
+    ]
   },
   {
     "site_host": "ticketmaster.com",
     "name": "Oakland Arena",
     "city": "Oakland, CA",
     "country": "US",
+    "layouts": [],
     "source_event_urls": [
-      "https://www.ticketmaster.com/gracie-abrams-the-look-at-my-oakland-california-12-06-2026/event/1C0064ADBB8886FE"
+      "https://ticketmaster.com/gracie-abrams-the-look-at-my-oakland-california-12-06-2026/event/1C0064ADBB8886FE"
+    ]
+  },
+  {
+    "site_host": "ticketmaster.com.au",
+    "name": "Athenaeum Theatre One",
+    "city": "Melbourne, VIC",
+    "country": "AU",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.com.au/bron-lewis-melbourne-24-03-2027/event/13006562DF40CCDE"
+    ]
+  },
+  {
+    "site_host": "ticketmaster.com.au",
+    "name": "The Tivoli",
+    "city": "Brisbane, QLD",
+    "country": "AU",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.com.au/sevendust-brisbane-17-02-2027/event/130065628C7B2F46"
+    ]
+  },
+  {
+    "site_host": "ticketmaster.cz",
+    "name": "Divadlo U Hasičů",
+    "city": "Praha 2",
+    "country": "CZ",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.cz/event/ross-noble-vstupenky/1898352484"
+    ]
+  },
+  {
+    "site_host": "ticketmaster.cz",
+    "name": "O2 arena",
+    "city": "Praha 9",
+    "country": "CZ",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.cz/event/andrea-bocelli-vstupenky/493115848"
+    ]
+  },
+  {
+    "site_host": "ticketmaster.de",
+    "name": "Kranhalle",
+    "city": "München",
+    "country": "DE",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.de/event/meltt-tickets/2066123927"
+    ]
+  },
+  {
+    "site_host": "ticketmaster.de",
+    "name": "Waldbühne",
+    "city": "Berlin",
+    "country": "DE",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.de/event/noah-kahan-the-last-of-the-bugs-world-tour-tickets/1306451961"
+    ]
+  },
+  {
+    "site_host": "ticketmaster.es",
+    "name": "Movistar Arena",
+    "city": "Madrid",
+    "country": "ES",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.es/event/mon-laferte-entradas/1776378129"
+    ]
+  },
+  {
+    "site_host": "ticketmaster.it",
+    "name": "Unipol Dome",
+    "city": "Milano",
+    "country": "IT",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.it/biglietti/hilary-duff-the-lucky-me-tour-milano-10-05-2027/event/segp4wi4du5m"
+    ]
+  },
+  {
+    "site_host": "ticketmaster.nl",
+    "provider_venue_id": "Z598xZbpZAdAF",
+    "name": "AFAS Live",
+    "city": "Amsterdam",
+    "country": "NL",
+    "layouts": [
+      {
+        "id": "map-82c52353d918bd79d3a710e085dd038c11d5874861d04e958bd3a72e6f49f6a7",
+        "name": "Observed static map",
+        "adapter": "ticketmaster-static-map-v1",
+        "sections": [
+          "AFAS Live"
+        ],
+        "map_url": "https://media.ticketmaster.eu/netherlands/b89d63a583936c5aadf2e8940e9386c4.jpg",
+        "source_event_urls": [
+          "https://ticketmaster.nl/event/famke-louise-1-0-tickets/221736388"
+        ],
+        "verified_at": null
+      }
     ],
-    "layouts": []
+    "source_event_urls": [
+      "https://ticketmaster.nl/event/famke-louise-1-0-tickets/221736388"
+    ]
+  },
+  {
+    "site_host": "ticketmaster.nl",
+    "provider_venue_id": "Z598xZbpZ76ke",
+    "name": "Dynamo",
+    "city": "Eindhoven",
+    "country": "NL",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.nl/event/thy-art-is-murder-tickets/1909691373"
+    ]
+  },
+  {
+    "site_host": "ticketmaster.nl",
+    "provider_venue_id": "Z198xZbpZ6Fe",
+    "name": "GelreDome",
+    "city": "Arnhem",
+    "country": "NL",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.nl/event/monster-jam-2027-tickets/381518243"
+    ]
+  },
+  {
+    "site_host": "ticketmaster.nl",
+    "provider_venue_id": "Z198xZbpZevF",
+    "name": "Johan Cruijff ArenA",
+    "city": "Amsterdam",
+    "country": "NL",
+    "layouts": [
+      {
+        "id": "map-b06d32e425f354b5382d6171622ee2ca13e867330bf5503776e3f1a0fac3b02a",
+        "name": "Observed static map",
+        "adapter": "ticketmaster-static-map-v1",
+        "sections": [
+          "Eerste ring",
+          "Platform",
+          "Tweede ring",
+          "Vloer"
+        ],
+        "map_url": "https://media.ticketmaster.eu/netherlands/040b3d16de7747deca99a5774bce135f.jpg",
+        "source_event_urls": [
+          "https://ticketmaster.nl/event/u2-the-greatest-show-on-earth-world-tour-tickets/1118978501"
+        ],
+        "verified_at": null
+      }
+    ],
+    "source_event_urls": [
+      "https://ticketmaster.nl/event/u2-the-greatest-show-on-earth-world-tour-tickets/1118978501"
+    ]
+  },
+  {
+    "site_host": "ticketmaster.nl",
+    "provider_venue_id": "Z598xZbpZd6ak",
+    "name": "Melkweg",
+    "city": "Amsterdam",
+    "country": "NL",
+    "layouts": [
+      {
+        "id": "map-631144cbd1bd5cb1140328931b7086895322a7bec746db4f91fa2149720ea376",
+        "name": "Observed static map",
+        "adapter": "ticketmaster-static-map-v1",
+        "sections": [],
+        "map_url": "https://media.ticketmaster.eu/netherlands/a565f16b5cbb05314daa6794a42f33e6.jpg",
+        "source_event_urls": [
+          "https://ticketmaster.nl/event/the-last-internationale-tickets/247738701"
+        ],
+        "verified_at": null
+      }
+    ],
+    "source_event_urls": [
+      "https://ticketmaster.nl/event/the-last-internationale-tickets/247738701"
+    ]
+  },
+  {
+    "site_host": "ticketmaster.nl",
+    "provider_venue_id": "Z598xZbpZed1e",
+    "name": "Musis Sacrum",
+    "city": "Arnhem",
+    "country": "NL",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.nl/event/gypsy-jazz-festival-2027-tickets/1816750465"
+    ]
+  },
+  {
+    "site_host": "ticketmaster.nl",
+    "provider_venue_id": "Z598xZbpZ7FAk",
+    "name": "Poppodium Q-Factory",
+    "city": "Amsterdam",
+    "country": "NL",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.nl/event/physical-graffiti-led-zeppelin-over-europe-2027-tickets/1627972756"
+    ]
+  },
+  {
+    "site_host": "ticketmaster.nl",
+    "provider_venue_id": "Z598xZbpZA1ee",
+    "name": "RTM Stage - Rotterdam Ahoy",
+    "city": "Rotterdam",
+    "country": "NL",
+    "layouts": [
+      {
+        "id": "map-c400c317bf938f0a783eabcdc82c6860cf2a54f5a36b1c9a1640ac23fd1054f1",
+        "name": "Observed static map",
+        "adapter": "ticketmaster-static-map-v1",
+        "sections": [
+          "Begane grond",
+          "Verdieping 2",
+          "Verdieping 3",
+          "Verdieping 4"
+        ],
+        "map_url": "https://media.ticketmaster.eu/netherlands/d8947bb2f8def0da7e9258b8683ef104.jpg",
+        "source_event_urls": [
+          "https://ticketmaster.nl/event/papa-roach-rise-of-the-roach-tickets/1833751571"
+        ],
+        "verified_at": null
+      }
+    ],
+    "source_event_urls": [
+      "https://ticketmaster.nl/event/papa-roach-rise-of-the-roach-tickets/1833751571"
+    ]
+  },
+  {
+    "site_host": "ticketmaster.nl",
+    "provider_venue_id": "Z598xZbpZ77de",
+    "name": "TivoliVredenburg",
+    "city": "Utrecht",
+    "country": "NL",
+    "layouts": [
+      {
+        "id": "map-5c962a58a4a115a2fea65f9600c34658d1d9424517bd9853f96819a47c910d12",
+        "name": "Observed static map",
+        "adapter": "ticketmaster-static-map-v1",
+        "sections": [
+          "Grote Zaal"
+        ],
+        "map_url": "https://media.ticketmaster.eu/netherlands/b3da81f0fbc3cffde394bd9fe9265de8.jpg",
+        "source_event_urls": [
+          "https://ticketmaster.nl/event/10cc-tickets/593318371"
+        ],
+        "verified_at": null
+      }
+    ],
+    "source_event_urls": [
+      "https://ticketmaster.nl/event/10cc-tickets/593318371"
+    ]
+  },
+  {
+    "site_host": "ticketmaster.nl",
+    "provider_venue_id": "Z598xZbpZdFeF",
+    "name": "Ziggo Dome",
+    "city": "Amsterdam",
+    "country": "NL",
+    "layouts": [
+      {
+        "id": "map-b42c9e26bd655ad6e3aa0b4865f80c31c7669fa9f0c474d0d861da5dbe8304a9",
+        "name": "Observed static map",
+        "adapter": "ticketmaster-static-map-v1",
+        "sections": [
+          "1e Ring",
+          "2e Ring",
+          "Vloer"
+        ],
+        "map_url": "https://media.ticketmaster.eu/netherlands/3975324150ab783bf80460a538eda0f5.jpg",
+        "source_event_urls": [
+          "https://ticketmaster.nl/event/new-wave-all-stars-tickets/1861749472"
+        ],
+        "verified_at": null
+      }
+    ],
+    "source_event_urls": [
+      "https://ticketmaster.nl/event/jamiroquai-tickets/1823751680",
+      "https://ticketmaster.nl/event/new-wave-all-stars-tickets/1861749472"
+    ]
+  },
+  {
+    "site_host": "ticketmaster.pl",
+    "name": "COS Torwar",
+    "city": "Warszawa",
+    "country": "PL",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.pl/event/hollywood-undead-eu-uk-2027-bilety/224274430"
+    ]
+  },
+  {
+    "site_host": "ticketmaster.pl",
+    "name": "ERGO ARENA",
+    "city": "Gdańsk/Sopot",
+    "country": "PL",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.pl/event/sting-30-tour-bilety/1047384207"
+    ]
+  },
+  {
+    "site_host": "ticketmaster.se",
+    "name": "Debaser Strand",
+    "city": "Stockholm",
+    "country": "SE",
+    "layouts": [],
+    "source_event_urls": [
+      "https://ticketmaster.se/event/dirty-honey-biljetter/1940251376"
+    ]
   }
 ]

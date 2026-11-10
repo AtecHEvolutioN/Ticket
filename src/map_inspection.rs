@@ -147,7 +147,9 @@ pub fn validate_inspection(
                 snapshot
                     .configured_sections
                     .as_ref()
-                    .is_some_and(|zones| zones.iter().any(|z| z.title == tip.zone)),
+                    .is_some_and(|zones| zones
+                        .iter()
+                        .any(|z| z.title.as_deref() == Some(tip.zone.as_str()))),
                 "tooltip zone is not in the event configuration"
             );
             let normalized = tip

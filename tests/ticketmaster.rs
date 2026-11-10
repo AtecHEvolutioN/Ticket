@@ -10,6 +10,8 @@ const DUTCH: &str = include_str!("fixtures/ticketmaster-regional-nl.html");
 const SWEDISH: &str = include_str!("fixtures/ticketmaster-regional-se.html");
 const BRITISH: &str = include_str!("fixtures/ticketmaster-regional-uk.html");
 const BRITISH_SEATED: &str = include_str!("fixtures/ticketmaster-regional-uk-seated.html");
+const GLOBAL_DISPLAY: &str = include_str!("fixtures/ticketmaster-global-display.html");
+const ITALIAN_DISPLAY: &str = include_str!("fixtures/ticketmaster-italian-display.html");
 
 fn watch() -> Watch {
     let mut watch = Watch {
@@ -19,6 +21,259 @@ fn watch() -> Watch {
     };
     watch.parser.adapter = PageAdapter::Ticketmaster;
     watch
+}
+
+fn display_watch(italian: bool) -> Watch {
+    let mut watch = watch();
+    watch.url = if italian {
+        "https://www.ticketmaster.it/biglietti/example-concert/event/abc123def456"
+    } else {
+        "https://www.ticketmaster.com/example-concert/event/ABCDEF1234567890"
+    }
+    .into();
+    watch
+}
+
+#[test]
+fn global_price_cards_preserve_different_quotes_without_claiming_tickets_or_stock() {
+    let result = parser::parse(&display_watch(false), GLOBAL_DISPLAY, 10);
+    assert_eq!(
+        result.adapter.as_deref(),
+        Some("ticketmaster-global-display-v1")
+    );
+    assert_eq!(result.availability, Availability::Unknown);
+    assert!(result.offers.is_empty());
+    assert!(!result.complete);
+    assert_eq!(result.ticket_categories.len(), 3);
+    assert!(
+        result
+            .ticket_categories
+            .iter()
+            .all(|category| category.selectable_quantity.is_none()
+                && category.currency.as_deref() == Some("USD"))
+    );
+    let mut same_row = result
+        .ticket_categories
+        .iter()
+        .filter(|category| {
+            category.section.as_deref() == Some("101") && category.row.as_deref() == Some("4")
+        })
+        .map(|category| category.price_min_minor.unwrap())
+        .collect::<Vec<_>>();
+    same_row.sort();
+    assert_eq!(same_row, [7550, 8000]);
+    assert!(
+        result
+            .ticket_categories
+            .iter()
+            .any(|category| category.ticket_type == "Standard Ticket"
+                && category.price_text.as_deref() == Some("$95.00"))
+    );
+    // A duplicate rendered card is not another ticket or another price quote.
+    let first = GLOBAL_DISPLAY
+        .split("<li role=\"menuitem\"")
+        .nth(1)
+        .unwrap()
+        .split("</li>")
+        .next()
+        .unwrap();
+    let duplicate =
+        GLOBAL_DISPLAY.replace("</ul>", &format!("<li role=\"menuitem\"{first}</li></ul>"));
+    assert_eq!(
+        parser::parse(&display_watch(false), &duplicate, 10).ticket_categories,
+        result.ticket_categories
+    );
+}
+
+#[test]
+fn global_display_requires_same_event_identity_and_unambiguous_currency() {
+    let expected = display_watch(false);
+    for page in [
+        GLOBAL_DISPLAY.replace("rel=\"canonical\"", "rel=\"unrecognized\""),
+        GLOBAL_DISPLAY.replace("href=\"https://www.ticketmaster.com/example-concert/event/ABCDEF1234567890\"", "href=\"#event\""),
+        GLOBAL_DISPLAY.replace("href=\"https://www.ticketmaster.com/example-concert/event/ABCDEF1234567890\"", "href=\"&#1;#event\""),
+        GLOBAL_DISPLAY.replace("href=\"https://www.ticketmaster.com/example-concert/event/ABCDEF1234567890\"", "href=\"&#1;?language=en-us\""),
+        GLOBAL_DISPLAY.replace("ABCDEF1234567890", "1111111111111111"),
+        GLOBAL_DISPLAY.replace("</head>", "<link rel='canonical' href='https://www.ticketmaster.com/other/event/1111111111111111'></head>"),
+    ] {
+        let result = parser::parse(&expected, &page, 10);
+        assert!(result.ticket_categories.is_empty());
+        assert!(result.offers.is_empty());
+    }
+    let no_hint = GLOBAL_DISPLAY.replace("\"priceCurrency\":\"USD\",", "");
+    let result = parser::parse(&expected, &no_hint, 10);
+    assert_eq!(result.ticket_categories.len(), 3);
+    assert!(
+        result
+            .ticket_categories
+            .iter()
+            .all(|category| category.currency.is_none() && category.price_min_minor.is_none())
+    );
+    let blank_event = GLOBAL_DISPLAY.replace(
+        "\"url\":\"https://www.ticketmaster.com/example-concert/event/ABCDEF1234567890\"",
+        "\"url\":\"\"",
+    );
+    assert!(
+        parser::parse(&expected, &blank_event, 10)
+            .ticket_categories
+            .iter()
+            .all(|category| category.currency.is_none() && category.price_min_minor.is_none())
+    );
+    let contradiction =
+        GLOBAL_DISPLAY.replace("\"priceCurrency\":\"USD\"", "\"priceCurrency\":\"EUR\"");
+    assert!(
+        parser::parse(&expected, &contradiction, 10)
+            .ticket_categories
+            .iter()
+            .all(|category| category.currency.is_none() && category.price_min_minor.is_none())
+    );
+}
+
+#[test]
+fn global_display_currency_can_use_bound_accessible_price_labels_but_not_filter_amounts() {
+    const LABELS: &str = "<fieldset><input id='min-price' value='$1'><label for='min-price'><span>Minimum ticket price in US Dollars</span></label><input id='max-price' value='$9999'><label for='max-price'><span>Maximum ticket price in US Dollars</span></label></fieldset>";
+    let no_metadata_currency = GLOBAL_DISPLAY.replace("\"priceCurrency\":\"USD\",", "");
+    let html = no_metadata_currency.replace("<body>", &format!("<body>{LABELS}"));
+    let result = parser::parse(&display_watch(false), &html, 10);
+    assert_eq!(result.ticket_categories.len(), 3);
+    assert!(
+        result
+            .ticket_categories
+            .iter()
+            .all(|category| category.currency.as_deref() == Some("USD")
+                && category.price_min_minor.is_some_and(|price| price >= 7550))
+    );
+    for changed in [
+        html.replace(
+            "Maximum ticket price in US Dollars",
+            "Maximum ticket price in Canadian Dollars",
+        ),
+        html.replace("for='min-price'", "for='missing-input'"),
+        html.replace("id='min-price'", "id='min-price' disabled"),
+        html.replace("<fieldset>", "<fieldset hidden>"),
+        html.replace(
+            "</fieldset>",
+            &format!("{}</fieldset>", "<input id='unrelated'>".repeat(257)),
+        ),
+        html.replace(
+            "<input id='min-price' value='$1'>",
+            "<input id='min-price' value='$1'><input id='min-price' value='$1'>",
+        ),
+        html.replace(
+            "\"price\":\"1.00\"",
+            "\"priceCurrency\":\"EUR\",\"price\":\"1.00\"",
+        ),
+    ] {
+        assert!(
+            parser::parse(&display_watch(false), &changed, 10)
+                .ticket_categories
+                .iter()
+                .all(|category| category.currency.is_none() && category.price_min_minor.is_none())
+        );
+    }
+}
+
+#[test]
+fn global_display_omits_locked_hidden_disabled_and_malformed_price_cards() {
+    for page in [
+        GLOBAL_DISPLAY.replace(
+            "aria-haspopup=\"dialog\"",
+            "aria-haspopup=\"dialog\" hidden",
+        ),
+        GLOBAL_DISPLAY.replace(
+            "aria-haspopup=\"dialog\"",
+            "aria-haspopup=\"dialog\" aria-disabled=\"true\"",
+        ),
+        GLOBAL_DISPLAY.replace(
+            "data-analytics=\"offer-card\">",
+            "data-analytics=\"offer-card\"><span data-bdd='icon-lock'></span>",
+        ),
+        GLOBAL_DISPLAY.replace(
+            "data-bdd=\"quick-pick-price-button\"",
+            "data-bdd=\"changed-price\"",
+        ),
+        GLOBAL_DISPLAY.replace("data-price=\"$", "data-price=\"EUR "),
+        GLOBAL_DISPLAY.replace(
+            "</li>",
+            "<span data-bdd='quick-pick-price-button'>$10.00</span></li>",
+        ),
+    ] {
+        let result = parser::parse(&display_watch(false), &page, 10);
+        assert_eq!(result.availability, Availability::Unknown);
+        assert!(result.ticket_categories.is_empty());
+        assert!(result.offers.is_empty());
+    }
+}
+
+#[test]
+fn italian_display_preserves_visible_fee_text_and_ranges_but_skips_unavailable_rows() {
+    let result = parser::parse(&display_watch(true), ITALIAN_DISPLAY, 10);
+    assert_eq!(
+        result.adapter.as_deref(),
+        Some("ticketmaster-italian-display-v1")
+    );
+    assert_eq!(result.availability, Availability::Unknown);
+    assert!(result.offers.is_empty());
+    assert!(!result.complete);
+    assert_eq!(result.ticket_categories.len(), 2);
+    assert!(
+        result
+            .ticket_categories
+            .iter()
+            .all(|category| category.selectable_quantity.is_none()
+                && category.currency.as_deref() == Some("EUR")
+                && category.price_text.as_ref().unwrap().ends_with("+ fees"))
+    );
+    let range = result
+        .ticket_categories
+        .iter()
+        .find(|category| category.ticket_type == "Second Tier")
+        .unwrap();
+    assert_eq!(
+        (range.price_min_minor, range.price_max_minor),
+        (Some(7000), Some(10000))
+    );
+    assert!(
+        result
+            .ticket_categories
+            .iter()
+            .any(|category| category.ticket_type.starts_with("Example VIP")
+                && category.price_min_minor == Some(15050))
+    );
+    assert!(
+        !result
+            .ticket_categories
+            .iter()
+            .any(|category| category.ticket_type.contains("Unavailable"))
+    );
+}
+
+#[test]
+fn italian_display_requires_reviewed_identity_structure_and_active_rows() {
+    for page in [
+        ITALIAN_DISPLAY.replace("rel=\"alternate\"", "rel=\"unrecognized\""),
+        ITALIAN_DISPLAY.replacen("abc123def456", "wrong123456", 1),
+        ITALIAN_DISPLAY.replace("class=\"edpSeatMap\"", "class=\"unrecognized\""),
+        ITALIAN_DISPLAY.replace(
+            "<div><div class=\"edpSeatMap\"",
+            "<div class=\"maxCart\"><div class=\"edpSeatMap\"",
+        ),
+        ITALIAN_DISPLAY.replace("class=\"ticketInfoDiv\"", "class=\"ticketInfoDiv\" hidden"),
+    ] {
+        let result = parser::parse(&display_watch(true), &page, 10);
+        assert!(result.ticket_categories.is_empty());
+        assert!(result.offers.is_empty());
+    }
+    let foreign = parser::parse(&display_watch(false), ITALIAN_DISPLAY, 10);
+    assert!(foreign.ticket_categories.is_empty());
+    let reverse = ITALIAN_DISPLAY.replace("from 70.00€ to 100.00€", "from 100.00€ to 70.00€");
+    let result = parser::parse(&display_watch(true), &reverse, 10);
+    let range = result
+        .ticket_categories
+        .iter()
+        .find(|category| category.ticket_type == "Second Tier")
+        .unwrap();
+    assert_eq!((range.price_min_minor, range.price_max_minor), (None, None));
 }
 
 #[test]

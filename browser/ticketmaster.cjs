@@ -4,14 +4,16 @@
 // Find tickets and checkout are deliberately outside this adapter's action set.
 const { sameEvent, challengeText } = require('./rendered.cjs');
 // These exact display labels were observed on the regional event pages captured
-// during the 2026-11-09 coverage check. Do not guess purchase-button translations.
+// during the 2026-11-09/10 coverage checks. Do not guess purchase-button translations.
 const BEST_AVAILABLE = [
   'See best available', 'Wybierz najlepsze dostępne miejsca',
   'Nejlepší dostupné', 'Ver lo mejor disponible', 'Best beschikbaar',
+  'Beste verfügbare Plätze',
 ];
 const REJECT_COOKIES = [
   'Reject all', 'Reject All', 'Odrzuć wszystko', 'Reject non-essential cookies',
   'Alles weigeren', 'Odmítnout vše',
+  'Alle ablehnen',
 ];
 
 async function inspect(page) {

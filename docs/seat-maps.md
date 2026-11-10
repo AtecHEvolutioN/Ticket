@@ -9,6 +9,11 @@ Opt-in [Czech section and seat inspection](seat-inspection.md) also reads render
 seat identities and supported resale hover prices.
 These source features are newer than the 0.6.0-test downloads and Android APK.
 
+The [Netherlands mapping audit](netherlands-mapping.md) adds verified parsing of
+observed Dutch section-name aliases and multiple same-text label placements.
+It includes seven overview maps, clean arena SVG exports and draft venue presets;
+individual-seat inspection remains Czech-only.
+
 ```bash
 cargo build --release --locked
 
@@ -49,6 +54,10 @@ The report separates the regional venue ID from its Discovery ID. Configured
 section IDs/titles and price-to-section **ID mappings** are configuration only;
 the report contains no ticket-price or remaining-stock claims. A zone might mean
 an entire floor rather than an individual numbered seating block.
+
+A blank configured zone name is reported as `title: null`. Its section ID and
+price mappings remain available, but draft presets omit the unknown label.
+Missing or malformed source fields still fail validation.
 
 The layout fingerprint hashes the site, regional venue identity, country, map URL
 and sorted configured sections. It is not an image-content hash. A different map

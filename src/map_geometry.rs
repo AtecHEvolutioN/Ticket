@@ -15,6 +15,7 @@ const MAX_PATH_BYTES: usize = 16 * 1024;
 const MAX_TOTAL_PATH_BYTES: usize = 1024 * 1024;
 const MAX_COMMANDS: usize = 512;
 const MAX_COORDINATE: f64 = 1_000_000.0;
+const MAX_LABEL_PLACEMENTS: usize = 8;
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
 pub struct Point {
@@ -75,6 +76,17 @@ pub struct SectionGeometry {
     pub name: String,
     pub path: Vec<PathCommand>,
     pub label: Option<SectionLabel>,
+    /// Additional positions of the same bound label, observed on NL overview
+    /// maps. Keep the original `label` field for existing readers.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub additional_labels: Vec<SectionLabel>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LabelPolicy {
+    Exact,
+    NetherlandsObservedAliases,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -84,6 +96,9 @@ pub struct MapGeometry {
     pub view_box: ViewBox,
     pub sections: Vec<SectionGeometry>,
     pub rendered_copies: usize,
+    /// The caller supplies the already validated market. Source section names
+    /// and their displayed label text remain separate and are never rewritten.
+    pub label_policy: LabelPolicy,
     pub geometry_fingerprint: String,
     pub stock_verified: bool,
     pub adjacency_verified: bool,
@@ -93,6 +108,27 @@ pub struct MapGeometry {
 /// The surrounding event and map region must already be validated by seat_map.
 /// A legacy capture without computed paint provenance supplies no geometry.
 pub fn extract_svg_geometry(region: ElementRef<'_>) -> Result<Option<MapGeometry>> {
+    extract_svg_geometry_with_policy(region, LabelPolicy::Exact)
+}
+
+/// Use only after the caller has bound the event, page state and market. An NL
+/// display alias is not inferred from a page label or untrusted DOM attribute.
+pub fn extract_svg_geometry_for_site(
+    region: ElementRef<'_>,
+    validated_site_host: &str,
+) -> Result<Option<MapGeometry>> {
+    let policy = if validated_site_host == "ticketmaster.nl" {
+        LabelPolicy::NetherlandsObservedAliases
+    } else {
+        LabelPolicy::Exact
+    };
+    extract_svg_geometry_with_policy(region, policy)
+}
+
+fn extract_svg_geometry_with_policy(
+    region: ElementRef<'_>,
+    label_policy: LabelPolicy,
+) -> Result<Option<MapGeometry>> {
     if crate::parser::hidden_element(region) || blocked_ancestor(region) {
         return Ok(None);
     }
@@ -133,7 +169,7 @@ pub fn extract_svg_geometry(region: ElementRef<'_>) -> Result<Option<MapGeometry
                 .or_else(|| svg.value().attr("viewbox"))
                 .context("map SVG lacks a viewBox")?,
         )?;
-        let sections = read_sections(svg, view_box, &mut total_bytes)?;
+        let sections = read_sections(svg, view_box, &mut total_bytes, label_policy)?;
         let fingerprint = format!(
             "geometry-{:x}",
             Sha256::digest(serde_json::to_vec(&(view_box, &sections))?)
@@ -151,6 +187,7 @@ pub fn extract_svg_geometry(region: ElementRef<'_>) -> Result<Option<MapGeometry
                 view_box,
                 sections,
                 rendered_copies: 1,
+                label_policy,
                 geometry_fingerprint: fingerprint,
                 stock_verified: false,
                 adjacency_verified: false,
@@ -165,6 +202,7 @@ fn read_sections(
     svg: ElementRef<'_>,
     bounds: ViewBox,
     total_bytes: &mut usize,
+    label_policy: LabelPolicy,
 ) -> Result<Vec<SectionGeometry>> {
     ensure!(
         svg.select(&select("svg, foreignObject, use"))
@@ -224,7 +262,8 @@ fn read_sections(
                         id,
                         name,
                         path,
-                        label: None
+                        label: None,
+                        additional_labels: Vec::new(),
                     }
                 )
                 .is_none(),
@@ -267,30 +306,71 @@ fn read_sections(
             let section = sections
                 .get_mut(&id)
                 .context("map label has no matching section")?;
-            ensure!(section.label.is_none(), "duplicate map section label");
             let value = read_label(text, bounds)?;
-            let rendered_name = value
-                .lines
-                .iter()
-                .map(|line| line.text.as_str())
-                .collect::<Vec<_>>()
-                .join(" ");
+            let rendered_name = label_text(&value);
             ensure!(
-                rendered_name == section.name,
+                label_matches(&section.name, &rendered_name, label_policy),
                 "map label and section name disagree"
             );
-            section.label = Some(value);
+            if let Some(first) = &section.label {
+                ensure!(
+                    label_policy == LabelPolicy::NetherlandsObservedAliases
+                        && section.additional_labels.len() + 1 < MAX_LABEL_PLACEMENTS
+                        && label_text(first) == rendered_name
+                        && first != &value
+                        && !section.additional_labels.contains(&value),
+                    "duplicate or conflicting map section label"
+                );
+                section.additional_labels.push(value);
+            } else {
+                section.label = Some(value);
+            }
         }
     }
     ensure!(
         svg.select(&select("[data-component='svg__label']")).count()
             == sections
                 .values()
-                .filter(|section| section.label.is_some())
-                .count(),
+                .map(|section| usize::from(section.label.is_some())
+                    + section.additional_labels.len())
+                .sum::<usize>(),
         "unbound or nested map section labels"
     );
     Ok(sections.into_values().collect())
+}
+
+fn label_matches(source_name: &str, displayed: &str, policy: LabelPolicy) -> bool {
+    if source_name == displayed {
+        return true;
+    }
+    if policy != LabelPolicy::NetherlandsObservedAliases {
+        return false;
+    }
+    // Observed on the GelreDome NL overview: the same section ID binds a
+    // "Vak127" source name to the displayed "127". Keep digits exact, including
+    // leading zeroes; never accept another block or an arbitrary name suffix.
+    let same_number = |number: &str| {
+        !number.is_empty()
+            && number.len() <= 8
+            && number.bytes().all(|value| value.is_ascii_digit())
+            && number == displayed
+    };
+    source_name.strip_prefix("Vak").is_some_and(same_number)
+        // Reviewed NL arena maps also shorten skybox names and standing-area
+        // descriptors. These are drawing aliases, not ticket-type evidence.
+        || source_name.strip_prefix("SKYBOXEN ").is_some_and(same_number)
+        || [" - Standing Room Only", " - STAANPLAATSEN"]
+            .iter()
+            .any(|suffix| source_name.strip_suffix(suffix) == Some(displayed))
+}
+
+fn label_text(label: &SectionLabel) -> String {
+    label
+        .lines
+        .iter()
+        .map(|line| line.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn read_label(text: ElementRef<'_>, bounds: ViewBox) -> Result<SectionLabel> {
@@ -695,7 +775,15 @@ pub fn render_svg(geometry: &MapGeometry) -> Result<String> {
             b.width.max(b.height) / 3000.0,
             xml(&section.name)
         )?;
-        if let Some(text) = &section.label {
+        ensure!(
+            section.additional_labels.is_empty()
+                || (geometry.label_policy == LabelPolicy::NetherlandsObservedAliases
+                    && section.label.is_some()
+                    && section.additional_labels.len() < MAX_LABEL_PLACEMENTS),
+            "unsupported additional geometry labels"
+        );
+        let mut prior_labels = Vec::new();
+        for text in section.label.iter().chain(&section.additional_labels) {
             ensure!(
                 !text.lines.is_empty()
                     && text.lines.len() <= 8
@@ -705,14 +793,18 @@ pub fn render_svg(geometry: &MapGeometry) -> Result<String> {
                 "invalid geometry label"
             );
             ensure!(
-                text.lines
-                    .iter()
-                    .map(|line| line.text.as_str())
-                    .collect::<Vec<_>>()
-                    .join(" ")
-                    == section.name,
+                label_matches(&section.name, &label_text(text), geometry.label_policy),
                 "geometry label and section name disagree"
             );
+            ensure!(
+                !prior_labels.contains(&text)
+                    && section
+                        .label
+                        .as_ref()
+                        .is_some_and(|first| label_text(first) == label_text(text)),
+                "duplicate or conflicting geometry labels"
+            );
+            prior_labels.push(text);
             write!(
                 output,
                 "<text fill=\"#111827\" text-anchor=\"middle\" font-family=\"sans-serif\" font-size=\"{}\"",
