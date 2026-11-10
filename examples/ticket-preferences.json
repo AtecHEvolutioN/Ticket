@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "defaults": {
+    "quantity": 2,
+    "max_total_minor": null,
+    "currency": "CZK",
+    "require_adjacent": true,
+    "price_strategy": "cheapest",
+    "allowed_category_ids": [],
+    "allowed_ticket_types": [],
+    "allowed_sections": [],
+    "allowed_rows": []
+  },
+  "event_overrides": []
+}

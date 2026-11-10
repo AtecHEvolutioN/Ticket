@@ -318,6 +318,7 @@ pub fn validate_public_url(input: &str) -> Result<Url> {
         "ticketmaster.com.au",
         "ticketmaster.co.nz",
         "ticketmaster.com.mx",
+        "ticketmaster.ae",
         "ticketmaster.co.za",
     ];
     let normal_host = host.strip_prefix("www.").unwrap_or(host);

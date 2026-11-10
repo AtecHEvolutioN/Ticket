@@ -1,8 +1,9 @@
 # Czech ticket selection and cart readiness
 
 The monitor can inspect event pages. The new source commands below add a
-read-only Czech price catalog and an offline adjacent-group planner. They do not
-reserve tickets, run automatically from a watch, or change the Android APK.
+read-only Czech price catalog and an offline group planner. They do not
+reserve tickets or run automatically from a watch. Android 0.7.0-test can save and
+export [ticket preferences](ticket-preferences.md) for this planner.
 
 ## Inspect the configured selection choices
 
@@ -52,9 +53,10 @@ open a browser, write monitoring state, or create a cart. Its output is a decisi
 about the supplied claims, not proof that those claims came from Ticketmaster.
 The Rust entry point is `cart::plan_json`; the typed request is `CartPlanRequest`.
 
-The request must specify the quantity explicitly. A watch's minimum quantity is
-an alert filter and cannot supply this purchase instruction. Eligible groups
-need that exact number of unique seats, explicit site-confirmed adjacency, a
+The request must specify the quantity explicitly, or receive it from an explicit
+`--preferences` document. Saved preferences default to two; a watch's minimum
+quantity remains an alert filter and cannot supply this purchase instruction. Eligible groups
+need that exact number of unique seats, site-confirmed adjacency when required, a
 complete group total in CZK, and fresh matching event/session/document bindings.
 Standing tickets and consecutive-looking seat numbers do not establish adjacency.
 Unknown fees, stale quotes, category ranges, and quantity limits are insufficient.
@@ -69,7 +71,11 @@ The cheapest eligible total can be called cheapest only within a complete search
 for the requested quantity. Partial or unresolved search coverage produces at
 most a provisional cheapest-observed group. Even a successful plan does not
 authorize the reservation step. An optional maximum total can constrain selection;
-the user's current preference is cheapest, without a specified cap.
+the defaults are two adjacent seats and cheapest eligible total, without a specified cap.
+Global defaults and per-event overrides can constrain ticket type, native category ID,
+section and row. Every requested filter needs matching evidence. Disabling the
+adjacency requirement permits exact seated groups in different rows or sections,
+subject to the other filters; standing groups remain unsupported.
 
 ## Browser evidence still needed
 

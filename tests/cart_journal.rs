@@ -34,6 +34,8 @@ fn request() -> CartPlanRequest {
 fn hold() -> HoldReceipt {
     HoldReceipt {
         context: context(),
+        category_id: None,
+        ticket_type: None,
         hold_correlation_id: "application-hold-1".into(),
         quantity: 2,
         seats: request().snapshot.groups[0].seats.clone(),
@@ -743,6 +745,8 @@ fn search_request() -> NativeSearchRequest {
         config_observed_at_ms: NOW,
         config_expires_at_ms: NOW + 10000,
         category_id: "category-1".into(),
+        category_title: None,
+        filters: CartFilters::default(),
         price_id: "price-1".into(),
         configured_unit_price_minor: 200000,
         currency: "CZK".into(),
@@ -771,6 +775,7 @@ fn search_hold() -> NativeSearchHoldReceipt {
     ranking.expires_at_ms = NOW + 5200;
     NativeSearchHoldReceipt {
         context: search_context(),
+        ticket_type: None,
         hold_correlation_id: "native-hold-1".into(),
         category_id: "category-1".into(),
         price_id: "price-1".into(),
@@ -880,7 +885,7 @@ fn native_search_admission_requires_fresh_explicit_intent_without_weakening_user
         let mut input = search_request();
         match case {
             0 => input.quantity = 0,
-            1 => input.adjacent_required = false,
+            1 => input.quantity = MAX_QUANTITY + 1,
             2 => input.cheapest_required = false,
             3 => input.expected_event_start = "2026-11-16".into(),
             4 => input.source_event_start = "2026-11-17T17:00:00Z".into(),
@@ -1231,4 +1236,150 @@ fn native_outcome_audit_failure_rolls_back_receipt_and_event_unlock() {
             .state,
         AttemptState::NoHoldConfirmed
     );
+}
+
+#[test]
+fn quoted_filter_policy_is_durable_and_requires_matching_receipt_category_and_type() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cart.sqlite");
+    let mut journal = CartJournal::open(&path).unwrap();
+    let mut input = request();
+    input.intent.filters = CartFilters {
+        allowed_category_ids: vec!["category-1".into()],
+        allowed_ticket_types: vec!["standard".into()],
+        allowed_sections: vec!["a".into()],
+        allowed_rows: vec!["1".into()],
+    };
+    input.snapshot.groups[0].category_id = Some("category-1".into());
+    input.snapshot.groups[0].ticket_type = Some("Standard".into());
+    let prepared = journal.begin("attempt-1", &input, NOW).unwrap();
+    assert_eq!(
+        prepared.quoted_binding().unwrap().filters,
+        input.intent.filters
+    );
+    journal
+        .mark_dispatch_started("attempt-1", NOW + 100)
+        .unwrap();
+    drop(journal);
+    let mut journal = CartJournal::open(&path).unwrap();
+    assert!(
+        journal
+            .record_hold("attempt-1", &hold(), NOW + 300)
+            .is_err()
+    );
+    let mut receipt = hold();
+    receipt.category_id = Some("category-1".into());
+    receipt.ticket_type = Some("VIP".into());
+    assert!(
+        journal
+            .record_hold("attempt-1", &receipt, NOW + 300)
+            .is_err()
+    );
+    receipt.ticket_type = Some("  STANDARD  ".into());
+    assert_eq!(
+        journal
+            .record_hold("attempt-1", &receipt, NOW + 300)
+            .unwrap()
+            .state,
+        AttemptState::Held
+    );
+}
+
+fn filtered_native_input() -> NativeSearchRequest {
+    let mut input = search_request();
+    input.adjacent_required = false;
+    input.category_title = Some("Standard".into());
+    input.filters = CartFilters {
+        allowed_category_ids: vec!["category-1".into()],
+        allowed_ticket_types: vec!["standard".into()],
+        allowed_sections: vec!["A".into(), "B".into()],
+        allowed_rows: vec!["1".into(), "2".into()],
+    };
+    input
+}
+fn filtered_native_hold() -> NativeSearchHoldReceipt {
+    let mut receipt = search_hold();
+    receipt.ticket_type = Some("Standard".into());
+    receipt.adjacency = AdjacencyEvidence::NotAdjacent;
+    receipt.seats[1].section = "B".into();
+    receipt.seats[1].row = "2".into();
+    receipt.seats[1].label = Some("1".into());
+    let ranking = receipt.post_action_ranking_evidence.as_mut().unwrap();
+    ranking.groups[0].category_id = Some("category-1".into());
+    ranking.groups[0].ticket_type = Some("Standard".into());
+    ranking.groups[0].seats = receipt.seats.clone();
+    ranking.groups[0].adjacency = AdjacencyEvidence::NotAdjacent;
+    receipt
+}
+
+#[test]
+fn native_nonadjacent_policy_honors_type_section_and_row_filters_in_hold_and_ranking() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cart.sqlite");
+    let mut journal = CartJournal::open(&path).unwrap();
+    let input = filtered_native_input();
+    let mut missing = input.clone();
+    missing.category_title = None;
+    assert!(journal.begin_search("missing", &missing, NOW).is_err());
+    journal.begin_search("attempt-1", &input, NOW).unwrap();
+    journal
+        .mark_search_dispatch_started("attempt-1", NOW + 100)
+        .unwrap();
+    let held = journal
+        .record_search_outcome(
+            "attempt-1",
+            &NativeSearchOutcome::Hold(Box::new(filtered_native_hold())),
+            NOW + 300,
+        )
+        .unwrap();
+    assert_eq!(held.state, AttemptState::Held);
+    assert!(!held.search_binding().unwrap().request.adjacent_required);
+    assert_eq!(
+        held.search_binding().unwrap().request.filters,
+        input.filters
+    );
+}
+
+#[test]
+fn native_filter_mismatch_unknown_type_or_duplicate_location_remains_locked() {
+    for case in 0..5 {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("cart.sqlite");
+        let mut journal = CartJournal::open(&path).unwrap();
+        journal
+            .begin_search("attempt-1", &filtered_native_input(), NOW)
+            .unwrap();
+        journal
+            .mark_search_dispatch_started("attempt-1", NOW + 100)
+            .unwrap();
+        let mut receipt = filtered_native_hold();
+        match case {
+            0 => receipt.ticket_type = None,
+            1 => receipt.ticket_type = Some("VIP".into()),
+            2 => receipt.seats[1].section = "C".into(),
+            3 => receipt.seats[1].row = "3".into(),
+            _ => {
+                receipt.seats[1].section = "A".into();
+                receipt.seats[1].row = "1".into();
+            }
+        }
+        let reviewed = journal
+            .record_search_outcome(
+                "attempt-1",
+                &NativeSearchOutcome::Hold(Box::new(receipt)),
+                NOW + 300,
+            )
+            .unwrap();
+        assert_eq!(
+            reviewed.state,
+            AttemptState::NeedsReconciliation,
+            "case {case}"
+        );
+        assert!(!recorded_search(&reviewed).hold_identity_confirmed);
+        assert!(
+            journal
+                .expire_confirmed_hold("attempt-1", NOW + 1000000)
+                .is_err()
+        );
+    }
 }

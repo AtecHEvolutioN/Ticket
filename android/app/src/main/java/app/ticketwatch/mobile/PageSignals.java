@@ -95,6 +95,7 @@ final class PageSignals {
                 .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
                 .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
                 .decode(java.nio.ByteBuffer.wrap(out.toByteArray())).toString();
+        for (int index = 0; index < value.length(); index++) if (Character.isISOControl(value.charAt(index))) return null;
         if(value.isEmpty()||".".equals(value)||"..".equals(value)||value.matches(".*[\\p{Cntrl}/\\\\%?#].*"))return null;
         return value;
     }

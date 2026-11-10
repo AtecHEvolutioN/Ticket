@@ -25,7 +25,7 @@ tree.write(sys.argv[2], encoding='utf-8', xml_declaration=True)
 PY
 "$tools_dir/aapt2" link -o "$build_dir/resources.apk" \
     --manifest "$build_dir/AndroidManifest.xml" -I "$platform_jar" \
-    --min-sdk-version 26 --target-sdk-version 35 --version-code 6 --version-name 0.6.0-test
+    --min-sdk-version 26 --target-sdk-version 35 --version-code 7 --version-name 0.7.0-test
 find "$project_dir/app/src/androidTest/java" -name '*.java' -print > "$build_dir/sources.txt"
 "$java_bin" com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target 17 \
     -classpath "$platform_jar:$main_jar" -d "$build_dir/classes" @"$build_dir/sources.txt"

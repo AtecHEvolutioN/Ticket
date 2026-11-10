@@ -70,6 +70,12 @@ pub struct PlanBinding {
     pub session_id: String,
     pub document_id: String,
     pub quote_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_category_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_ticket_type: Option<String>,
+    #[serde(default, skip_serializing_if = "cart::CartFilters::is_empty")]
+    pub filters: cart::CartFilters,
     pub quantity: u32,
     pub max_total_minor: Option<u64>,
     pub total_minor: u64,
@@ -106,6 +112,10 @@ pub struct NativeSearchRequest {
     pub config_observed_at_ms: i64,
     pub config_expires_at_ms: i64,
     pub category_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category_title: Option<String>,
+    #[serde(default, skip_serializing_if = "cart::CartFilters::is_empty")]
+    pub filters: cart::CartFilters,
     pub price_id: String,
     pub configured_unit_price_minor: u64,
     pub currency: String,
@@ -150,6 +160,8 @@ pub struct NativeSearchReceiptContext {
 #[serde(deny_unknown_fields)]
 pub struct NativeSearchHoldReceipt {
     pub context: NativeSearchReceiptContext,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_type: Option<String>,
     pub hold_correlation_id: String,
     pub category_id: String,
     pub price_id: String,
@@ -291,6 +303,10 @@ pub struct ReceiptContext {
 #[serde(deny_unknown_fields)]
 pub struct HoldReceipt {
     pub context: ReceiptContext,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_type: Option<String>,
     /// An application-generated ID or digest, never a raw private cart token.
     pub hold_correlation_id: String,
     pub quantity: u32,
@@ -442,6 +458,9 @@ impl CartJournal {
             session_id: request.context.session_id.clone(),
             document_id: request.context.document_id.clone(),
             quote_id: selected.group_id,
+            selected_category_id: selected.category_id,
+            selected_ticket_type: selected.ticket_type,
+            filters: request.intent.filters.clone(),
             quantity: selected.quantity,
             max_total_minor: request.intent.max_total_minor,
             total_minor: selected.total_minor,
@@ -451,7 +470,7 @@ impl CartJournal {
             quote_expires_at_ms: selected.quote_expires_at_ms,
             source_expires_at_ms: request.snapshot.expires_at_ms,
             cheapest_for_request: true,
-            adjacent_required: true,
+            adjacent_required: request.intent.require_adjacent,
             fees_complete: true,
         };
         tx.execute(
@@ -1057,6 +1076,38 @@ fn validate_receipt(record: &AttemptRecord, receipt: &OutcomeReceipt, now_ms: i6
             validate_id(&hold.hold_correlation_id)?;
             validate_time(hold.hold_expires_at_ms)?;
             ensure!(
+                hold.category_id
+                    .as_ref()
+                    .is_none_or(|v| validate_id(v).is_ok())
+                    && hold.ticket_type.as_ref().is_none_or(|v| safe_seat_label(v)),
+                "invalid hold category/type evidence"
+            );
+            ensure!(
+                binding.filters.allowed_category_ids.is_empty()
+                    || (hold.category_id.is_some()
+                        && hold.category_id == binding.selected_category_id
+                        && hold
+                            .category_id
+                            .as_ref()
+                            .is_some_and(|v| binding.filters.allowed_category_ids.contains(v))),
+                "hold category does not satisfy bound preferences"
+            );
+            ensure!(
+                binding.filters.allowed_ticket_types.is_empty()
+                    || hold
+                        .ticket_type
+                        .as_ref()
+                        .is_some_and(|v| cart::label_allowed(
+                            &binding.filters.allowed_ticket_types,
+                            v
+                        ) && binding
+                            .selected_ticket_type
+                            .as_ref()
+                            .is_some_and(|expected| cart::normalized_label(expected)
+                                == cart::normalized_label(v))),
+                "hold ticket type does not satisfy bound preferences"
+            );
+            ensure!(
                 hold.quantity == binding.quantity && hold.seats.len() == binding.quantity as usize,
                 "receipt quantity mismatch"
             );
@@ -1158,8 +1209,8 @@ fn normalize_search_request(request: &NativeSearchRequest) -> Result<NativeSearc
         "native search requires an explicit bounded quantity"
     );
     ensure!(
-        request.adjacent_required && request.cheapest_required,
-        "native search must preserve adjacent and cheapest requirements"
+        request.cheapest_required,
+        "native search must preserve the cheapest requirement"
     );
     ensure!(
         request.currency == "CZK"
@@ -1168,6 +1219,30 @@ fn normalize_search_request(request: &NativeSearchRequest) -> Result<NativeSearc
                 .max_total_minor
                 .is_none_or(|v| v <= cart::MAX_EXACT_INTEGER),
         "invalid native price filter"
+    );
+    ensure!(
+        cart::valid_filters(&request.filters)
+            && request
+                .category_title
+                .as_ref()
+                .is_none_or(|v| safe_seat_label(v)),
+        "invalid native preference filters or category title"
+    );
+    ensure!(
+        request.filters.allowed_category_ids.is_empty()
+            || request
+                .filters
+                .allowed_category_ids
+                .contains(&request.category_id),
+        "native category does not satisfy preferences"
+    );
+    ensure!(
+        request.filters.allowed_ticket_types.is_empty()
+            || request
+                .category_title
+                .as_ref()
+                .is_some_and(|v| cart::label_allowed(&request.filters.allowed_ticket_types, v)),
+        "native ticket type is unknown or does not satisfy preferences"
     );
     let subtotal = request
         .configured_unit_price_minor
@@ -1225,6 +1300,10 @@ fn sanitize_search_outcome(outcome: &mut NativeSearchOutcome) -> Result<()> {
             validate_id(id)?;
         }
         ensure!(
+            hold.ticket_type.as_ref().is_none_or(|v| safe_seat_label(v)),
+            "invalid native ticket type evidence"
+        );
+        ensure!(
             hold.seats.len() <= cart::MAX_QUANTITY as usize,
             "native hold seat list exceeds limit"
         );
@@ -1246,6 +1325,10 @@ fn sanitize_search_outcome(outcome: &mut NativeSearchOutcome) -> Result<()> {
                 && ranking.groups.len() <= cart::MAX_GROUPS
                 && ranking.groups.iter().all(|g| {
                     validate_id(&g.id).is_ok()
+                        && g.category_id
+                            .as_ref()
+                            .is_none_or(|v| validate_id(v).is_ok())
+                        && g.ticket_type.as_ref().is_none_or(|v| safe_seat_label(v))
                         && g.seats.len() <= cart::MAX_QUANTITY as usize
                         && g.seats.iter().all(|s| {
                             validate_id(&s.id).is_ok()
@@ -1342,7 +1425,15 @@ fn assess_search_outcome(
             let labels: HashSet<_> = hold
                 .seats
                 .iter()
-                .filter_map(|s| s.label.as_ref().map(|v| v.trim().to_lowercase()))
+                .filter_map(|s| {
+                    s.label.as_ref().map(|v| {
+                        (
+                            cart::normalized_label(&s.section),
+                            cart::normalized_label(&s.row),
+                            cart::normalized_label(v),
+                        )
+                    })
+                })
                 .collect();
             let labeled_count = hold.seats.iter().filter(|s| s.label.is_some()).count();
             let same_row = hold.seats.first().is_some_and(|first| {
@@ -1355,12 +1446,13 @@ fn assess_search_outcome(
                 || hold.seats.len() != request.quantity as usize
                 || ids.len() != hold.seats.len()
                 || labels.len() != labeled_count
-                || !same_row
+                || (request.adjacent_required && !same_row)
             {
                 reasons.push(R::QuantityOrSeatsMismatch);
             }
             if hold.seating != cart::SeatingKind::Seated
-                || hold.adjacency != cart::AdjacencyEvidence::SiteConfirmed
+                || (request.adjacent_required
+                    && hold.adjacency != cart::AdjacencyEvidence::SiteConfirmed)
             {
                 reasons.push(R::AdjacencyUnconfirmed);
             }
@@ -1368,6 +1460,22 @@ fn assess_search_outcome(
                 .configured_unit_price_minor
                 .saturating_mul(u64::from(request.quantity));
             if hold.category_id != request.category_id
+                || (!request.filters.allowed_category_ids.is_empty()
+                    && !request
+                        .filters
+                        .allowed_category_ids
+                        .contains(&hold.category_id))
+                || (!request.filters.allowed_ticket_types.is_empty()
+                    && !hold.ticket_type.as_ref().is_some_and(|v| {
+                        cart::label_allowed(&request.filters.allowed_ticket_types, v)
+                            && request.category_title.as_ref().is_some_and(|expected| {
+                                cart::normalized_label(expected) == cart::normalized_label(v)
+                            })
+                    }))
+                || hold.seats.iter().any(|seat| {
+                    !cart::label_allowed(&request.filters.allowed_sections, &seat.section)
+                        || !cart::label_allowed(&request.filters.allowed_rows, &seat.row)
+                })
                 || hold.price_id != request.price_id
                 || hold.unit_price_minor != request.configured_unit_price_minor
                 || hold.currency != "CZK"
@@ -1422,6 +1530,8 @@ fn search_ranking_matches(
             expected_event_start: Some(request.expected_event_start.clone()),
             quantity: Some(request.quantity),
             max_total_minor: request.max_total_minor,
+            require_adjacent: request.adjacent_required,
+            filters: request.filters.clone(),
         },
         context: cart::BrowserContext {
             session_id: request.session_id.clone(),
@@ -1440,6 +1550,13 @@ fn search_ranking_matches(
             && v.quantity == hold.quantity
             && v.total_minor == hold.total_minor
             && v.currency == hold.currency
+            && (request.filters.allowed_category_ids.is_empty()
+                || v.category_id.as_deref() == Some(hold.category_id.as_str()))
+            && (request.filters.allowed_ticket_types.is_empty()
+                || v.ticket_type
+                    .as_ref()
+                    .zip(hold.ticket_type.as_ref())
+                    .is_some_and(|(a, b)| cart::normalized_label(a) == cart::normalized_label(b)))
             && sorted_seats(v.seats) == hold.seats
     })
 }

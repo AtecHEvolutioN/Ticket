@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "defaults": {
+    "quantity": 5,
+    "max_total_minor": 600000,
+    "currency": "CZK",
+    "require_adjacent": true,
+    "price_strategy": "cheapest",
+    "allowed_category_ids": [],
+    "allowed_ticket_types": [],
+    "allowed_sections": [
+      "110",
+      "112"
+    ],
+    "allowed_rows": []
+  },
+  "event_overrides": [
+    {
+      "event_url": "https:\/\/www.ticketmaster.cz\/event\/synthetic-preferences\/88770901",
+      "preferences": {
+        "quantity": 3,
+        "max_total_minor": 825000,
+        "currency": "CZK",
+        "require_adjacent": true,
+        "price_strategy": "cheapest",
+        "allowed_category_ids": [
+          "2"
+        ],
+        "allowed_ticket_types": [
+          "Ověřené přeprodávané vstupenky"
+        ],
+        "allowed_sections": [
+          "110"
+        ],
+        "allowed_rows": [
+          "12"
+        ]
+      }
+    }
+  ]
+}

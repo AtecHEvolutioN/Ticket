@@ -1,6 +1,6 @@
 # Android test-build verification
 
-Version 0.6.0-test verified on 2026-11-09 using an isolated Android 9 / API 28 x86_64 emulator.
+Version 0.7.0-test verified on 2026-11-10 using an isolated Android 9 / API 28 x86_64 emulator.
 The APK supports API 26 and newer by manifest; API 26 and API 35 physical devices
 have not been tested in this environment.
 
@@ -8,13 +8,27 @@ have not been tested in this environment.
 - The visible demo flow creates a saved watch, changes unavailable to available,
   and posts a labelled "Demo ticket alert" to Android's notification service.
   Watchlist and notification screenshots are included with the local build output.
-- 291 on-device offline assertions pass: public-link validation, page identity and
+- 364 on-device offline assertions pass: public-link validation, page identity and
   challenge classification, API schema handling, watch persistence, quiet initial
   observations, restock deduplication, unknown/blocked recovery, selector-change
   baselines, URL-free demo persistence, Android Keystore encryption/removal, bottom
   navigation, country-chip selection, search-draft persistence, blank credential
   inputs and screenshot protection, demo state buttons and local alert delivery,
   availability filters that exclude demo data, and an offline page inspector.
+- 73 preference assertions cover the default of two tickets, global choices,
+  event-specific overrides and reset, exact total-price parsing, Unicode filter
+  normalization, supported event identity, corruption handling, and bounded JSON
+  export. The real editor is exercised through invalid input, Save, reopen,
+  inheritance and Save & export with a local document result. Pasted negative or
+  oversized quantities and malformed amounts remain visible and are rejected;
+  comma decimals retain their intended value. Preferences never modify saved
+  inventory observations or authorize a reservation.
+- Actual Android exports with Unicode ticket types, section/row/category filters,
+  a CZK total and an event override pass the desktop planner's compatibility checks.
+  The export stays within its 256 KiB limit near storage capacity without dropping
+  configured entries. Preview images `android-ticket-preferences.png`,
+  `android-event-preferences.png`, and `android-ticket-filters.png` use the app's
+  actual views and clearly synthetic data.
 - Ticket detail coverage includes advertised ranges, decimal/currency parsing,
   missing and ambiguous quantities, wrong-event and blocked-page rejection,
   current-snapshot persistence, profile-change invalidation, stale-offer removal,
@@ -62,6 +76,10 @@ have not been tested in this environment.
   and waits for dialog readiness; no live requests are involved.
 - AAPT2 packaging, D8 compilation, APK alignment, and v2/v3 signature verification
   pass. The APK contains no native ABI-specific libraries.
+- The signing certificate matches the published 0.6.0-test APK. Installing the new
+  APK over the emulator's existing 0.3.0-test app succeeded without uninstalling.
+  Guest Wi-Fi and mobile data were disabled; the final run reported no active
+  default network.
 - Debugging, application backups, and cleartext network access are disabled.
   Only the launcher activity is exported.
 - Tests use synthetic data and a fake temporary credential that is removed after

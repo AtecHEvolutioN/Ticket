@@ -37,7 +37,7 @@ PY
     --manifest "$build_dir/AndroidManifest.xml" \
     -I "$platform_jar" --java "$build_dir/generated" \
     --min-sdk-version 26 --target-sdk-version 35 \
-    --version-code 6 --version-name 0.6.0-test "$build_dir/resources.zip"
+    --version-code 7 --version-name 0.7.0-test "$build_dir/resources.zip"
 find "$project_dir/app/src/main/java" "$build_dir/generated" -name '*.java' -print > "$build_dir/sources.txt"
 "$java_bin" com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target 17 \
     -classpath "$platform_jar" -d "$build_dir/classes" @"$build_dir/sources.txt"

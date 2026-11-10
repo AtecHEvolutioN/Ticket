@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    android:versionCode="6" android:versionName="0.6.0-test">
+    android:versionCode="7" android:versionName="0.7.0-test">
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -21,6 +21,8 @@
         <activity android:name=".PageActivity" android:exported="false"
             android:windowSoftInputMode="adjustResize" />
         <activity android:name=".VenueActivity" android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".TicketPreferencesActivity" android:exported="false"
             android:windowSoftInputMode="adjustResize" />
     </application>
 </manifest>

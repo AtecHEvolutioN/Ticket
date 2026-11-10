@@ -118,7 +118,19 @@ enum Command {
         headed: bool,
     },
     /// Evaluate supplied group quotes offline; a decision never authorizes a reservation.
-    CartPlan { file: PathBuf },
+    CartPlan {
+        file: PathBuf,
+        /// Apply saved Android/global/event preferences before evaluating supplied quotes.
+        #[arg(long)]
+        preferences: Option<PathBuf>,
+    },
+    /// Validate/export ticket preferences offline, or resolve the settings for one event.
+    CartPreferences {
+        #[arg(long)]
+        file: Option<PathBuf>,
+        #[arg(long)]
+        event_url: Option<String>,
+    },
     /// Inspect any selected event using the built-in Ticketmaster adapter; no config or alerts.
     Inspect {
         #[arg(long)]
@@ -270,6 +282,24 @@ fn read_html(path: &Path, limit: usize) -> Result<String> {
         bail!("HTML fixture exceeds configured body limit");
     }
     String::from_utf8(input).context("HTML fixture must contain UTF-8 text")
+}
+
+fn read_cart_preferences(
+    path: &Path,
+) -> Result<ticket_watch::cart_preferences::PreferencesDocument> {
+    let file = std::fs::File::open(path).context("Open ticket preferences")?;
+    let metadata = file
+        .metadata()
+        .context("Read ticket preferences metadata")?;
+    let limit = ticket_watch::cart_preferences::MAX_INPUT_BYTES;
+    if !metadata.is_file() || metadata.len() > limit as u64 {
+        bail!("Ticket preferences must be a regular file within the size limit");
+    }
+    let mut input = Vec::new();
+    file.take(limit as u64 + 1)
+        .read_to_end(&mut input)
+        .context("Read ticket preferences")?;
+    ticket_watch::cart_preferences::parse_document(&input)
 }
 
 fn write_new_artifact(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -747,6 +777,7 @@ async fn main() -> Result<()> {
         | Command::CartCatalog { .. }
         | Command::CartControls { .. }
         | Command::CartJournal { .. }
+        | Command::CartPreferences { .. }
         | Command::CartPlan { .. } => Config::default(),
         Command::Venues { .. }
             if cli.config == Path::new("config.toml") && !cli.config.exists() =>
@@ -999,17 +1030,47 @@ async fn main() -> Result<()> {
                 "section_inspection":section_inspection}),
             )?;
         }
-        Command::CartPlan { file } => {
+        Command::CartPreferences { file, event_url } => {
+            let document = match file {
+                Some(path) => read_cart_preferences(&path)?,
+                None => ticket_watch::cart_preferences::PreferencesDocument::default(),
+            };
+            if let Some(url) = event_url {
+                print_json(&ticket_watch::cart_preferences::resolve(&document, &url)?)?;
+            } else {
+                print_json(&document)?;
+            }
+        }
+        Command::CartPlan { file, preferences } => {
             let mut input = Vec::new();
             std::fs::File::open(file)
                 .context("Open cart quote request")?
                 .take(ticket_watch::cart::MAX_INPUT_BYTES as u64 + 1)
                 .read_to_end(&mut input)
                 .context("Read cart quote request")?;
-            print_json(&ticket_watch::cart::plan_json(
-                &input,
-                chrono::Utc::now().timestamp_millis(),
-            ))?;
+            if let Some(path) = preferences {
+                if input.len() > ticket_watch::cart::MAX_INPUT_BYTES {
+                    bail!("Cart quote request exceeds the size limit");
+                }
+                let request: ticket_watch::cart::CartPlanRequest =
+                    serde_json::from_slice(&input)
+                        .map_err(|_| anyhow::anyhow!("Invalid cart quote request"))?;
+                let document = read_cart_preferences(&path)?;
+                let prepared = ticket_watch::cart_preferences::apply_to_plan(&document, &request)?;
+                let decision = ticket_watch::cart::plan(
+                    &prepared.request,
+                    chrono::Utc::now().timestamp_millis(),
+                );
+                print_json(&serde_json::json!({
+                    "effective_preferences": prepared.effective_preferences,
+                    "decision": decision,
+                }))?;
+            } else {
+                print_json(&ticket_watch::cart::plan_json(
+                    &input,
+                    chrono::Utc::now().timestamp_millis(),
+                ))?;
+            }
         }
         Command::CartCatalog { url, html, headed } => {
             let parsed = config::validate_public_url(&url)

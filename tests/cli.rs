@@ -1,6 +1,179 @@
 use std::process::Command;
 
 #[test]
+fn cart_preferences_defaults_and_event_overrides_round_trip_without_monitor_setup() {
+    let directory = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+            .current_dir(directory.path())
+            .env_remove("TICKETMASTER_API_KEY")
+            .env_remove("DISCORD_BOT_TOKEN")
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    let mut preferences = run(&["cart-preferences"]);
+    assert_eq!(preferences["schema_version"], 1);
+    assert_eq!(preferences["defaults"]["quantity"], 2);
+    assert_eq!(preferences["defaults"]["require_adjacent"], true);
+    assert_eq!(preferences["defaults"]["price_strategy"], "cheapest");
+    let event_url = "https://www.ticketmaster.cz/event/synthetic-vstupenky/1234567890";
+    let mut event_preferences = preferences["defaults"].clone();
+    event_preferences["quantity"] = 3.into();
+    event_preferences["max_total_minor"] = 750_000.into();
+    event_preferences["allowed_ticket_types"] = serde_json::json!(["Sezení"]);
+    preferences["event_overrides"] = serde_json::json!([
+        {"event_url":event_url, "preferences":event_preferences},
+        {"event_url":"https://www.ticketmaster.ae/event/synthetic/4567890123", "preferences":preferences["defaults"].clone()}
+    ]);
+    let file = directory.path().join("preferences.json");
+    std::fs::write(&file, serde_json::to_vec(&preferences).unwrap()).unwrap();
+    let exported = run(&["cart-preferences", "--file", file.to_str().unwrap()]);
+    std::fs::write(&file, serde_json::to_vec(&exported).unwrap()).unwrap();
+    let resolved = run(&[
+        "cart-preferences",
+        "--file",
+        file.to_str().unwrap(),
+        "--event-url",
+        event_url,
+    ]);
+    assert_eq!(resolved["source"], "event_override");
+    assert_eq!(resolved["preferences"]["quantity"], 3);
+    assert_eq!(resolved["preferences"]["max_total_minor"], 750_000);
+    let inherited = run(&[
+        "cart-preferences",
+        "--file",
+        file.to_str().unwrap(),
+        "--event-url",
+        "https://www.ticketmaster.cz/event/different-vstupenky/9876543210",
+    ]);
+    assert_eq!(inherited["source"], "defaults");
+    assert_eq!(inherited["preferences"]["quantity"], 2);
+    let uae = run(&[
+        "cart-preferences",
+        "--file",
+        file.to_str().unwrap(),
+        "--event-url",
+        "https://ticketmaster.ae/event/renamed/4567890123",
+    ]);
+    assert_eq!(uae["source"], "event_override");
+    assert_eq!(uae["preferences"]["quantity"], 2);
+    assert!(!directory.path().join("data").exists());
+}
+
+#[test]
+fn cart_plan_applies_exported_budget_and_rejects_a_changed_search_quantity() {
+    let directory = tempfile::tempdir().unwrap();
+    let preferences_path = directory.path().join("preferences.json");
+    let request_path = directory.path().join("quotes.json");
+    let mut preferences: serde_json::Value =
+        serde_json::from_str(include_str!("../examples/ticket-preferences.json")).unwrap();
+    preferences["defaults"]["max_total_minor"] = 400_000.into();
+    std::fs::write(&preferences_path, serde_json::to_vec(&preferences).unwrap()).unwrap();
+    let at = chrono::Utc::now().timestamp_millis();
+    let event_url = "https://www.ticketmaster.cz/event/synthetic-vstupenky/1234567890";
+    let request = serde_json::json!({
+        "intent":{"event_url":event_url,"expected_event_start":"2027-06-01T19:00:00+02:00","quantity":null},
+        "context":{"session_id":"fixture-session","document_id":"fixture-document"},
+        "snapshot":{
+            "event_url":event_url,"event_start":"2027-06-01T19:00:00+02:00",
+            "session_id":"fixture-session","document_id":"fixture-document",
+            "requested_quantity":2,"observed_at_ms":at,"expires_at_ms":at+5000,
+            "coverage":"complete_for_request","groups":[{
+                "id":"exact-pair","quantity":2,"kind":"seated","availability":"confirmed",
+                "evidence":"exact_group","adjacency":"site_confirmed",
+                "seats":[{"id":"s1","section":"A","row":"1"},{"id":"s2","section":"A","row":"1"}],
+                "price":{"amount_minor":450_000,"currency":"CZK","basis":"group_total","fees":"complete"}
+            }]
+        }
+    });
+    std::fs::write(&request_path, serde_json::to_vec(&request).unwrap()).unwrap();
+    let run = || {
+        Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+            .current_dir(directory.path())
+            .env_remove("TICKETMASTER_API_KEY")
+            .env_remove("DISCORD_BOT_TOKEN")
+            .args([
+                "cart-plan",
+                request_path.to_str().unwrap(),
+                "--preferences",
+                preferences_path.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap()
+    };
+    let capped = run();
+    assert!(
+        capped.status.success(),
+        "{}",
+        String::from_utf8_lossy(&capped.stderr)
+    );
+    let capped: serde_json::Value = serde_json::from_slice(&capped.stdout).unwrap();
+    assert_eq!(
+        capped["effective_preferences"]["preferences"]["quantity"],
+        2
+    );
+    assert_eq!(capped["decision"]["reason"], "no_eligible_group");
+    assert_eq!(capped["decision"]["reservation_authorized"], false);
+    preferences["defaults"]["max_total_minor"] = serde_json::Value::Null;
+    std::fs::write(&preferences_path, serde_json::to_vec(&preferences).unwrap()).unwrap();
+    let uncapped = run();
+    assert!(
+        uncapped.status.success(),
+        "{}",
+        String::from_utf8_lossy(&uncapped.stderr)
+    );
+    let uncapped: serde_json::Value = serde_json::from_slice(&uncapped.stdout).unwrap();
+    assert_eq!(uncapped["decision"]["outcome"], "planned");
+    assert_eq!(uncapped["decision"]["selected"]["group_id"], "exact-pair");
+    assert_eq!(uncapped["decision"]["reservation_authorized"], false);
+    preferences["defaults"]["quantity"] = 3.into();
+    std::fs::write(&preferences_path, serde_json::to_vec(&preferences).unwrap()).unwrap();
+    let mismatch = run();
+    assert!(!mismatch.status.success());
+    assert!(mismatch.stdout.is_empty());
+    assert!(!directory.path().join("data").exists());
+}
+
+#[test]
+fn cart_preferences_rejects_unknown_fields_and_session_urls_without_echoing_them() {
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("preferences.json");
+    let mut preferences: serde_json::Value =
+        serde_json::from_str(include_str!("../examples/ticket-preferences.json")).unwrap();
+    preferences["secret-marker"] = "private-fixture-marker".into();
+    std::fs::write(&file, serde_json::to_vec(&preferences).unwrap()).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+        .current_dir(directory.path())
+        .args(["cart-preferences", "--file", file.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("private-fixture-marker"));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("secret-marker"));
+    let output = Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+        .current_dir(directory.path())
+        .args([
+            "cart-preferences",
+            "--event-url",
+            "https://secure.ticketmaster.cz/payment?token=private-fixture-marker",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("private-fixture-marker"));
+    assert!(!directory.path().join("data").exists());
+}
+
+#[test]
 fn venue_presets_import_idempotently_and_match_without_a_key_or_network() {
     let directory = tempfile::tempdir().unwrap();
     let seed = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/venue-presets.json");

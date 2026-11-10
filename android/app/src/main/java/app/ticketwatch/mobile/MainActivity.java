@@ -530,6 +530,12 @@ public final class MainActivity extends Activity {
         gap(card, 8);
         card.addView(text(eventMeta(watch.date, watch.city, watch.country), 13, TEXT, false));
         if (!blank(watch.venue)) card.addView(text(watch.venue, 12, MUTED, false));
+        if (TicketPreferencesStore.supportsEvent(watch.url)) {
+            try {
+                TicketPreferencesStore ticketPreferences = new TicketPreferencesStore(this);
+                paragraph(card, "Saved preferences: " + ticketPreferences.effective(watch.url).summary());
+            } catch (RuntimeException error) { paragraph(card, "Saved ticket preferences could not be read."); }
+        }
         if (!watch.demo) {
             VenueStore.Preset preset = new VenueStore(this).selected(watch);
             if (preset != null) {
@@ -571,6 +577,13 @@ public final class MainActivity extends Activity {
                 startActivity(intent);
             }).setTag("watch_venue_" + watch.id);
         }
+        if (TicketPreferencesStore.supportsEvent(watch.url)) {
+            action(card, "Ticket preferences", false, () -> {
+                Intent intent = new Intent(this, TicketPreferencesActivity.class);
+                intent.putExtra("watch_id", watch.id);
+                startActivity(intent);
+            }).setTag("watch_preferences_" + watch.id);
+        }
         TextView remove = text("Remove watch", 12, MUTED, false);
         remove.setPadding(0, dp(18), 0, dp(7));
         remove.setGravity(Gravity.CENTER);
@@ -589,6 +602,14 @@ public final class MainActivity extends Activity {
     private void renderSettings() {
         title(body, "Settings");
         paragraph(body, "Set up search and choose how you get alerts. Credentials are encrypted on this phone.");
+        gap(body, 15);
+        LinearLayout ticketDefaults = card();
+        ticketDefaults.addView(text("Your ticket defaults", 19, TEXT, true));
+        paragraph(ticketDefaults, "Choose quantity, a total price limit, ticket types and seating preferences. You can override these for each event.");
+        action(ticketDefaults, "Edit ticket preferences", false,
+                () -> startActivity(new Intent(this, TicketPreferencesActivity.class)))
+                .setTag("ticket_preferences_defaults");
+        body.addView(ticketDefaults);
         gap(body, 15);
         LinearLayout api = card();
         api.addView(text("1 · Event search", 19, TEXT, true));

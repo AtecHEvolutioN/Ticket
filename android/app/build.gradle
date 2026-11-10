@@ -11,8 +11,8 @@ android {
         applicationId 'app.ticketwatch.mobile'
         minSdk 26
         targetSdk 35
-        versionCode 6
-        versionName '0.6.0-test'
+        versionCode 7
+        versionName '0.7.0-test'
         testInstrumentationRunner 'app.ticketwatch.mobile.SmokeInstrumentation'
     }
     compileOptions {

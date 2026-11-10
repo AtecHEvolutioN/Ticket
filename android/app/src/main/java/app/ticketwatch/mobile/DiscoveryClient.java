@@ -357,7 +357,7 @@ public final class DiscoveryClient {
     private static boolean hasControls(String value) {
         for (int i = 0; i < value.length(); i++) {
             char character = value.charAt(i);
-            if (character <= 0x1f || character == 0x7f) return true;
+            if (Character.isISOControl(character)) return true;
         }
         return false;
     }

@@ -39,11 +39,50 @@ The app uses a compact dark interface with persistent bottom navigation:
   references, and notes that can be selected for another event at the same venue.
 - **Settings:** separate search-key, phone-notification, and Discord setup cards.
   Saved credentials never appear in the input fields.
+- **Ticket preferences:** global defaults and event overrides for ticket count,
+  total budget, adjacency, ticket types, sections, rows, and category IDs.
 - **Page inspector:** event details, status and check time, an embedded public page,
   and a collapsible advanced selector editor.
 
 The refreshed build uses the same local signing certificate as earlier test builds, so it
 can be installed as an update without removing saved settings.
+
+## Choose your tickets
+
+Version 0.7.0-test adds **Settings → Edit ticket preferences**. The starting defaults
+are **2 tickets**, **adjacent seats**, **cheapest eligible group**, **CZK**, and no
+total budget limit. Quantity is editable from 1 to 20; the event's own purchase
+limit still applies. A budget is the complete group total including fees, entered
+as a decimal amount. No currency conversion is performed. The current Czech
+desktop planner accepts CZK; other currencies can be saved but cannot currently
+be applied to Czech cart planning.
+
+Open a saved event's **Ticket preferences** from its watch card or page inspector.
+Clear **Use my default preferences**, change the fields, and tap **Save for this
+event**. An override is a complete set of choices: later default changes do not
+alter it. Re-enable **Use my default preferences** and save to remove the override.
+Preferences are stored separately from watch observations, so subsequent page
+checks and event metadata updates cannot overwrite them. Slug, locale, and `www`
+aliases for the same site/event share the override; different sites remain separate.
+
+Ticket-type, section, and row filters accept one exact label per line; capitalization
+and repeated Unicode whitespace are ignored. Blank lists allow any value. When a
+page check has supplied ticket-type labels, **Choose types from last page check**
+offers those labels for selection. They are observations, not a promise of current
+inventory. Advanced category IDs must match the desktop event catalog exactly.
+Missing label evidence cannot satisfy a selected filter. Restricted-view and
+accessibility suitability are not currently verified by the planner.
+
+**Save & export preferences** opens Android's file picker to write
+`ticket-preferences.json`. The file contains a versioned set of defaults and public
+event overrides; it includes no API keys, bot tokens, account sessions, or payment
+data. See [desktop preference usage](../docs/ticket-preferences.md) for applying it
+to offline cart planning. A saved preference is not permission to place a live hold.
+
+This screen saves and exports choices. **Automatic carting is not active in the
+Android app**, existing availability alerts are not filtered by these preferences,
+and the app does not synchronize them to the Rust service. Changing quantities
+or filters here never clicks Find tickets or submits a reservation.
 
 ## Reuse a venue preset
 

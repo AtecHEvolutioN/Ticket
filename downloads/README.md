@@ -1,4 +1,8 @@
-# Tested downloads — 0.6.0-test
+# Archived downloads — 0.6.0-test
+
+For the current APK with editable ticket preferences and the matching Rust planner,
+use the [0.7.0-test release](https://github.com/AtecHEvolutioN/Ticket/releases/tag/v0.7.0-test).
+The files in this directory remain the older 0.6.0-test builds.
 
 These are the builds verified locally for this test release. Use each file's matching `.sha256` file to verify the download.
 

@@ -185,6 +185,17 @@ public final class PageActivity extends Activity {
         add(body, ticketDetails, 16);
         renderTicketDetails();
 
+        if (TicketPreferencesStore.supportsEvent(watch.url)) {
+            Button preferences = button("Ticket preferences", false);
+            preferences.setTag("page_ticket_preferences");
+            preferences.setOnClickListener(view -> {
+                Intent intent = new Intent(this, TicketPreferencesActivity.class);
+                intent.putExtra("watch_id", watch.id);
+                startActivity(intent);
+            });
+            add(body, preferences, 12);
+        }
+
         LinearLayout statusCard = column();
         statusCard.setPadding(dp(16), dp(15), dp(16), dp(15));
         statusCard.setBackground(surface(CARD, BORDER, 16));

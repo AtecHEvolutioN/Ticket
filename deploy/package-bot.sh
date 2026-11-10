@@ -25,7 +25,7 @@ for entry in Cargo.toml Cargo.lock package.json package-lock.json config.example
     cp "$repo_dir/$entry" "$bundle_dir/$entry"
 done
 # These reviewed public screenshots/data support the capture and coverage reports. Never copy raw HTML.
-for entry in korn-live-tickets.png korn-live-resale.png korn-live-capture.json ticketmaster-coverage.json coverage-czech.png coverage-dutch.png coverage-spanish.png android-venues.png; do
+for entry in korn-live-tickets.png korn-live-resale.png korn-live-capture.json ticketmaster-coverage.json coverage-czech.png coverage-dutch.png coverage-spanish.png android-venues.png android-ticket-preferences.png android-event-preferences.png android-rust-preferences-contract.json; do
     if [[ -f "$repo_dir/dist/$entry" ]]; then
         mkdir -p "$bundle_dir/dist"
         cp "$repo_dir/dist/$entry" "$bundle_dir/dist/$entry"
@@ -68,6 +68,15 @@ To populate the local venue registry, run:
    ./target/release/ticket-watch venues import examples/venue-presets.json
 Read docs/venue-presets.md for matching and separate seating-layout references.
 The 21 starter venue records contain no invented seating maps or live inventory.
+
+Ticket preferences default to two adjacent tickets and the cheapest eligible group.
+Export defaults and per-event choices from Android Settings > Ticket preferences,
+then validate the saved file with:
+   ./target/release/ticket-watch cart-preferences --file ticket-preferences.json
+Apply it to supplied quotes with:
+   ./target/release/ticket-watch cart-plan quotes.json --preferences ticket-preferences.json
+Read docs/ticket-preferences.md for quantity, budget, category and seat filters.
+This remains offline planning: phone/server syncing and live carting are not active.
 
 The reusable regional adapter opens known best-available tabs and extracts
 category ranges plus explicit resale listing quantities for any event using that

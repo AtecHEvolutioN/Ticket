@@ -1,0 +1,75 @@
+{
+  "source": "actual_android_ui_and_store_exports_to_rust_cli",
+  "checked_at_utc": "2026-11-10T08:55:23Z",
+  "provider_requests": 0,
+  "reservations": 0,
+  "inputs": [
+    {
+      "path": "dist/android-ticket-preferences-ui.json",
+      "sha256": "cdafa0941edebfd5f0585b3242b8a69f2414230004ce907de1a5051fa88d8118"
+    },
+    {
+      "path": "dist/android-ticket-preferences.json",
+      "sha256": "dff063c2f12b6e4e770f2e8687c043917b61d35a63f09ea50e066e8f18cc87c1"
+    }
+  ],
+  "passed": true,
+  "checks": [
+    {
+      "check": "Both actual Android exports parse without losing fields or changing numeric amounts",
+      "passed": true
+    },
+    {
+      "check": "Public-host and renamed-slug alias selects the full event override",
+      "passed": true
+    },
+    {
+      "check": "Sibling event inherits all global settings without override leakage",
+      "passed": true
+    },
+    {
+      "check": "Edited event quantity3 and exact CZK total825000 minor units survive export",
+      "passed": true
+    },
+    {
+      "check": "Actual exported exact category/type/section/row filters exclude cheaper nonmatches before ranking",
+      "passed": true
+    },
+    {
+      "check": "Unicode case/whitespace label matching works across Android export and Rust",
+      "passed": true
+    },
+    {
+      "check": "Exported adjacency=false permits exact separated seated group without authorizing reservation",
+      "passed": true
+    },
+    {
+      "check": "Actual store export adjacency=true refuses the same separated group",
+      "passed": true
+    },
+    {
+      "check": "Missing category evidence prevents a complete cheapest claim",
+      "passed": true
+    },
+    {
+      "check": "Group total one minor unit above exported cap is refused",
+      "passed": true
+    },
+    {
+      "check": "Unknown complete fees cannot satisfy exported total budget",
+      "passed": true
+    },
+    {
+      "check": "Captured quantity2 is rejected rather than relabeled as requested quantity3",
+      "passed": true
+    },
+    {
+      "check": "Different event quote cannot reuse the selected event override",
+      "passed": true
+    },
+    {
+      "check": "Unsupported currency errors explicitly without conversion or ignored preference",
+      "passed": true
+    }
+  ]
+}

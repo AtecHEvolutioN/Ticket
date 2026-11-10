@@ -1,12 +1,12 @@
-//! Pure, side-effect-free planning for one Czech adjacent-seat request.
+//! Pure, side-effect-free planning for one Czech seated-ticket request.
 //!
 //! This module evaluates supplied quote claims, not independently verified live
 //! inventory. A browser runner must obtain and revalidate those claims in the
 //! same session/document before any separate reservation step. JSON files are
 //! useful for review and fixtures; they cannot authorize a live reservation.
 //! Neither category ranges, purchase limits, nor consecutive seat numbers prove
-//! that a requested adjacent group exists. The conservative first implementation
-//! accepts only explicitly confirmed seated groups in one section and row.
+//! that a requested adjacent group exists. Only exact seated groups qualify;
+//! adjacency is required by default and may be explicitly disabled by the user.
 
 use std::collections::HashSet;
 
@@ -43,6 +43,36 @@ pub struct CartIntent {
     pub quantity: Option<u32>,
     #[serde(default)]
     pub max_total_minor: Option<u64>,
+    #[serde(default = "default_require_adjacent", skip_serializing_if = "is_true")]
+    pub require_adjacent: bool,
+    #[serde(default, skip_serializing_if = "CartFilters::is_empty")]
+    pub filters: CartFilters,
+}
+
+fn default_require_adjacent() -> bool {
+    true
+}
+fn is_true(value: &bool) -> bool {
+    *value
+}
+
+/// Empty allow-lists impose no additional restriction. IDs compare exactly;
+/// human-readable type, section and row labels ignore case and extra whitespace.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct CartFilters {
+    pub allowed_category_ids: Vec<String>,
+    pub allowed_ticket_types: Vec<String>,
+    pub allowed_sections: Vec<String>,
+    pub allowed_rows: Vec<String>,
+}
+impl CartFilters {
+    pub fn is_empty(&self) -> bool {
+        self.allowed_category_ids.is_empty()
+            && self.allowed_ticket_types.is_empty()
+            && self.allowed_sections.is_empty()
+            && self.allowed_rows.is_empty()
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -85,6 +115,10 @@ pub enum Coverage {
 #[serde(deny_unknown_fields)]
 pub struct GroupQuote {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_type: Option<String>,
     pub quantity: u32,
     #[serde(default)]
     pub kind: SeatingKind,
@@ -244,6 +278,12 @@ pub enum GroupRejectionReason {
     CompleteFeesRequired,
     AmountMissing,
     AboveMaximumTotal,
+    CategoryMismatch,
+    CategoryUnconfirmed,
+    TicketTypeMismatch,
+    TicketTypeUnconfirmed,
+    SectionMismatch,
+    RowMismatch,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -255,6 +295,8 @@ pub struct GroupRejection {
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct SelectedGroup {
     pub group_id: String,
+    pub category_id: Option<String>,
+    pub ticket_type: Option<String>,
     /// Canonical UTC performance start from supplied evidence, when known.
     /// Matching this claim never authenticates the provider or its inventory.
     pub event_start: Option<String>,
@@ -326,7 +368,13 @@ pub fn plan(request: &CartPlanRequest, now_ms: i64) -> CartDecision {
     let mut candidates = Vec::new();
     let mut unresolved = false;
     for group in &request.snapshot.groups {
-        match candidate(group, quantity, request.intent.max_total_minor) {
+        match candidate(
+            group,
+            quantity,
+            request.intent.max_total_minor,
+            request.intent.require_adjacent,
+            &request.intent.filters,
+        ) {
             Ok(total) => candidates.push((total, group)),
             Err((reason, uncertain)) => {
                 unresolved |= uncertain;
@@ -370,6 +418,8 @@ pub fn plan(request: &CartPlanRequest, now_ms: i64) -> CartDecision {
         }),
         selected: Some(SelectedGroup {
             group_id: group.id.clone(),
+            category_id: group.category_id.clone(),
+            ticket_type: group.ticket_type.clone(),
             event_start: request
                 .snapshot
                 .event_start
@@ -464,6 +514,7 @@ fn validate_request(request: &CartPlanRequest, now_ms: i64) -> Result<(), Decisi
         .intent
         .max_total_minor
         .is_some_and(|v| v > MAX_EXACT_INTEGER)
+        || !valid_filters(&request.intent.filters)
         || snapshot.groups.len() > MAX_GROUPS
     {
         return Err(DecisionReason::InvalidInputBounds);
@@ -471,6 +522,8 @@ fn validate_request(request: &CartPlanRequest, now_ms: i64) -> Result<(), Decisi
     let mut ids = HashSet::new();
     for group in &snapshot.groups {
         if !valid_id(&group.id)
+            || group.category_id.as_ref().is_some_and(|v| !valid_id(v))
+            || group.ticket_type.as_ref().is_some_and(|v| !valid_label(v))
             || group.quantity == 0
             || group.quantity > MAX_QUANTITY
             || group.seats.len() > MAX_QUANTITY as usize
@@ -562,7 +615,7 @@ fn valid_label(value: &str) -> bool {
     !value.trim().is_empty() && value.len() <= 128 && !value.chars().any(char::is_control)
 }
 
-fn normalized_label(value: &str) -> String {
+pub(crate) fn normalized_label(value: &str) -> String {
     value
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -570,13 +623,70 @@ fn normalized_label(value: &str) -> String {
         .to_lowercase()
 }
 
+pub(crate) fn valid_filters(filters: &CartFilters) -> bool {
+    if filters.allowed_category_ids.len() > 100
+        || filters.allowed_category_ids.iter().any(|v| !valid_id(v))
+        || filters
+            .allowed_category_ids
+            .iter()
+            .collect::<HashSet<_>>()
+            .len()
+            != filters.allowed_category_ids.len()
+    {
+        return false;
+    }
+    [
+        &filters.allowed_ticket_types,
+        &filters.allowed_sections,
+        &filters.allowed_rows,
+    ]
+    .iter()
+    .all(|values| {
+        values.len() <= 100
+            && values.iter().all(|v| valid_label(v))
+            && values
+                .iter()
+                .map(|v| normalized_label(v))
+                .collect::<HashSet<_>>()
+                .len()
+                == values.len()
+    })
+}
+
+pub(crate) fn label_allowed(allowed: &[String], value: &str) -> bool {
+    allowed.is_empty()
+        || allowed
+            .iter()
+            .any(|candidate| normalized_label(candidate) == normalized_label(value))
+}
+
 /// The boolean flags unresolved evidence that could conceal a cheaper match.
 fn candidate(
     group: &GroupQuote,
     quantity: u32,
     max_total: Option<u64>,
+    require_adjacent: bool,
+    filters: &CartFilters,
 ) -> Result<u64, (GroupRejectionReason, bool)> {
     use GroupRejectionReason as R;
+    if !filters.allowed_category_ids.is_empty() {
+        match &group.category_id {
+            Some(id) if !filters.allowed_category_ids.contains(id) => {
+                return Err((R::CategoryMismatch, false));
+            }
+            None => return Err((R::CategoryUnconfirmed, true)),
+            _ => {}
+        }
+    }
+    if !filters.allowed_ticket_types.is_empty() {
+        match &group.ticket_type {
+            Some(label) if !label_allowed(&filters.allowed_ticket_types, label) => {
+                return Err((R::TicketTypeMismatch, false));
+            }
+            None => return Err((R::TicketTypeUnconfirmed, true)),
+            _ => {}
+        }
+    }
     // A category/purchase-limit quantity is not an exact group size. It cannot
     // exclude a potentially cheaper match, even when it differs from the intent.
     if group.evidence != QuoteEvidence::ExactGroup {
@@ -588,7 +698,7 @@ fn candidate(
     if group.availability == GroupAvailability::Unavailable {
         return Err((R::Unavailable, false));
     }
-    if group.adjacency == AdjacencyEvidence::NotAdjacent {
+    if require_adjacent && group.adjacency == AdjacencyEvidence::NotAdjacent {
         return Err((R::NotAdjacent, false));
     }
     if group.kind != SeatingKind::Seated {
@@ -621,14 +731,30 @@ fn candidate(
     if group.quantity != quantity {
         return Err((R::QuantityMismatch, false));
     }
+    if group
+        .seats
+        .iter()
+        .any(|seat| !label_allowed(&filters.allowed_sections, &seat.section))
+    {
+        return Err((R::SectionMismatch, false));
+    }
+    if group
+        .seats
+        .iter()
+        .any(|seat| !label_allowed(&filters.allowed_rows, &seat.row))
+    {
+        return Err((R::RowMismatch, false));
+    }
     let first = &group.seats[0];
-    if group.seats.iter().any(|seat| {
-        normalized_label(&seat.section) != normalized_label(&first.section)
-            || normalized_label(&seat.row) != normalized_label(&first.row)
-    }) {
+    if require_adjacent
+        && group.seats.iter().any(|seat| {
+            normalized_label(&seat.section) != normalized_label(&first.section)
+                || normalized_label(&seat.row) != normalized_label(&first.row)
+        })
+    {
         return Err((R::DifferentSectionOrRow, true));
     }
-    if group.adjacency != AdjacencyEvidence::SiteConfirmed {
+    if require_adjacent && group.adjacency != AdjacencyEvidence::SiteConfirmed {
         return Err((R::AdjacencyUnconfirmed, true));
     }
     if group.price.basis != PriceBasis::GroupTotal {
@@ -656,6 +782,8 @@ mod tests {
     fn group(id: &str, total: u64) -> GroupQuote {
         GroupQuote {
             id: id.to_owned(),
+            category_id: None,
+            ticket_type: None,
             quantity: 2,
             kind: SeatingKind::Seated,
             availability: GroupAvailability::Confirmed,
@@ -692,6 +820,8 @@ mod tests {
                 expected_event_start: Some("2026-11-16T18:00:00+01:00".into()),
                 quantity: Some(2),
                 max_total_minor: None,
+                require_adjacent: true,
+                filters: CartFilters::default(),
             },
             context: BrowserContext {
                 session_id: "browser-1".into(),

@@ -22,17 +22,29 @@ import java.io.FileOutputStream;
 /** Runs inside a fresh emulator. No network, genuine credentials, or Discord sends. */
 public final class SmokeInstrumentation extends Instrumentation {
     private int assertions;
+    private boolean preferencesOnly;
     private void check(boolean condition, String label) {
         assertions++;
         if (!condition) throw new AssertionError(label);
     }
 
-    @Override public void onCreate(Bundle arguments) { super.onCreate(arguments); start(); }
+    @Override public void onCreate(Bundle arguments) {
+        super.onCreate(arguments);
+        preferencesOnly = arguments != null && "preferences".equals(arguments.getString("suite"));
+        start();
+    }
 
     @Override public void onStart() {
         Bundle result = new Bundle();
         try {
             Context context = getTargetContext();
+            if (preferencesOnly) {
+                assertions += TicketPreferencesChecks.run(context);
+                assertions += TicketPreferencesChecks.ui(this);
+                result.putString("stream", "\nPASS: " + assertions + " offline Android preference assertions. No live requests.\n");
+                finish(Activity.RESULT_OK, result);
+                return;
+            }
             urlRules();
             pageSignals();
             catalogSchema();
@@ -46,6 +58,8 @@ public final class SmokeInstrumentation extends Instrumentation {
             assertions += EuropeTicketChecks.browser(this);
             assertions += VenueChecks.run(context);
             assertions += VenueChecks.ui(this);
+            assertions += TicketPreferencesChecks.run(context);
+            assertions += TicketPreferencesChecks.ui(this);
             uiFlow(context);
             result.putString("stream", "\nPASS: " + assertions + " offline Android assertions. No live requests.\n");
             finish(Activity.RESULT_OK, result);

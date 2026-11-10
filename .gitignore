@@ -24,6 +24,11 @@
 !/dist/android-settings.png
 !/dist/android-tickets.png
 !/dist/android-venues.png
+!/dist/android-ticket-preferences.png
+!/dist/android-event-preferences.png
+!/dist/android-ticket-preferences.json
+!/dist/android-ticket-preferences-ui.json
+!/dist/android-rust-preferences-contract.json
 !/dist/android-watchlist.png
 !/dist/android-instrumentation-result.txt
 !/dist/android-test-report.txt

@@ -18,7 +18,7 @@ inventory alerts and map observations. Unrelated database files are rejected.
 1. Call `begin` with an application-generated attempt ID and a fresh
    `CartPlanRequest`. The journal recomputes the planner decision. It requires an
    explicit quantity, matching expected/source performance instants,
-   site-confirmed adjacency, complete CZK fees and a complete
+   site-confirmed adjacency when required, complete CZK fees and a complete
    search that supports the cheapest group for that request. Displayed map prices
    do not qualify. Only one active attempt per event can exist in a journal.
 2. Commit `mark_dispatch_started` immediately before any action that might reserve
@@ -66,7 +66,9 @@ sequence; it does not invent a complete quote before the site returns one.
 1. `begin_search` records a `NativeSearchRequest`: explicit quantity, matching
    expected/source event starts, application session/document/configuration IDs,
    selected category and exact configured price filter, CZK currency and optional
-   total ceiling. Both adjacent and cheapest requirements must be enabled.
+   total ceiling. Cheapest ranking is required; adjacency defaults to required
+   and can be explicitly disabled through the saved selection preferences.
+   Category/type and section/row filters are persisted with the request.
    Configuration freshness is capped at five seconds. The configured unit price
    is a reference, not proof of stock, complete fees or the cheapest available group.
 2. Commit `mark_search_dispatch_started` before Find tickets. The quoted and native
@@ -76,7 +78,7 @@ sequence; it does not invent a complete quote before the site returns one.
    form document and the outcome document have separate IDs because the native
    flow may navigate. Both remain bound to the same application session, attempt
    and configuration.
-4. A matching hold must have the requested seats/quantity, affirmative adjacency,
+4. A matching hold must have the requested seats/quantity, affirmative adjacency when required,
    exact filters, complete total and an actual expiry. Classifying it as cheapest
    also requires complete **post-action** ranking evidence. The existing planner
    reevaluates that snapshot and its exact winning group. This never becomes a
