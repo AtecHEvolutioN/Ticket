@@ -132,24 +132,63 @@ impl Discovery {
         city: Option<&str>,
         page: u32,
     ) -> Result<Value> {
+        self.events_query_page(Some(attraction_id), country, city, page)
+            .await
+    }
+
+    /// One bounded country-wide catalog page, without an artist filter.
+    /// The country's whole catalog can exceed Discovery's deep-paging ceiling.
+    pub async fn events_country_page(
+        &mut self,
+        country: &str,
+        city: Option<&str>,
+        page: u32,
+    ) -> Result<Value> {
+        self.events_query_page(None, Some(country), city, page)
+            .await
+    }
+
+    async fn events_query_page(
+        &mut self,
+        attraction_id: Option<&str>,
+        country: Option<&str>,
+        city: Option<&str>,
+        page: u32,
+    ) -> Result<Value> {
         if page >= 10 {
             bail!(
                 "Event page must be 0–9; Discovery deep paging is limited to the first 1,000 results"
             );
         }
-        let attraction_id = input_text(attraction_id, "Attraction ID", 160)?;
-        if !attraction_id
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
-        {
-            bail!("Attraction ID must contain only letters, digits, hyphens, or underscores");
-        }
+        let attraction_id = attraction_id
+            .map(|value| -> Result<String> {
+                let id = input_text(value, "Attraction ID", 160)?;
+                if !id
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+                {
+                    bail!(
+                        "Attraction ID must contain only letters, digits, hyphens, or underscores"
+                    );
+                }
+                Ok(id)
+            })
+            .transpose()?;
         let mut params = vec![
-            ("attractionId", attraction_id.clone()),
             ("source", "ticketmaster".into()),
             ("size", "100".into()),
             ("page", page.to_string()),
         ];
+        if let Some(id) = &attraction_id {
+            params.push(("attractionId", id.clone()));
+        } else {
+            if country.is_none() {
+                bail!("Country-wide event discovery requires an explicit country");
+            }
+            // Stable date ordering keeps a bounded scan useful without implying
+            // that events beyond the provider's first 1,000 results were read.
+            params.push(("sort", "date,asc".into()));
+        }
         if let Some(country) = country {
             if country.len() != 2 || !country.bytes().all(|b| b.is_ascii_uppercase()) {
                 bail!("Country must be a two-letter uppercase code such as PL");
@@ -167,6 +206,11 @@ impl Discovery {
             .collect::<Vec<_>>();
         let mut output = envelope(&raw);
         output["kind"] = json!("event_search");
+        output["selection_scope"] = json!(if attraction_id.is_some() {
+            "artist"
+        } else {
+            "country"
+        });
         output["attraction_id"] = json!(attraction_id);
         output["country"] = json!(country);
         output["city"] = json!(city);
@@ -427,6 +471,19 @@ fn normalize_event(event: &Value) -> Value {
                     .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
         })
         .collect::<std::collections::BTreeSet<_>>();
+    let attractions = event
+        .pointer("/_embedded/attractions")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .take(100)
+        .filter_map(|item| {
+            let id = item.get("id")?.as_str()?;
+            attraction_ids
+                .contains(id)
+                .then(|| json!({"id": id, "name": text(item.get("name"), 400)}))
+        })
+        .collect::<Vec<_>>();
     let price_ranges = event
         .get("priceRanges")
         .and_then(Value::as_array)
@@ -497,6 +554,7 @@ fn normalize_event(event: &Value) -> Value {
     json!({
         "id": text(event.get("id"), 160), "name": text(event.get("name"), 400),
         "attraction_ids": attraction_ids,
+        "attractions": attractions,
         "url": public_event_url(event.get("url")), "event_status": text(status, 100),
         "inventory_verified": false,
         "price_ranges": price_ranges,
@@ -664,6 +722,99 @@ mod tests {
         assert_eq!(output["inventory_verified"], false);
         assert_eq!(output["has_more"], false);
         assert!(!output.to_string().contains(FAKE_KEY));
+    }
+
+    #[tokio::test]
+    async fn country_catalog_query_omits_artist_filter_and_reports_bounded_scope() {
+        let body = json!({"_embedded":{"events":[{
+            "id":"nl-event", "name":"Synthetic Dutch festival",
+            "url":"https://www.ticketmaster.nl/event/synthetic/12345678",
+            "_embedded":{"attractions":[{"id":"artist-1","name":"First Artist"},{"id":"artist-2","name":"Second Artist"}]},
+            "internal":FAKE_KEY
+        }]},"page":{"number":3,"size":100,"totalElements":1500,"totalPages":15}}).to_string();
+        let (mut client, request) = mock("200 OK", "", &body).await;
+        let output = client
+            .events_country_page("NL", Some("Amsterdam"), 3)
+            .await
+            .unwrap();
+        let params = request_params(&request.await.unwrap());
+        assert_eq!(params["countryCode"], "NL");
+        assert_eq!(params["city"], "Amsterdam");
+        assert_eq!(params["source"], "ticketmaster");
+        assert_eq!(params["size"], "100");
+        assert_eq!(params["page"], "3");
+        assert_eq!(params["sort"], "date,asc");
+        assert!(!params.contains_key("attractionId"));
+        assert_eq!(output["selection_scope"], "country");
+        assert!(output["attraction_id"].is_null());
+        assert_eq!(output["has_more"], true);
+        assert_eq!(output["next_page"], 4);
+        assert_eq!(output["inventory_verified"], false);
+        assert_eq!(
+            output["events"][0]["attractions"],
+            json!([
+                {"id":"artist-1","name":"First Artist"},
+                {"id":"artist-2","name":"Second Artist"}
+            ])
+        );
+        assert!(!output.to_string().contains(FAKE_KEY));
+    }
+
+    #[tokio::test]
+    async fn country_catalog_validation_never_requests_an_unbounded_query() {
+        let (mut client, mut request) = mock("200 OK", "", "{}").await;
+        for country in ["", "nl", "Netherlands", "NL&apikey=other", " NL"] {
+            assert!(client.events_country_page(country, None, 0).await.is_err());
+        }
+        assert!(client.events_country_page("NL", None, 10).await.is_err());
+        assert!(
+            client
+                .events_country_page("NL", Some(" "), 0)
+                .await
+                .is_err()
+        );
+        assert!(client.events_query_page(None, None, None, 0).await.is_err());
+        // The unchanged artist API must never interpret an empty ID as all artists.
+        assert!(client.events_page("", Some("NL"), None, 0).await.is_err());
+        assert!(matches!(
+            request.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+    }
+
+    #[test]
+    fn country_event_artist_names_are_bounded_metadata() {
+        let mut artists = vec![
+            json!({"id":"valid-artist", "name":"Å".repeat(500), "private":FAKE_KEY}),
+            json!({"id":"control-name", "name":"First\nArtist\tName"}),
+            json!({"id":"invalid&id", "name":"Reject invalid identity"}),
+            json!({"id":"", "name":"Reject empty identity"}),
+            json!({"id":"missing-name"}),
+        ];
+        artists.extend(
+            (0..105).map(
+                |index| json!({"id":format!("artist-{index}"),"name":format!("Artist {index}")}),
+            ),
+        );
+        let event = normalize_event(&json!({"_embedded":{"attractions":artists}}));
+        let names = event["attractions"].as_array().unwrap();
+        assert!(names.len() <= 100);
+        assert_eq!(names[0]["name"].as_str().unwrap().chars().count(), 400);
+        assert_eq!(names[1]["name"], "FirstArtistName");
+        assert!(
+            names
+                .iter()
+                .all(|artist| artist["id"] != "invalid&id" && artist["id"] != "")
+        );
+        assert!(
+            names
+                .iter()
+                .find(|artist| artist["id"] == "missing-name")
+                .unwrap()["name"]
+                .is_null()
+        );
+        assert!(!event.to_string().contains(FAKE_KEY));
+        assert_eq!(normalize_event(&json!({}))["attractions"], json!([]));
     }
 
     #[test]

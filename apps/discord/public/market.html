@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ticket Watch · Price history</title>
+  <link rel="stylesheet" href="market.css">
+  <!-- HISTORY_DATA -->
+  <script src="market.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="./"><span class="brand-icon" aria-hidden="true">↗</span> Ticket Watch <span class="brand-divider">/</span> <span class="brand-subtitle">Market history</span></a>
+      <span class="local-badge"><span aria-hidden="true">●</span> Local data · no uploads</span>
+    </header>
+    <main>
+      <section class="intro" aria-labelledby="page-title">
+        <div><p class="eyebrow">OBSERVE THE MARKET</p><h1 id="page-title">Every price has a history.</h1><p class="intro-copy">Explore recorded ticket asking prices and listing counts. One event, one source, one comparable ticket series.</p></div>
+        <div class="import-actions"><label class="button primary" for="history-file">Open history file <span aria-hidden="true">↗</span></label><input id="history-file" type="file" accept=".json,application/json"><button class="button secondary" id="demo-button" type="button">Try synthetic demo</button></div>
+      </section>
+      <p class="load-status" id="load-status" role="status" aria-live="polite">Open a Ticket Watch history JSON export to begin. Your file stays on this device.</p>
+      <div class="error-banner" id="error-banner" role="alert" hidden></div>
+      <section class="market-panel" aria-labelledby="event-heading">
+        <div class="event-header"><div><p class="eyebrow" id="event-context">NO HISTORY LOADED</p><h2 id="event-heading">Choose your event.</h2><p id="event-location" class="muted">Recorded observations will appear here.</p></div><div class="event-status"><span class="status-badge" id="snapshot-badge">Offline viewer</span><a id="event-link" target="_blank" rel="noopener noreferrer" hidden>Event page ↗</a></div></div>
+        <div class="selectors">
+          <label>Event<select id="event-select" disabled><option>Load a history export</option></select></label>
+          <label>Observation source<select id="source-select" disabled><option>No source</option></select></label>
+          <label class="series-select">Ticket series<select id="series-select" disabled><option>No series</option></select></label>
+        </div>
+        <div class="series-tags" id="series-tags" aria-label="Selected series dimensions"></div>
+        <div class="metrics">
+          <div><p id="price-label">Latest observed lowest ask</p><strong id="price-value">—</strong><span id="price-subtitle">No data loaded</span></div>
+          <div><p>Window change</p><strong id="change-value">—</strong><span>First to last recorded ask</span></div>
+          <div><p id="count-label">Latest observed entries</p><strong id="count-value">—</strong><span id="count-subtitle">Not ticket sales</span></div>
+          <div><p>Latest source observation</p><strong class="time-metric" id="time-value">—</strong><span id="time-subtitle">No live connection</span></div>
+        </div>
+        <div class="chart-toolbar">
+          <div class="window-controls" role="group" aria-label="History window"><button type="button" data-window="86400">24H</button><button type="button" data-window="604800">7D</button><button type="button" data-window="2592000">30D</button><button type="button" data-window="all" aria-pressed="true">All</button></div>
+          <div class="chart-options"><label class="compact-label">Chart<select id="chart-mode"><option value="line">Line</option><option value="candles">Candles</option></select></label><label class="compact-label">Bars<select id="count-mode"><option value="observed">Observed entries</option><option value="reported">Reported quantity</option></select></label></div>
+        </div>
+        <div class="chart-area" id="chart-area">
+          <div class="empty-state" id="empty-state"><div class="empty-chart" aria-hidden="true">▁ ▂ ▂ ▅ ▃ ▆ ▄ ▇</div><h3>Your observations, over time.</h3><p>Load an export to see asking prices and observed counts.<br>No live data or example prices are shown by default.</p></div>
+          <svg id="price-chart" viewBox="0 0 1100 440" role="img" aria-labelledby="chart-title chart-description" hidden><title id="chart-title">Recorded ticket asking prices</title><desc id="chart-description">Load history to display a chart.</desc></svg>
+        </div>
+        <div class="chart-footer"><span id="chart-caption">Asking prices, not completed transactions.</span><span id="bucket-caption">No observations</span></div>
+        <div class="inspection" id="inspection" hidden><label for="observation-range">Inspect observation <input id="observation-range" type="range" min="0" max="0" value="0"></label><output id="observation-detail" for="observation-range">Select a point to inspect it.</output></div>
+      </section>
+      <section class="notes" aria-label="How to read this chart">
+        <article><span class="note-number">01</span><h3>Price observations</h3><p>Candles summarize the first, highest, lowest and last <strong>minimum asking price</strong> recorded in each time bucket. They are not trades. Category price ranges do not prove ticket availability.</p></article>
+        <article><span class="note-number">02</span><h3>Counts, not sales</h3><p>Bars use the <strong>last recorded count</strong> in a bucket. Polls are never added together. Reported quantity sums explicit amounts across distinct entries, which may overlap; it is not total event stock.</p></article>
+        <article><span class="note-number">03</span><h3>Gaps stay gaps</h3><p>Missing or blocked price readings stay gaps. A displayed price can persist while stock is unknown. Sources, currencies, price basis and fees stay separate. This is an exported snapshot, not a live feed.</p></article>
+      </section>
+      <footer class="footer"><span>Ticket Watch / Observation terminal</span><span>Local file viewer · no account required</span></footer>
+    </main>
+  </div>
+</body>
+</html>

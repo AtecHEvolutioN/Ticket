@@ -348,6 +348,24 @@ enum Command {
     },
     /// Show saved watch health, last evidence and pending notifications.
     Status,
+    /// Export saved event price/volume history without fetching or changing monitoring state.
+    HistoryExport {
+        /// Existing watcher or map database. Repeat to combine independent sources.
+        #[arg(long = "database", required = true)]
+        databases: Vec<PathBuf>,
+        /// New .html (standalone interactive chart) or .json (viewer import) file.
+        #[arg(long)]
+        output: PathBuf,
+        /// Inclusive UTC timestamp, e.g. 2026-11-10T00:00:00Z.
+        #[arg(long)]
+        from: Option<String>,
+        /// Inclusive UTC timestamp, e.g. 2026-11-11T00:00:00Z.
+        #[arg(long)]
+        to: Option<String>,
+        /// Export just this public event URL; otherwise include every recorded event.
+        #[arg(long)]
+        event_url: Option<String>,
+    },
     /// Preview queued Discord payloads without delivering them.
     Outbox,
 }
@@ -856,6 +874,7 @@ async fn main() -> Result<()> {
         | Command::CartAbandonPrepared { .. }
         | Command::CartPreferences { .. }
         | Command::CartPreferencesSave { .. }
+        | Command::HistoryExport { .. }
         | Command::CartPlan { .. } => Config::default(),
         Command::Venues { .. } | Command::DiscordSetup { .. } | Command::DiscordTest { .. }
             if cli.config == Path::new("config.toml") && !cli.config.exists() =>
@@ -1839,6 +1858,23 @@ async fn main() -> Result<()> {
             }
         }
         Command::Status => print_json(&Store::open(&config.database)?.status()?)?,
+        Command::HistoryExport {
+            databases,
+            output,
+            from,
+            to,
+            event_url,
+        } => {
+            let report = ticket_watch::market_chart::export(
+                &databases,
+                &output,
+                from.as_deref(),
+                to.as_deref(),
+                event_url.as_deref(),
+                now(),
+            )?;
+            print_json(&report)?;
+        }
         Command::Outbox => {
             for pending in Store::open(&config.database)?.pending(i64::MAX, 100)? {
                 print_json(

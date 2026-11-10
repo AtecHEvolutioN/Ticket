@@ -1,5 +1,10 @@
 # Netherlands Discord layout
 
+Created on 10 November 2026: **TICKETMASTER NL** and all nine text channels in
+the configured server. The [setup run](https://github.com/AtecHEvolutioN/Ticket/actions/runs/42857120073)
+confirmed every public ID; the [saved layout](evidence/discord-nl-layout-2026-11-10.json)
+records them for subsequent routing configuration. No messages were posted.
+
 The initial scope is **all artists on Ticketmaster Netherlands**, across Dutch
 cities and venues. Discovery coverage and inventory-check coverage must be
 reported separately: finding an event does not prove its ticket page is readable,
@@ -72,3 +77,12 @@ capacity. A partial or capped scan is reported as incomplete and must not erase
 unseen cached events. Inventory checks need independent pacing and priority for
 imminent sales and recently changing events. No one-second country-wide detection
 guarantee is implied by removing the artist filter.
+
+The [all-artists NL configuration](../examples/netherlands-all.example.toml)
+uses `all_artists = true` and `country = "NL"`, without an attraction ID. It
+includes all returned event types, preserves actual artist labels and published
+sale/presale information, and explicitly reports the 1,000-result paging and
+configured capacity limits. It has not been activated on a live host.
+Country-wide catalog coverage beyond that limit needs partitioned discovery;
+the current conservative per-host pacing also makes it unsuitable for a
+one-second sweep of every event.

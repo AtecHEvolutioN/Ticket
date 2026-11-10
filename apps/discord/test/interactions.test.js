@@ -93,6 +93,17 @@ test('help is static, does not echo supplied interaction fields, and mentions no
   assert.deepEqual(result.data.allowed_mentions, { parse: [] });
 });
 
+test('chart command opens a local-import viewer without claiming live sales data', async () => {
+  const response = await invoke(command('chart'));
+  const result = await response.json();
+  assert.equal(result.data.flags, 64);
+  assert.match(result.data.content, /https:\/\/ticket-discord\.vercel\.app\/market\.html/);
+  assert.match(result.data.content, /Files stay on your device/);
+  assert.match(result.data.content, /not connected to a live watcher/);
+  assert.match(result.data.content, /not confirmed sales/);
+  assert.deepEqual(result.data.allowed_mentions, { parse: [] });
+});
+
 test('missing, malformed, wrong-key and modified-body signatures return 401', async () => {
   for (const signature of ['', 'a'.repeat(127), 'z'.repeat(128), '00'.repeat(64)]) {
     const response = await invoke(command(), { headers: { 'x-signature-ed25519': signature } });
@@ -256,7 +267,7 @@ test('health endpoint reveals no identifiers, secrets, or claimed worker health'
 test('registered command defaults to disabled and does not request DM access or purchase actions', () => {
   assert.equal(ticketCommand.default_member_permissions, '0');
   assert.equal(ticketCommand.dm_permission, false);
-  assert.deepEqual(ticketCommand.options.map(value => value.name), ['ping', 'help']);
+  assert.deepEqual(ticketCommand.options.map(value => value.name), ['ping', 'help', 'chart']);
 });
 
 test('configuration bounds prohibit invalid snowflakes and oversized allowlists', () => {

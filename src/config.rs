@@ -103,13 +103,16 @@ impl Default for CatalogConfig {
     }
 }
 
-/// An explicit attraction ID avoids matching unrelated artists with similar names.
+/// Artist subscriptions require an explicit attraction ID. Broad discovery must
+/// opt into all_artists and provide a country instead of silently widening scope.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Subscription {
     pub id: String,
     pub artist: String,
     pub attraction_id: String,
+    #[serde(skip_serializing_if = "is_false")]
+    pub all_artists: bool,
     pub country: Option<String>,
     pub city: Option<String>,
     pub enabled: bool,
@@ -122,6 +125,7 @@ impl Default for Subscription {
             id: String::new(),
             artist: String::new(),
             attraction_id: String::new(),
+            all_artists: false,
             country: None,
             city: None,
             enabled: true,
@@ -129,6 +133,10 @@ impl Default for Subscription {
             exclude_keywords: vec![],
         }
     }
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 /// A website extraction profile is valid only for explicitly listed public hosts.
@@ -655,14 +663,20 @@ fn validate_catalog(config: &Config) -> Result<()> {
     }
     let mut subscription_ids = HashSet::new();
     for subscription in &config.subscriptions {
+        let artist_scope_valid = if subscription.all_artists {
+            subscription.attraction_id.is_empty()
+                && subscription.country.is_some()
+                && (subscription.artist.is_empty() || bounded_label(&subscription.artist, 500))
+        } else {
+            bounded_label(&subscription.artist, 500) && safe_id(&subscription.attraction_id)
+        };
         if !safe_id(&subscription.id)
             || !subscription_ids.insert(subscription.id.as_str())
-            || !bounded_label(&subscription.artist, 500)
-            || !safe_id(&subscription.attraction_id)
+            || !artist_scope_valid
             || !profile_ids.contains(subscription.profile.as_str())
         {
             bail!(
-                "Subscription {} needs a unique id, artist, attraction_id, and an existing profile",
+                "Subscription {} needs a unique id and existing profile; choose artist + attraction_id, or all_artists=true + country without an attraction_id",
                 subscription.id
             );
         }

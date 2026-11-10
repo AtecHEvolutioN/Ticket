@@ -10,8 +10,14 @@ use crate::{
     config::{Config, DiscordConfig, MapWatch},
     map_inspection::DisplayedSeatQuote,
     map_scan::{SectionScan, validate_displayed_quote, validate_report},
-    map_scan_store::{ChangeKind, MapScanStore, ScanChanges, record_in_transaction},
-    model::{Alert, FeeScope, InventoryKind, Offer, PendingAlert, PriceScope, QuantityKind},
+    map_scan_store::{
+        ChangeKind, MapScanStore, ScanChanges, market_event, market_sample, record_in_transaction,
+    },
+    market_history::{self, SampleInput, SourceMetadata},
+    model::{
+        Alert, Availability, Evidence, FeeScope, InventoryKind, Offer, PendingAlert, PriceScope,
+        QuantityKind,
+    },
 };
 
 const MAX_PENDING: usize = 10_000;
@@ -204,6 +210,12 @@ impl MapMonitorStore {
             "Map scan does not match its configured watch"
         );
         let changes = record_in_transaction(&tx, scan)?;
+        market_history::record_sample(
+            &tx,
+            &market_event(&watch.url, Some(&watch.name)),
+            &market_source(&watch, &fingerprint),
+            &market_sample(scan)?,
+        )?;
         let mut batches: Vec<(&str, Vec<(DisplayedSeatQuote, i64)>)> = Vec::new();
         for (kind, signal) in [
             (ChangeKind::FirstObserved, "displayed_price_observed"),
@@ -315,6 +327,34 @@ impl MapMonitorStore {
             .inner
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let saved: Option<(String, String)> = tx.query_row(
+            "SELECT CASE WHEN length(CAST(watch_json AS BLOB))<=?2 THEN watch_json ELSE NULL END,fingerprint FROM map_monitor_watches WHERE id=?1 AND enabled=1",
+            params![watch_id, MAX_JSON],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional()?;
+        if let Some((raw, fingerprint)) = saved {
+            let watch = parse_watch(&raw)?;
+            ensure!(
+                watch.id == watch_id && fingerprint == digest(raw.as_bytes()),
+                "Map watch configuration changed"
+            );
+            market_history::record_sample(
+                &tx,
+                &market_event(&watch.url, Some(&watch.name)),
+                &market_source(&watch, &fingerprint),
+                &SampleInput {
+                    observed_at: now_ms / 1000,
+                    availability: if health == "blocked" {
+                        Availability::Blocked
+                    } else {
+                        Availability::Unknown
+                    },
+                    evidence: Evidence::None,
+                    complete: false,
+                    entries: Vec::new(),
+                },
+            )?;
+        }
         tx.execute("UPDATE map_monitor_watches SET health=?2,last_observed_at_ms=?3,next_due_ms=?4 WHERE id=?1 AND enabled=1",params![watch_id,health,now_ms,next_due_ms])?;
         tx.execute(
             "UPDATE map_monitor_outbox SET state='cancelled' WHERE watch_id=?1 AND state='pending'",
@@ -489,6 +529,17 @@ fn parse_watch(raw: &str) -> Result<MapWatch> {
         ..Config::default()
     })?;
     Ok(watch)
+}
+fn market_source(watch: &MapWatch, fingerprint: &str) -> SourceMetadata {
+    SourceMetadata {
+        watch_id: watch.id.clone(),
+        scope: format!(
+            "map_monitor:section:{}:limit:{}",
+            watch.section_id, watch.limit
+        ),
+        interval_secs: watch.interval_secs,
+        config_fingerprint: fingerprint.into(),
+    }
 }
 fn times(now: i64, due: i64, age: i64) -> Result<()> {
     ensure!(

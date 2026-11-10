@@ -12,6 +12,11 @@ experiment. This roadmap does not enable purchases, resale listings or repricing
   [Primary/resale classification](ticket-sale-types.md) is explicit per observed
   offer/category and appears in Discord; unproven sale channels remain unknown.
   The [coverage report](coverage-2026-11-10.md) records the tested markets and gaps.
+- [Per-event price history](price-history.md): persistent, timestamped samples,
+  independent original/resale/type series, read-only JSON/HTML exports and an
+  interactive asking-price/observed-volume viewer. `/ticket chart` opens the
+  viewer; continuous collection and authenticated live chart data still need the
+  persistent watcher deployment. Observed volume is not completed sales volume.
 - Czech section/seat inspection and displayed-price monitoring, service templates,
   graceful shutdown and freshness checks. Production installation and live Discord
   delivery have not been verified.

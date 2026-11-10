@@ -25,6 +25,8 @@ pub mod map_monitor;
 pub mod map_monitor_store;
 pub mod map_scan;
 pub mod map_scan_store;
+pub mod market_chart;
+pub mod market_history;
 pub mod model;
 pub mod monitor_trigger;
 pub mod notification_delivery;

@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "created_on": "2026-11-10",
+  "application_id": "1569720679757127740",
+  "guild_id": "1569717598709350491",
+  "setup_run": "https://github.com/AtecHEvolutioN/Ticket/actions/runs/42857120073",
+  "watcher_connected": false,
+  "messages_sent": 0,
+  "channels": [
+    {
+      "status": "confirmed",
+      "application_id": "1569720679757127740",
+      "guild_id": "1569717598709350491",
+      "channel_id": "1569753960397541380",
+      "name": "TICKETMASTER NL",
+      "type": 4,
+      "parent_id": null,
+      "operation": "created"
+    },
+    {
+      "status": "confirmed",
+      "application_id": "1569720679757127740",
+      "guild_id": "1569717598709350491",
+      "channel_id": "1569753963245338686",
+      "name": "nl-upcoming-sales",
+      "type": 0,
+      "parent_id": "1569753960397541380",
+      "operation": "created"
+    },
+    {
+      "status": "confirmed",
+      "application_id": "1569720679757127740",
+      "guild_id": "1569717598709350491",
+      "channel_id": "1569753968161198181",
+      "name": "nl-presales",
+      "type": 0,
+      "parent_id": "1569753960397541380",
+      "operation": "created"
+    },
+    {
+      "status": "confirmed",
+      "application_id": "1569720679757127740",
+      "guild_id": "1569717598709350491",
+      "channel_id": "1569753969780072580",
+      "name": "nl-on-sale",
+      "type": 0,
+      "parent_id": "1569753960397541380",
+      "operation": "created"
+    },
+    {
+      "status": "confirmed",
+      "application_id": "1569720679757127740",
+      "guild_id": "1569717598709350491",
+      "channel_id": "1569753970929434736",
+      "name": "nl-primary",
+      "type": 0,
+      "parent_id": "1569753960397541380",
+      "operation": "created"
+    },
+    {
+      "status": "confirmed",
+      "application_id": "1569720679757127740",
+      "guild_id": "1569717598709350491",
+      "channel_id": "1569753971738804334",
+      "name": "nl-resale",
+      "type": 0,
+      "parent_id": "1569753960397541380",
+      "operation": "created"
+    },
+    {
+      "status": "confirmed",
+      "application_id": "1569720679757127740",
+      "guild_id": "1569717598709350491",
+      "channel_id": "1569753972741509140",
+      "name": "nl-price-changes",
+      "type": 0,
+      "parent_id": "1569753960397541380",
+      "operation": "created"
+    },
+    {
+      "status": "confirmed",
+      "application_id": "1569720679757127740",
+      "guild_id": "1569717598709350491",
+      "channel_id": "1569753973525839892",
+      "name": "nl-event-updates",
+      "type": 0,
+      "parent_id": "1569753960397541380",
+      "operation": "created"
+    },
+    {
+      "status": "confirmed",
+      "application_id": "1569720679757127740",
+      "guild_id": "1569717598709350491",
+      "channel_id": "1569753974444269738",
+      "name": "nl-charts",
+      "type": 0,
+      "parent_id": "1569753960397541380",
+      "operation": "created"
+    },
+    {
+      "status": "confirmed",
+      "application_id": "1569720679757127740",
+      "guild_id": "1569717598709350491",
+      "channel_id": "1569753975182332027",
+      "name": "bot-status",
+      "type": 0,
+      "parent_id": "1569753960397541380",
+      "operation": "created"
+    }
+  ]
+}

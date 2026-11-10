@@ -32,6 +32,10 @@ pub struct Selection {
     /// Accepted watch IDs from every successfully read page of the current scan.
     #[serde(default)]
     pub scan_watch_ids: Vec<String>,
+    /// A resumed scan cannot claim complete coverage after a prior page lost
+    /// selected events to the configured storage/monitoring capacity.
+    #[serde(default)]
+    pub scan_capacity_limited: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -111,6 +115,17 @@ pub trait Source: Send {
 }
 impl Source for Discovery {
     async fn page(&mut self, s: &Subscription, page: u32) -> Result<Value> {
+        if s.all_artists {
+            return self
+                .events_country_page(
+                    s.country
+                        .as_deref()
+                        .context("All-artist discovery requires a country")?,
+                    s.city.as_deref(),
+                    page,
+                )
+                .await;
+        }
         self.events_page(
             &s.attraction_id,
             s.country.as_deref(),
@@ -133,6 +148,8 @@ fn metadata(event: &Value) -> Value {
         "venue":event["venues"].as_array().and_then(|v| v.first()),
         "venues":event["venues"],
         "public_sale":event.pointer("/sales/public"),
+        "presales":event.pointer("/sales/presales").and_then(Value::as_array).map(|sales|sales.iter().take(100).collect::<Vec<_>>()),
+        "attractions":event["attractions"],
         "price_ranges":event["price_ranges"].as_array().map(|v|v.iter().take(10).collect::<Vec<_>>()),
         "source":"ticketmaster_discovery", "inventory_verified":false})
 }
@@ -173,12 +190,17 @@ pub async fn refresh<S: Source>(config: &Config, db: &Db, source: &mut S) -> Res
     }
     let subscriptions: Vec<_> = config.subscriptions.iter().filter(|s| s.enabled).collect();
     if subscriptions.is_empty() {
-        bail!("No enabled artist/location subscriptions");
+        bail!("No enabled artist/location or all-artist country subscriptions");
     }
     let next = at + config.catalog.refresh_interval_secs as i64;
     db.call(move |s| s.set_cooldown(REFRESH_SCOPE, next))
         .await?;
     snapshot.next_refresh_at = Some(next);
+    let cached_watch_ids: HashSet<_> = snapshot
+        .selections
+        .iter()
+        .flat_map(|selection| selection.watches.iter().map(|watch| watch.id.clone()))
+        .collect();
     let mut selections: HashMap<_, _> = snapshot
         .selections
         .drain(..)
@@ -208,10 +230,17 @@ pub async fn refresh<S: Source>(config: &Config, db: &Db, source: &mut S) -> Res
         }
         if selection.next_page == 0 {
             selection.scan_watch_ids.clear();
+            selection.scan_capacity_limited = false;
         }
         let mut page = selection.next_page;
         let mut complete = false;
         let mut notes = Vec::new();
+        if sub.all_artists {
+            notes.push(format!(
+                "Country scope {} has no artist filter. Coverage refers to returned Discovery metadata, not every website listing or verified ticket inventory.",
+                sub.country.as_deref().unwrap_or("unknown")
+            ));
+        }
         let mut skipped = Vec::new();
         let mut observed = false;
         loop {
@@ -307,15 +336,21 @@ pub async fn refresh<S: Source>(config: &Config, db: &Db, source: &mut S) -> Res
                     .retain(|watch| accepted.contains(&watch.id));
                 selection.next_page = 0;
                 selection.scan_watch_ids.clear();
-                complete = true;
+                complete = !selection.scan_capacity_limited;
+                if selection.scan_capacity_limited {
+                    notes.push("This scan previously reached the configured event limit; coverage remains incomplete even though its final API page succeeded. A new scan is required to recover omitted events.".into());
+                }
                 break;
             }
             if response["next_page"].as_u64() != Some(page as u64 + 1)
                 || page == 9
                 || items.len() > 100
             {
-                notes
-                    .push("Search pagination is incomplete; narrow artist/location filters".into());
+                notes.push(if sub.all_artists {
+                    "Country discovery coverage is incomplete: the 1,000-result paging ceiling or invalid pagination was reached. This is not every event; date/location partitioning is required for exhaustive coverage. Cached matches were retained.".into()
+                } else {
+                    "Search pagination is incomplete; narrow artist/location filters".into()
+                });
                 selection.next_page = 0;
                 selection.scan_watch_ids.clear();
                 break;
@@ -332,6 +367,24 @@ pub async fn refresh<S: Source>(config: &Config, db: &Db, source: &mut S) -> Res
         selections.insert(sub.id.clone(), selection);
     }
     let mut retained_urls = HashSet::new();
+    // A capped partial refresh must not evict an existing watch merely because
+    // an updated copy moved later in a page or another subscription found new
+    // events first. Reserve capacity for surviving cached identities first.
+    for sub in &subscriptions {
+        if let Some(selection) = selections.get(&sub.id) {
+            for watch in selection
+                .watches
+                .iter()
+                .filter(|watch| cached_watch_ids.contains(&watch.id))
+            {
+                if retained_urls.len() < config.catalog.max_events
+                    && let Ok(url) = hybrid::canonical_event_url(&watch.url)
+                {
+                    retained_urls.insert(url);
+                }
+            }
+        }
+    }
     for sub in subscriptions {
         let mut selection = selections.remove(&sub.id).unwrap_or_else(|| Selection {
             id: sub.id.clone(),
@@ -353,6 +406,7 @@ pub async fn refresh<S: Source>(config: &Config, db: &Db, source: &mut S) -> Res
         });
         if selection.watches.len() < before {
             selection.complete = false;
+            selection.scan_capacity_limited = true;
             selection
                 .notes
                 .push("Configured unique event limit reached; coverage is incomplete".into());

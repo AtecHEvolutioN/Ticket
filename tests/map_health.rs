@@ -145,6 +145,61 @@ fn fresh_state_is_read_only_and_never_claims_process_delivery_or_stock_verificat
 }
 
 #[test]
+fn complete_legacy_and_upgraded_history_schemas_remain_healthy_without_read_side_migration() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = config(&dir.path().join("monitor.sqlite"));
+    drop(seeded(&config));
+    let connection = Connection::open(&config.map_database).unwrap();
+    connection.execute_batch("DROP TABLE market_samples; DROP TABLE market_sources; DROP TABLE market_events; DROP TABLE market_history_meta;").unwrap();
+    drop(connection);
+    let before = std::fs::read(&config.map_database).unwrap();
+    assert!(inspect(&config, 120, START + 1500).unwrap().healthy);
+    assert_eq!(std::fs::read(&config.map_database).unwrap(), before);
+    let count: i64 = Connection::open(&config.map_database)
+        .unwrap()
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name LIKE 'market_%'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 0, "health inspection must not initialize history");
+
+    drop(MapMonitorStore::open(&config.map_database).unwrap());
+    let before = std::fs::read(&config.map_database).unwrap();
+    assert!(inspect(&config, 120, START + 1500).unwrap().healthy);
+    assert_eq!(std::fs::read(&config.map_database).unwrap(), before);
+    let count: i64 = Connection::open(&config.map_database)
+        .unwrap()
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name LIKE 'market_%'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 4);
+}
+
+#[test]
+fn partial_unknown_version_or_unrelated_history_extension_is_rejected_read_only() {
+    for mutation in [
+        "DROP TABLE market_samples",
+        "UPDATE market_history_meta SET schema_version=2 WHERE id=1",
+        "CREATE TABLE unrelated(payload TEXT)",
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let config = config(&dir.path().join("monitor.sqlite"));
+        drop(seeded(&config));
+        let connection = Connection::open(&config.map_database).unwrap();
+        connection.execute_batch(mutation).unwrap();
+        drop(connection);
+        let before = std::fs::read(&config.map_database).unwrap();
+        assert!(inspect(&config, 120, START + 1500).is_err(), "{mutation}");
+        assert_eq!(std::fs::read(&config.map_database).unwrap(), before);
+    }
+}
+
+#[test]
 fn freshness_boundary_is_inclusive_and_stale_success_cannot_look_healthy() {
     let dir = tempfile::tempdir().unwrap();
     let config = config(&dir.path().join("monitor.sqlite"));

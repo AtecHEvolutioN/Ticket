@@ -1,7 +1,7 @@
 # Discord setup and hosting
 
 The Rust watcher sends alerts directly to Discord. The optional Vercel app
-handles `/ticket ping` and `/ticket help` over signed HTTP interactions. Neither
+handles `/ticket ping`, `/ticket help` and `/ticket chart` over signed HTTP interactions. No
 command polls Ticketmaster, changes preferences, selects seats or reserves tickets.
 The command service and the availability watcher have separate health states.
 
@@ -10,6 +10,7 @@ The command service and the availability watcher have separate health states.
 | Component | Host | Persistent data |
 | --- | --- | --- |
 | Discord commands | Vercel, project root `apps/discord`, Node.js 24, Frankfurt | None; public verification key and access settings are environment variables |
+| Price history viewer | Vercel `/market.html` or standalone exported HTML | Reads an exported file locally; no live database connection or upload |
 | Availability watcher and direct Discord alerts | One always-on Linux machine | SQLite observations, outbox and cooldowns on local persistent disk |
 | Browser/session and cart operator | Persistent host with the appropriate browser/display access | Private browser evidence and the existing attempt journal |
 
@@ -191,9 +192,11 @@ Integrations before trying again.
 Commands default to administrators in Discord. If an allowed operator is not an
 administrator, grant that user access under Server Settings → Integrations →
 the application. The endpoint's user allowlist still applies to administrators.
-Try `/ticket ping` and `/ticket help` in the configured server. A successful ping
+Try `/ticket ping`, `/ticket help` and `/ticket chart` in the configured server. A successful ping
 verifies the command endpoint only. Watch controls, remote status and preference
-sync still require a worker connection and are not exposed yet.
+sync still require a worker connection and are not exposed yet. `/ticket chart`
+opens the [history viewer](price-history.md); it does not assert that monitoring
+is running or that the chart contains current inventory.
 
 ## Let the bot create a channel
 
@@ -225,7 +228,7 @@ uncertain response. Inspect the server before another invocation after an
 ambiguous failure. Run one provisioner at a time: the helper has no distributed
 lock and concurrent invocations can race. Copy the confirmed channel ID into the
 worker's `[discord].channel_id` if you want future alerts sent there. Channel
-creation is an operator tool; `/ticket` currently exposes only ping/help.
+creation is an operator tool; `/ticket` currently exposes ping/help/chart.
 
 ## Start real alerts
 

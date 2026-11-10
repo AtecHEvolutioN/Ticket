@@ -120,6 +120,7 @@ impl Store {
              CREATE INDEX IF NOT EXISTS outbox_watch ON outbox(watch_id, state);",
             )
             .context("initialize state database")?;
+        crate::market_history::initialize(&connection)?;
         Ok(Self { connection })
     }
 
@@ -305,6 +306,8 @@ impl Store {
              ON CONFLICT(watch_id) DO UPDATE SET observation_json=excluded.observation_json",
             params![watch.id, snapshot],
         )?;
+        // Save unchanged samples and evidence gaps atomically with inventory/outbox state.
+        crate::market_history::record_observation(&transaction, watch, observation)?;
         if !trusted
             || matches!(
                 observation.availability,

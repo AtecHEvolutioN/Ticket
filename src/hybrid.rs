@@ -74,14 +74,20 @@ fn event_watch(
     if subscription.profile != profile.id {
         return Err("subscription profile mismatch");
     }
+    if subscription.all_artists
+        && (!subscription.attraction_id.is_empty() || subscription.country.is_none())
+    {
+        return Err("all-artist discovery requires a country without an attraction filter");
+    }
     let _event_id = nonempty(event.get("id")).ok_or("missing event identity")?;
-    if !event
-        .get("attraction_ids")
-        .and_then(Value::as_array)
-        .is_some_and(|ids| {
-            ids.iter()
-                .any(|id| id.as_str() == Some(&subscription.attraction_id))
-        })
+    if !subscription.all_artists
+        && !event
+            .get("attraction_ids")
+            .and_then(Value::as_array)
+            .is_some_and(|ids| {
+                ids.iter()
+                    .any(|id| id.as_str() == Some(&subscription.attraction_id))
+            })
     {
         return Err("selected attraction is not confirmed for this event");
     }
@@ -143,7 +149,11 @@ fn event_watch(
     Ok(Watch {
         id: format!("auto-{:x}", Sha256::digest(identity.as_bytes())),
         name: bounded(&display_name, 500),
-        artist: subscription.artist.clone(),
+        artist: if subscription.all_artists {
+            event_artists(event)
+        } else {
+            subscription.artist.clone()
+        },
         country: country.into(),
         city,
         url: url.into(),
@@ -159,6 +169,25 @@ fn event_watch(
         currency: profile.currency.clone(),
         parser: profile.parser.clone(),
     })
+}
+
+fn event_artists(event: &Value) -> String {
+    let mut names = Vec::new();
+    if let Some(attractions) = event.get("attractions").and_then(Value::as_array) {
+        for attraction in attractions.iter().take(100) {
+            if let Some(name) = nonempty(attraction.get("name")) {
+                let name = bounded(name, 400);
+                if !names.contains(&name) {
+                    names.push(name);
+                }
+            }
+        }
+    }
+    if names.is_empty() {
+        "Artist not provided".into()
+    } else {
+        bounded(&names.join(" / "), 500)
+    }
 }
 
 fn nonempty(value: Option<&Value>) -> Option<&str> {

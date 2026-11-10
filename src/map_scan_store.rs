@@ -12,6 +12,10 @@ use sha2::{Digest, Sha256};
 
 use crate::map_inspection::DisplayedSeatQuote;
 use crate::map_scan::{SectionScan, validate_displayed_quote, validate_report};
+use crate::market_history::{
+    self, EventMetadata, HistoryEntry, HistorySeat, SampleInput, SeriesKind, SourceMetadata,
+};
+use crate::model::{Availability, Evidence, FeeScope, InventoryKind, PriceScope, QuantityKind};
 
 pub const COMPARISON_MAX_AGE_MS: i64 = 15 * 60 * 1000;
 const MAX_QUOTES_PER_SCOPE: usize = 10_000;
@@ -58,7 +62,7 @@ impl MapScanStore {
         if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
             std::fs::create_dir_all(parent).context("Create map history directory")?;
         }
-        let connection = Connection::open(path).context("Open map price history")?;
+        let mut connection = Connection::open(path).context("Open map price history")?;
         connection.busy_timeout(Duration::from_secs(5))?;
         let tables = {
             let mut statement = connection.prepare(
@@ -75,12 +79,18 @@ impl MapScanStore {
             "map_monitor_cooldowns",
             "map_monitor_outbox",
         ];
+        let market = crate::market_history::TABLE_NAMES;
+        let market_count = tables
+            .iter()
+            .filter(|name| market.contains(&name.as_str()))
+            .count();
         if !tables.is_empty() {
             ensure!(
-                tables
-                    .iter()
-                    .all(|name| base.contains(&name.as_str()) || monitor.contains(&name.as_str()))
-                    && tables.iter().any(|name| name == "map_scan_meta"),
+                tables.iter().all(|name| base.contains(&name.as_str())
+                    || monitor.contains(&name.as_str())
+                    || market.contains(&name.as_str()))
+                    && tables.iter().any(|name| name == "map_scan_meta")
+                    && (market_count == 0 || market_count == market.len()),
                 "Use a dedicated map price history database"
             );
             let version: i64 = connection
@@ -92,19 +102,23 @@ impl MapScanStore {
                 .context("Read map price history version")?;
             ensure!(
                 (version == 1
-                    && tables.len() == base.len()
-                    && tables.iter().all(|name| base.contains(&name.as_str())))
-                    || (version == 2 && tables.len() == base.len() + monitor.len()),
+                    && tables.len() == base.len() + market_count
+                    && tables.iter().all(
+                        |name| base.contains(&name.as_str()) || market.contains(&name.as_str())
+                    ))
+                    || (version == 2 && tables.len() == base.len() + monitor.len() + market_count),
                 "Unsupported or incomplete map price history schema"
             );
         }
-        connection
-            .execute_batch(
-                "PRAGMA journal_mode=WAL;
+        connection.execute_batch(
+            "PRAGMA journal_mode=WAL;
              PRAGMA synchronous=FULL;
-             PRAGMA foreign_keys=ON;
-             BEGIN IMMEDIATE;
-             CREATE TABLE IF NOT EXISTS map_scan_meta (
+             PRAGMA foreign_keys=ON;",
+        )?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS map_scan_meta (
                  id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL
              );
              INSERT OR IGNORE INTO map_scan_meta (id, version) VALUES (1, 1);
@@ -139,10 +153,13 @@ impl MapScanStore {
                  delivered_message_id TEXT, last_error TEXT
              );
              CREATE INDEX IF NOT EXISTS map_monitor_outbox_due ON map_monitor_outbox(state,not_before_ms,id);
-             UPDATE map_scan_meta SET version=2 WHERE id=1;
-             COMMIT;",
+             UPDATE map_scan_meta SET version=2 WHERE id=1;",
             )
             .context("Initialize map price history")?;
+        crate::market_history::initialize(&transaction)?;
+        transaction
+            .commit()
+            .context("Commit map price history schema")?;
         Ok(Self { connection })
     }
 
@@ -153,9 +170,101 @@ impl MapScanStore {
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let result = record_in_transaction(&transaction, scan)?;
+        let source = SourceMetadata {
+            watch_id: "map-scan".into(),
+            scope: format!("map_scan:section:{}:limit:{}", scan.section_id, scan.limit),
+            interval_secs: 0,
+            config_fingerprint: format!(
+                "{:x}",
+                Sha256::digest(serde_json::to_vec(&(
+                    &scan.site_host,
+                    &scan.event_id,
+                    &scan.section_id,
+                    scan.limit,
+                    &scan.coverage,
+                ))?)
+            ),
+        };
+        market_history::record_sample(
+            &transaction,
+            &market_event(&scan.event_url, None),
+            &source,
+            &market_sample(scan)?,
+        )?;
         transaction.commit()?;
         Ok(result)
     }
+}
+
+pub(crate) fn market_event(event_url: &str, name: Option<&str>) -> EventMetadata {
+    EventMetadata {
+        event_url: event_url.into(),
+        name: name.unwrap_or_default().into(),
+        artist: String::new(),
+        country: "CZ".into(),
+        city: None,
+    }
+}
+
+/// Retain aggregate prices alongside individual displayed-seat observations.
+/// Both projections describe quotes, never tickets available to purchase.
+pub(crate) fn market_sample(scan: &SectionScan) -> Result<SampleInput> {
+    validate_report(scan)?;
+    let mut entries = Vec::with_capacity(scan.quoted_count as usize * 2);
+    for quote in scan
+        .observations
+        .iter()
+        .filter_map(|observation| observation.quote.as_ref())
+    {
+        // Scope native node identities to their event and section. Persist only
+        // the digest and validated human labels in the public history sample.
+        let seat_key = format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_vec(&(
+                &scan.site_host,
+                &scan.event_id,
+                &scan.section_id,
+                &quote.seat_id,
+            ))?)
+        );
+        let aggregate = HistoryEntry {
+            entry_id: format!("aggregate:{seat_key}"),
+            ticket_type: Some(quote.ticket_type.clone()),
+            inventory_kind: InventoryKind::Resale,
+            currency: Some(quote.currency.clone()),
+            price_scope: PriceScope::PerTicket,
+            fees: FeeScope::Unknown,
+            quantity_kind: QuantityKind::Unknown,
+            kind: SeriesKind::DisplayedSeat,
+            seat: None,
+            min_price_minor: Some(quote.price_minor),
+            max_price_minor: Some(quote.price_minor),
+            quantity: None,
+        };
+        let individual = HistoryEntry {
+            entry_id: format!("seat:{seat_key}"),
+            seat: Some(HistorySeat {
+                seat_key,
+                section: quote.section.clone(),
+                row: quote.row.clone(),
+                number: quote.seat.clone(),
+            }),
+            ..aggregate.clone()
+        };
+        entries.push(aggregate);
+        entries.push(individual);
+    }
+    Ok(SampleInput {
+        observed_at: scan.finished_at_ms / 1000,
+        availability: Availability::Unknown,
+        evidence: if entries.is_empty() {
+            Evidence::None
+        } else {
+            Evidence::Metadata
+        },
+        complete: false,
+        entries,
+    })
 }
 
 pub(crate) fn record_in_transaction(

@@ -153,12 +153,23 @@ fn existing_file(path: &Path) -> Result<bool> {
 }
 
 fn validate_schema(tx: &Transaction<'_>) -> Result<()> {
-    let mut statement = tx.prepare("SELECT CASE WHEN length(CAST(name AS BLOB))<=128 THEN name ELSE NULL END FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' LIMIT 8")?;
+    let market = crate::market_history::TABLE_NAMES;
+    let mut statement = tx.prepare("SELECT CASE WHEN length(CAST(name AS BLOB))<=128 THEN name ELSE NULL END FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' LIMIT ?1")?;
     let tables = statement
-        .query_map([], |row| row.get::<_, String>(0))?
+        .query_map([TABLES.len() + market.len() + 1], |row| {
+            row.get::<_, String>(0)
+        })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+    let market_count = tables
+        .iter()
+        .filter(|name| market.contains(&name.as_str()))
+        .count();
     ensure!(
-        tables.len() == TABLES.len() && tables.iter().all(|name| TABLES.contains(&name.as_str())),
+        (market_count == 0 || market_count == market.len())
+            && tables.len() == TABLES.len() + market_count
+            && tables
+                .iter()
+                .all(|name| TABLES.contains(&name.as_str()) || market.contains(&name.as_str())),
         "Health inspection requires a dedicated map database with schema version 2"
     );
     let version: i64 = tx
@@ -170,6 +181,19 @@ fn validate_schema(tx: &Transaction<'_>) -> Result<()> {
         version == 2,
         "Health inspection does not migrate unsupported map database schemas"
     );
+    if market_count > 0 {
+        let market_version: i64 = tx
+            .query_row(
+                "SELECT schema_version FROM market_history_meta WHERE id=1",
+                [],
+                |row| row.get(0),
+            )
+            .context("Read market history schema version")?;
+        ensure!(
+            market_version == 1,
+            "Health inspection does not migrate unsupported market history schemas"
+        );
+    }
     Ok(())
 }
 
