@@ -142,6 +142,29 @@ channel permissions, registration or successful Discord delivery.
 
 ## Register the commands
 
+### From a phone using GitHub Actions
+
+Save the bot token directly in this repository's Actions secrets as
+`DISCORD_SETUP_BOT_TOKEN`. It is a temporary setup credential; never paste it in
+chat, a workflow input, a Git-tracked file or an issue.
+
+Open Actions → **Register Discord commands** → Run workflow, select `main`, then
+run it once. The [manual workflow](../.github/workflows/discord-setup.yml) checks
+out the exact dispatch commit and uses pinned actions. It has no push or pull
+request trigger, refuses other branches, and supplies the token only to the
+registration step. It installs no project dependencies and uploads no artifacts.
+The application and server IDs are explicit in the workflow; change both the
+workflow and the Vercel settings when using another Discord application.
+
+The registration step checks that the token belongs to the intended application,
+then creates or updates only the server's `/ticket` command. It sends no channel
+messages and makes no automatic retries. If the result is uncertain, inspect
+Server Settings → Integrations before another run. A successful run prints only
+the application, server and command identifiers. Keep the token privately for the
+future watcher, then remove the temporary GitHub setup secret after verification.
+
+### From a computer using the CLI
+
 Create a private root-level `.env.discord.local` file (`umask 077` before creating
 it; `chmod 600 .env.discord.local` for an existing file) with the application ID,
 guild ID and bot token, or export those variables in the shell. The repository
