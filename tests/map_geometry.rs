@@ -45,6 +45,41 @@ fn extracts_typed_section_paths_and_label_coordinates_without_inventory() {
 }
 
 #[test]
+fn zoomed_seat_layer_does_not_replace_or_conflict_with_overview_geometry() {
+    let zoomed = PAGE.replace(
+        "<g class=\"seats\" hidden></g>",
+        "<g class=\"seats\"><g data-component=\"svg__block\"></g></g>",
+    );
+    assert!(extract(&zoomed).unwrap().is_none());
+    let combined = duplicate(PAGE, |_| {
+        let start = zoomed.find("<svg ").unwrap();
+        let end = zoomed.find("</svg>").unwrap() + "</svg>".len();
+        zoomed[start..end].to_owned()
+    });
+    let map = extract(&combined).unwrap().unwrap();
+    assert_eq!(map.rendered_copies, 1);
+    assert_eq!(
+        map.geometry_fingerprint,
+        extract(PAGE).unwrap().unwrap().geometry_fingerprint
+    );
+    for attribute in [
+        "hidden",
+        "inert",
+        "aria-hidden=\"true\"",
+        "style=\"display:none\"",
+    ] {
+        let preloaded = zoomed.replace(
+            "<g class=\"seats\">",
+            &format!("<g class=\"seats\" {attribute}>"),
+        );
+        assert_eq!(
+            extract(&preloaded).unwrap().unwrap().geometry_fingerprint,
+            extract(PAGE).unwrap().unwrap().geometry_fingerprint
+        );
+    }
+}
+
+#[test]
 fn duplicate_views_deduplicate_but_conflicting_paths_or_labels_fail() {
     let baseline = extract(PAGE).unwrap().unwrap();
     let duplicate = duplicate(PAGE, |svg| {

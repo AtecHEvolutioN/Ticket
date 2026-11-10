@@ -75,8 +75,10 @@ available seats, and session/cart links never become shared venue data. Optional
 public source event. [Map inspection](seat-maps.md) can download these images and
 save separate draft layouts for different map/section configurations at one venue.
 Supported rendered section outlines can be inspected and exported separately;
-they are not copied into these presets. Live individual-seat extraction remains
-unimplemented. Inventory detection still requires a fresh check for each event.
+they are not copied into these presets. [Seat inspection](seat-inspection.md)
+reads explicit row/seat labels and supported hover prices, but those transient
+records are not saved as venue inventory. Inventory detection still requires a
+fresh check for each event.
 
 ## Android
 

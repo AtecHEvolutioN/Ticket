@@ -457,3 +457,118 @@ fn map_geometry_export_is_bound_to_the_event_and_never_creates_stock() {
     assert!(String::from_utf8_lossy(&missing.stderr).contains("No captured section geometry"));
     assert!(!output_file.exists());
 }
+
+#[test]
+fn map_section_flags_require_a_live_section_target_before_any_fetch() {
+    let directory = tempfile::tempdir().unwrap();
+    let url = "https://www.ticketmaster.cz/event/example/12345678";
+    for extra in [
+        vec!["--seat-id", "seat_1"],
+        vec!["--section-id", "s_1", "--html", "missing.html"],
+        vec![
+            "--section-id",
+            "s_1",
+            "--seat-id",
+            "seat_1",
+            "--html",
+            "missing.html",
+        ],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+            .current_dir(directory.path())
+            .args(["map-inspect", "--url", url])
+            .args(extra)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(error.contains("--section-id") || error.contains("--html"));
+        assert!(!error.contains("Open HTML") && !error.contains("Browser worker"));
+        assert!(output.stdout.is_empty());
+    }
+    assert!(!directory.path().join("data").exists());
+}
+
+#[test]
+fn map_section_cli_validates_hover_evidence_without_turning_it_into_stock() {
+    let directory = tempfile::tempdir().unwrap();
+    let svg = |html: &str| {
+        let start = html.find("<svg ").unwrap();
+        let end = html.find("</svg>").unwrap() + "</svg>".len();
+        html[start..end].to_owned()
+    };
+    let overview = svg(include_str!("fixtures/map-geometry.html"))
+        .replace("s_a", "s_12")
+        .replace("A1", "110");
+    let seats = svg(include_str!("fixtures/seat-geometry.html"));
+    let page = include_str!("fixtures/seat-map-regional.html")
+        .replace("</aside>", &format!("{overview}{seats}</aside>"));
+    std::fs::write(directory.path().join("event.html"), page).unwrap();
+    std::fs::create_dir(directory.path().join("browser")).unwrap();
+    std::fs::write(
+        directory.path().join("browser/worker.cjs"),
+        r#"
+        const fs=require('node:fs');
+        require('node:readline').createInterface({input:process.stdin}).on('line',line=>{
+            const r=JSON.parse(line);
+            if(r.adapter!=='ticketmaster'||r.display!=='map'||r.map_section_id!=='s_12'||r.map_seat_id!=='seat-2') {
+                process.stdout.write(JSON.stringify({id:r.id,error:'invalid_request'})+'\n'); return;
+            }
+            process.stdout.write(JSON.stringify({id:r.id,status:200,adapter_state:'ready',
+                final_url:r.url,html:fs.readFileSync('event.html','utf8'),
+                map_inspection:JSON.parse(fs.readFileSync('inspection.json','utf8'))})+'\n');
+        });
+        "#,
+    )
+    .unwrap();
+    let mut inspection = serde_json::json!({
+        "section_id":"s_12", "section_name":"110", "seat_id":"seat-2",
+        "coverage":"section_only", "stock_verified":false, "adjacency_verified":false,
+        "tooltip":{
+            "zone":"1. POSCHODÍ", "section":"110", "row":"12", "seat":"2",
+            "ticket_type":"Ověřené přeprodávané vstupenky", "restriction":null,
+            "price_text":"1 234,50 Kč za kus"
+        }
+    });
+    let run = || {
+        Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+            .current_dir(directory.path())
+            .args([
+                "map-inspect",
+                "--url",
+                "https://www.ticketmaster.cz/event/synthetic-concert/1234567890",
+                "--section-id",
+                "s_12",
+                "--seat-id",
+                "seat-2",
+            ])
+            .output()
+            .unwrap()
+    };
+    let evidence_file = directory.path().join("inspection.json");
+    std::fs::write(&evidence_file, serde_json::to_vec(&inspection).unwrap()).unwrap();
+    let output = run();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let observed = &report["section_inspection"];
+    assert_eq!(observed["rendered_seat_count"], 3);
+    assert_eq!(observed["displayed_quote"]["price_minor"], 123450);
+    assert_eq!(observed["displayed_quote"]["price_basis"], "per_ticket");
+    assert_eq!(observed["displayed_quote"]["fees_complete"], false);
+    assert!(observed["displayed_quote"]["available_quantity"].is_null());
+    assert_eq!(observed["stock_verified"], false);
+    assert_eq!(observed["adjacency_verified"], false);
+    assert_eq!(report["map"]["stock_verified"], false);
+    assert!(report["saved_venue"].is_null());
+    inspection["tooltip"]["row"] = "99".into();
+    std::fs::write(&evidence_file, serde_json::to_vec(&inspection).unwrap()).unwrap();
+    let mismatch = run();
+    assert!(!mismatch.status.success());
+    assert!(String::from_utf8_lossy(&mismatch.stderr).contains("does not match hovered seat"));
+    assert!(mismatch.stdout.is_empty());
+    assert!(!directory.path().join("data").exists());
+}

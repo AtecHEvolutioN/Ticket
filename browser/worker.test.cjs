@@ -52,6 +52,20 @@ test('request protocol has bounded sizes and durations', () => {
   assert.throws(() => validateRequest({...request,timeout_ms:0}));
 });
 
+test('section inspection requires explicit bounded Czech map targets', () => {
+  const request = { id: 1, url: 'https://www.ticketmaster.cz/event/synthetic/12345678',
+    timeout_ms: 1000, max_body_bytes: 1024, render_wait_ms: 0,
+    adapter: 'ticketmaster', display: 'map', map_section_id: 's_12', map_seat_id: 'seat-2' };
+  assert.doesNotThrow(() => validateRequest(request));
+  for (const change of [
+    { display: undefined }, { adapter: 'selectors' }, { map_section_id: undefined },
+    { url: 'https://www.ticketmaster.pl/event/synthetic/12345678' },
+    { map_section_id: '' }, { map_section_id: 's_12"] *' },
+    { map_section_id: 'x'.repeat(129) }, { map_seat_id: 'seat 2' },
+    { map_seat_id: null },
+  ]) assert.throws(() => validateRequest({ ...request, ...change }), /invalid_request/);
+});
+
 test('event identity binds region and event ID rather than page slug', () => {
   const event = 'https://www.ticketmaster.pl/event/korn/496543017';
   assert.ok(sameEvent(event, 'https://ticketmaster.pl/event/new-slug/496543017?language=en'));

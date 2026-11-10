@@ -23,6 +23,7 @@ pub struct FetchResult {
     pub final_url: String,
     pub detail: String,
     pub adapter_state: Option<String>,
+    pub map_inspection: Option<crate::map_inspection::MapInspection>,
 }
 
 pub struct Fetcher {
@@ -72,7 +73,7 @@ impl Fetcher {
         let page = match watch.mode {
             FetchMode::Http => self.http(safe_url.as_str()).await?,
             FetchMode::Browser => {
-                self.browser(safe_url.as_str(), watch.parser.adapter, None)
+                self.browser(safe_url.as_str(), watch.parser.adapter, None, None, None)
                     .await?
             }
         };
@@ -90,7 +91,7 @@ impl Fetcher {
         match mode {
             FetchMode::Http => self.http(safe_url.as_str()).await,
             FetchMode::Browser => {
-                self.browser(safe_url.as_str(), PageAdapter::Selectors, None)
+                self.browser(safe_url.as_str(), PageAdapter::Selectors, None, None, None)
                     .await
             }
         }
@@ -98,6 +99,32 @@ impl Fetcher {
 
     /// Inspect the event's map display without switching to ticket offers.
     pub async fn fetch_map(&self, url: &str) -> Result<FetchResult> {
+        self.fetch_map_target(url, None, None).await
+    }
+
+    /// Open one Czech map section and optionally hover one seat; never selects it.
+    pub async fn fetch_map_section(
+        &self,
+        url: &str,
+        section_id: &str,
+        seat_id: Option<&str>,
+    ) -> Result<FetchResult> {
+        if !crate::event_identity::identity(url).is_some_and(|(host, _)| host == "ticketmaster.cz")
+        {
+            bail!("Section inspection requires a public Czech event URL");
+        }
+        if !map_identifier(section_id) || seat_id.is_some_and(|id| !map_identifier(id)) {
+            bail!("Map section and seat IDs must be bounded ASCII identifiers");
+        }
+        self.fetch_map_target(url, Some(section_id), seat_id).await
+    }
+
+    async fn fetch_map_target(
+        &self,
+        url: &str,
+        section_id: Option<&str>,
+        seat_id: Option<&str>,
+    ) -> Result<FetchResult> {
         let safe_url = validate_public_url(url)?;
         if !crate::event_identity::same_event(url, url) {
             bail!("Map inspection requires a supported public event URL");
@@ -107,6 +134,8 @@ impl Fetcher {
                 safe_url.as_str(),
                 PageAdapter::Ticketmaster,
                 Some(BrowserDisplay::Map),
+                section_id,
+                seat_id,
             )
             .await?;
         if (200..300).contains(&page.status)
@@ -133,6 +162,8 @@ impl Fetcher {
         url: &str,
         adapter: PageAdapter,
         display: Option<BrowserDisplay>,
+        map_section_id: Option<&str>,
+        map_seat_id: Option<&str>,
     ) -> Result<FetchResult> {
         // One context and child process are reused. The worker processes one navigation at a time.
         let mut guard = self.browser.lock().await;
@@ -151,6 +182,8 @@ impl Fetcher {
             render_wait_ms: self.browser_config.render_wait_ms,
             adapter,
             display,
+            map_section_id,
+            map_seat_id,
         };
         worker.next_id += 1;
         // Include a bounded browser-startup allowance in addition to the navigation deadline.
@@ -181,6 +214,14 @@ impl Fetcher {
             worker.terminate().await;
         }
     }
+}
+
+fn map_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
 fn redacted_http_error(error: reqwest::Error) -> anyhow::Error {
@@ -251,6 +292,7 @@ async fn read_response(
             final_url,
             detail,
             adapter_state: None,
+            map_inspection: None,
         });
     }
     if response
@@ -286,6 +328,7 @@ async fn read_response(
         final_url,
         detail: "HTTP page received".into(),
         adapter_state: None,
+        map_inspection: None,
     })
 }
 
@@ -336,6 +379,10 @@ struct BrowserRequest<'a> {
     adapter: PageAdapter,
     #[serde(skip_serializing_if = "Option::is_none")]
     display: Option<BrowserDisplay>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    map_section_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    map_seat_id: Option<&'a str>,
 }
 
 #[derive(Deserialize)]
@@ -388,6 +435,7 @@ struct BrowserReply {
     content_type: Option<String>,
     adapter_state: Option<String>,
     manual_intervention: Option<ManualIntervention>,
+    map_inspection: Option<crate::map_inspection::MapInspection>,
 }
 
 struct BrowserProcess {
@@ -537,6 +585,26 @@ impl BrowserProcess {
                 .as_ref()
                 .map(|state| format!("{detail}; browser adapter={state}"))
                 .unwrap_or(detail);
+            match (request.map_section_id, &reply.map_inspection) {
+                (None, Some(_)) => bail!("Unsolicited map section inspection"),
+                (Some(section_id), Some(inspection)) => {
+                    if inspection.section_id != section_id
+                        || inspection.seat_id.as_deref() != request.map_seat_id
+                    {
+                        bail!("Map section inspection target mismatch");
+                    }
+                    if !(200..300).contains(&status) || adapter_state.as_deref() != Some("ready") {
+                        bail!("Map section inspection lacks a ready document");
+                    }
+                }
+                (Some(_), None)
+                    if (200..300).contains(&status)
+                        && adapter_state.as_deref() == Some("ready") =>
+                {
+                    bail!("Browser omitted the requested map section inspection");
+                }
+                _ => {}
+            }
             return Ok(FetchResult {
                 status,
                 html,
@@ -545,6 +613,7 @@ impl BrowserProcess {
                 elapsed_ms: reply.elapsed_ms.unwrap_or(0),
                 detail,
                 adapter_state,
+                map_inspection: reply.map_inspection,
             });
         }
     }
@@ -817,6 +886,131 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&ordinary.html).unwrap(),
             serde_json::json!({"adapter":"selectors","display":"default"})
         );
+        fetcher.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn map_section_identifiers_and_market_are_checked_before_starting_a_browser() {
+        let mut config = Config::default();
+        config.browser.script = "missing-browser-worker.cjs".into();
+        let fetcher = Fetcher::new(&config).unwrap();
+        let url = "https://www.ticketmaster.cz/event/example/12345678";
+        for (section, seat) in [
+            ("", None),
+            ("s_1", Some("")),
+            ("s_1] path", None),
+            ("s_1", Some("1/2")),
+            ("s_ě", None),
+            ("s_1", Some("řada")),
+        ] {
+            let error = fetcher
+                .fetch_map_section(url, section, seat)
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains("bounded ASCII identifiers"));
+        }
+        let oversized = "x".repeat(129);
+        assert!(
+            fetcher
+                .fetch_map_section(url, &oversized, None)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("bounded ASCII identifiers")
+        );
+        assert!(
+            fetcher
+                .fetch_map_section(url, "s_1", Some(&oversized))
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("bounded ASCII identifiers")
+        );
+        for url in [
+            "https://www.ticketmaster.pl/event/example/12345678",
+            "https://www.ticketmaster.cz/artist/12345678",
+        ] {
+            assert!(
+                fetcher
+                    .fetch_map_section(url, "s_1", None)
+                    .await
+                    .unwrap_err()
+                    .to_string()
+                    .contains("public Czech event URL")
+            );
+        }
+        assert!(fetcher.browser.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn map_section_protocol_binds_requested_section_seat_and_event() {
+        let mut script = tempfile::NamedTempFile::new().unwrap();
+        script
+            .write_all(
+                br#"
+            const lines=require('node:readline').createInterface({input:process.stdin});
+            lines.on('line',line=>{
+                const r=JSON.parse(line);
+                const kind=new URL(r.url).pathname.split('/')[2];
+                const evidence=r.map_section_id||kind==='unsolicited'?{
+                    section_id:kind==='wrong-section'?'s_other':r.map_section_id||'s_1',
+                    section_name:'101',seat_id:kind==='wrong-seat'?'seat_other':r.map_seat_id||null,
+                    coverage:'section_only',tooltip:null,stock_verified:false,adjacency_verified:false
+                }:undefined;
+                process.stdout.write(JSON.stringify({id:r.id,status:200,
+                    html:JSON.stringify(r),final_url:kind==='wrong-event'?r.url.replace('12345678','87654321'):r.url,
+                    adapter_state:kind==='blocked'?'blocked':'ready',
+                    map_inspection:kind==='missing'?undefined:evidence})+'\n');
+            });
+        "#,
+            )
+            .unwrap();
+        let mut config = Config::default();
+        config.browser.script = script.path().to_owned();
+        let fetcher = Fetcher::new(&config).unwrap();
+        let url = "https://www.ticketmaster.cz/event/example/12345678";
+        for seat_id in [None, Some("seat-123")] {
+            let result = fetcher
+                .fetch_map_section(url, "s_1", seat_id)
+                .await
+                .unwrap();
+            let request: serde_json::Value = serde_json::from_str(&result.html).unwrap();
+            assert_eq!(request["adapter"], "ticketmaster");
+            assert_eq!(request["display"], "map");
+            assert_eq!(request["map_section_id"], "s_1");
+            assert_eq!(request["map_seat_id"].as_str(), seat_id);
+            let evidence = result.map_inspection.unwrap();
+            assert_eq!(evidence.section_id, "s_1");
+            assert_eq!(evidence.seat_id.as_deref(), seat_id);
+        }
+        for (kind, message) in [
+            ("wrong-section", "target mismatch"),
+            ("wrong-seat", "target mismatch"),
+            ("wrong-event", "does not match the requested event"),
+            ("missing", "omitted the requested map section inspection"),
+            ("blocked", "lacks a ready document"),
+        ] {
+            let url = format!("https://www.ticketmaster.cz/event/{kind}/12345678");
+            let error = fetcher
+                .fetch_map_section(&url, "s_1", Some("seat-123"))
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains(message), "{kind}: {error}");
+        }
+        let unsolicited = "https://www.ticketmaster.cz/event/unsolicited/12345678";
+        assert!(
+            fetcher
+                .fetch_map(unsolicited)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("Unsolicited map section inspection")
+        );
+        let ordinary = fetcher.fetch_map(url).await.unwrap();
+        let request: serde_json::Value = serde_json::from_str(&ordinary.html).unwrap();
+        assert!(request.get("map_section_id").is_none());
+        assert!(request.get("map_seat_id").is_none());
+        assert!(ordinary.map_inspection.is_none());
         fetcher.shutdown().await;
     }
 

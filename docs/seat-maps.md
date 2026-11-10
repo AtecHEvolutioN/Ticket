@@ -5,6 +5,8 @@ selection zones and supported rendered SVG section outlines. Its browser mode
 keeps the native map display instead of switching to best available. It can
 export a clean section SVG, download a referenced image and save a draft static
 layout in the venue registry.
+Opt-in [Czech section and seat inspection](seat-inspection.md) also reads rendered
+seat identities and supported resale hover prices.
 These source features are newer than the 0.6.0-test downloads and Android APK.
 
 ```bash
@@ -96,7 +98,9 @@ SVG and unfamiliar asset paths are unsupported.
 The page extractor reads captured HTML and bound page metadata. It does not read
 canvas pixels, cross-origin iframe contents or shadow-root seat data. Visible
 canvas/iframe counts within the map region are diagnostics, not coverage proof.
-Individual seats, physical aisle boundaries and adjacent groups remain unverified.
+Supported seat layers now provide explicit seat identities and local coordinates
+with partial DOM coverage; see [seat inspection](seat-inspection.md). Available
+seat quantities, physical aisle boundaries and adjacent groups remain unverified.
 
 A drawing's colors and labels do not establish which tickets are on sale.
 All map reports explicitly keep `stock_verified`, `geometry_verified` and

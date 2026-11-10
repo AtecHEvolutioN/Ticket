@@ -6,6 +6,7 @@ const readline = require('node:readline');
 const { captureRendered, sameEvent } = require('./rendered.cjs');
 const { prepareTicketmaster } = require('./ticketmaster.cjs');
 const { prepareTicketmasterMap } = require('./ticketmaster-map.cjs');
+const { inspectTicketmasterSection, assertSectionInspectionCurrent } = require('./ticketmaster-section.cjs');
 const { inspectChallenge, responseIntervention } = require('./manual-intervention.cjs');
 const { observeDocuments } = require('./document-lifecycle.cjs');
 const ALLOWED_DOMAINS = new Set([
@@ -68,7 +69,12 @@ function validateRequest(request) {
   if (request.adapter !== undefined && !['ticketmaster', 'selectors'].includes(request.adapter)) throw new Error('invalid_request');
   if (request.display !== undefined && (request.display !== 'map' || request.adapter !== 'ticketmaster')) throw new Error('invalid_request');
   if (request.adapter === 'ticketmaster' && !sameEvent(request.url, request.url)) throw new Error('invalid_request');
-  return validateUrl(request.url);
+  const url = validateUrl(request.url);
+  const identifier = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
+  if (request.map_section_id !== undefined && (request.display !== 'map'
+      || url.hostname.replace(/^www\./, '') !== 'ticketmaster.cz' || !identifier(request.map_section_id))) throw new Error('invalid_request');
+  if (request.map_seat_id !== undefined && (request.map_section_id === undefined || !identifier(request.map_seat_id))) throw new Error('invalid_request');
+  return url;
 }
 
 async function capture(context, request) {
@@ -157,6 +163,7 @@ async function capture(context, request) {
     let html = '';
     let adapterState;
     let adapterReason;
+    let mapInspection;
     let manualIntervention = responseIntervention(status, headers);
     const guard = async () => {
       await documents.synchronize();
@@ -183,28 +190,38 @@ async function capture(context, request) {
           validateDocument({ url: page.url() });
           snapshot = current;
         };
-        const prepared = request.display === 'map'
-          ? await prepareTicketmasterMap(page, target.href, remaining(), mapGuard)
-          : await prepareTicketmaster(page, target.href, remaining());
+        const prepared = request.map_section_id !== undefined
+          ? await inspectTicketmasterSection(page, target.href,
+            { sectionId: request.map_section_id, seatId: request.map_seat_id }, remaining(), mapGuard)
+          : request.display === 'map'
+            ? await prepareTicketmasterMap(page, target.href, remaining(), mapGuard)
+            : await prepareTicketmaster(page, target.href, remaining());
         await guard();
+        if (prepared.state === 'section_ready') mapInspection = prepared.inspection;
         adapterReason = prepared.state;
-        adapterState = ['regional', 'listings', 'map_svg', 'map_static', 'map_canvas', 'map_iframe'].includes(prepared.state) ? 'ready'
+        adapterState = ['regional', 'listings', 'map_svg', 'map_static', 'map_canvas', 'map_iframe', 'section_ready'].includes(prepared.state) ? 'ready'
           : ['blocked', 'map_modal_blocked'].includes(prepared.state) ? 'blocked'
             : prepared.state === 'no_visible_offers' ? 'no_offers' : 'unsupported';
       }
       html = await captureRendered(page, request.max_body_bytes);
       await guard();
+      if (mapInspection) {
+        await assertSectionInspectionCurrent(page, target.href, mapInspection);
+        await guard();
+      }
       manualIntervention ||= await inspectChallenge(page);
       await guard();
     }
     if (manualIntervention) {
       adapterState = 'blocked';
       adapterReason = 'manual_intervention';
+      mapInspection = undefined;
     }
     const finalUrl = validateUrl(page.url());
     validateDocument({ url: finalUrl.href });
     return { id: request.id, status, html, final_url: finalUrl.href,
       ...(adapterState ? { adapter_state: adapterState, adapter_reason: adapterReason } : {}),
+      ...(mapInspection ? { map_inspection: mapInspection } : {}),
       ...(manualIntervention ? { manual_intervention: manualIntervention } : {}),
       retry_after_secs: retryAfter(headers['retry-after']), elapsed_ms: Math.round(performance.now() - started),
       server: headers.server?.slice(0, 120), content_type: headers['content-type']?.slice(0, 120) };

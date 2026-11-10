@@ -69,6 +69,8 @@ pub struct SeatMapSnapshot {
     pub displayed_reference_matched: bool,
     /// Observed vector section outlines, not individual seats or live inventory.
     pub rendered_geometry: Option<crate::map_geometry::MapGeometry>,
+    /// Explicit rendered seat labels and coordinates; not a stock count.
+    pub rendered_seats: Option<crate::seat_geometry::RenderedSeats>,
 }
 
 /// Inspect an already captured page. The caller owns transport/freshness validation.
@@ -308,8 +310,11 @@ pub fn extract_seat_map(
             displayed_reference_matched = true;
         }
     }
+    let rendered_seats = crate::seat_geometry::extract_rendered_seats(regions[0])?;
     let rendered_geometry = crate::map_geometry::extract_svg_geometry(regions[0])?;
-    let evidence = if rendered_geometry.is_some() {
+    let evidence = if rendered_seats.is_some() {
+        "rendered_seats_and_configuration"
+    } else if rendered_geometry.is_some() {
         "rendered_svg_sections_and_configuration"
     } else {
         "static_reference_configuration"
@@ -332,6 +337,7 @@ pub fn extract_seat_map(
         image_content_verified: false,
         displayed_reference_matched,
         rendered_geometry,
+        rendered_seats,
     })
 }
 

@@ -52,6 +52,12 @@ enum Command {
         /// Export observed section outlines as a rebuilt SVG; no source scripts or styling.
         #[arg(long)]
         geometry_svg: Option<PathBuf>,
+        /// Open one Czech map section without selecting tickets (live browser only).
+        #[arg(long, conflicts_with = "html")]
+        section_id: Option<String>,
+        /// Hover one rendered seat in that section without selecting it.
+        #[arg(long, requires = "section_id", conflicts_with = "html")]
+        seat_id: Option<String>,
     },
     /// Inspect configured Czech prices and quantity controls; never selects or reserves tickets.
     CartCatalog {
@@ -707,39 +713,65 @@ async fn main() -> Result<()> {
             save_layout,
             map_image,
             geometry_svg,
+            section_id,
+            seat_id,
         } => {
             config::validate_public_url(&url)?;
             if !ticket_watch::event_identity::same_event(&url, &url) {
                 bail!("Use a supported public Ticketmaster event URL");
             }
-            let (body, final_url, source, transport_binding) = if let Some(path) = html {
-                (
-                    read_html(&path, config.max_body_bytes)?,
-                    url.clone(),
-                    "saved_html",
-                    "unverified_saved_html",
-                )
-            } else {
-                let mut browser_config = config.clone();
-                browser_config.browser.headed = headed;
-                browser_config.request_timeout_secs = 45;
-                let fetcher = Fetcher::new(&browser_config)?;
-                let result = fetcher.fetch_map(&url).await;
-                fetcher.shutdown().await;
-                let page = result?;
-                if !(200..300).contains(&page.status)
-                    || page.adapter_state.as_deref() == Some("blocked")
-                {
-                    bail!("HTTP {}; {}; no map extracted", page.status, page.detail);
-                }
-                (
-                    page.html,
-                    page.final_url,
-                    "live_browser",
-                    "observed_main_document",
-                )
-            };
+            let (body, final_url, source, transport_binding, map_inspection) =
+                if let Some(path) = html {
+                    (
+                        read_html(&path, config.max_body_bytes)?,
+                        url.clone(),
+                        "saved_html",
+                        "unverified_saved_html",
+                        None,
+                    )
+                } else {
+                    let mut browser_config = config.clone();
+                    browser_config.browser.headed = headed;
+                    browser_config.request_timeout_secs = 45;
+                    let fetcher = Fetcher::new(&browser_config)?;
+                    let result = if let Some(section_id) = section_id.as_deref() {
+                        fetcher
+                            .fetch_map_section(&url, section_id, seat_id.as_deref())
+                            .await
+                    } else {
+                        fetcher.fetch_map(&url).await
+                    };
+                    fetcher.shutdown().await;
+                    let page = result?;
+                    if !(200..300).contains(&page.status)
+                        || page.adapter_state.as_deref() == Some("blocked")
+                    {
+                        bail!("HTTP {}; {}; no map extracted", page.status, page.detail);
+                    }
+                    (
+                        page.html,
+                        page.final_url,
+                        "live_browser",
+                        "observed_main_document",
+                        page.map_inspection,
+                    )
+                };
             let snapshot = ticket_watch::seat_map::extract_seat_map(&url, &final_url, &body)?;
+            let section_inspection = match (section_id.as_deref(), map_inspection.as_ref()) {
+                (Some(section_id), Some(inspection)) => {
+                    if inspection.section_id != section_id
+                        || inspection.seat_id.as_deref() != seat_id.as_deref()
+                    {
+                        bail!("Map section inspection target mismatch");
+                    }
+                    Some(ticket_watch::map_inspection::validate_inspection(
+                        &snapshot, inspection,
+                    )?)
+                }
+                (Some(_), None) => bail!("No captured evidence for the requested map section"),
+                (None, Some(_)) => bail!("Unsolicited map section inspection"),
+                (None, None) => None,
+            };
             // Validate a save candidate before attempting either optional output action.
             let preset = save_layout.then(|| map_preset(&snapshot)).transpose()?;
             let svg = geometry_svg
@@ -804,7 +836,8 @@ async fn main() -> Result<()> {
             };
             print_json(
                 &serde_json::json!({"source":source, "transport_binding":transport_binding,
-                "map":snapshot, "saved_venue":saved, "downloaded_image":image, "exported_geometry":exported_geometry}),
+                "map":snapshot, "saved_venue":saved, "downloaded_image":image, "exported_geometry":exported_geometry,
+                "section_inspection":section_inspection}),
             )?;
         }
         Command::CartPlan { file } => {
@@ -1141,6 +1174,7 @@ mod observation_tests {
                 final_url: String::new(),
                 detail: "browser result".into(),
                 adapter_state: Some(state.into()),
+                map_inspection: None,
             };
             let result = page_observation(&watch, &page, 10);
             assert_eq!(result.availability, expected, "{state}");

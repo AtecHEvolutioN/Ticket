@@ -1,0 +1,69 @@
+{
+  "event_url": "https://www.ticketmaster.cz/event/korn-vstupenky/1472650657",
+  "market": "CZ",
+  "release_cli_observation": {
+    "output_completed_at_utc": "2026-11-10T06:50:44.848189+00:00",
+    "completion_time_source": "local output file modification time",
+    "source": "live_browser",
+    "transport_binding": "observed_main_document",
+    "command": "ticket-watch map-inspect --headed --url https://www.ticketmaster.cz/event/korn-vstupenky/1472650657 --section-id s_128 --seat-id GFIC2MJRGA5DCMR2GM",
+    "section_inspection": {
+      "adjacency_verified": false,
+      "coverage": "section_only",
+      "displayed_quote": {
+        "available_quantity": null,
+        "currency": "CZK",
+        "evidence": "rendered_seat_hover",
+        "fees_complete": false,
+        "price_basis": "per_ticket",
+        "price_minor": 243800,
+        "price_text": "2 438,00 Kč za kus",
+        "restriction": "Omezený výhled",
+        "row": "12",
+        "seat": "3",
+        "seat_id": "GFIC2MJRGA5DCMR2GM",
+        "section": "110",
+        "ticket_type": "Ověřené přeprodávané vstupenky",
+        "zone": "1. POSCHODÍ"
+      },
+      "hovered_seat_id": "GFIC2MJRGA5DCMR2GM",
+      "rendered_seat_count": 376,
+      "section_id": "s_128",
+      "section_name": "110",
+      "stock_verified": false
+    },
+    "rendered_map": {
+      "seat_records": 2150,
+      "blocks": 7,
+      "rows": 113,
+      "painted_populated_copies": 1,
+      "geometry_fingerprint": "seat-geometry-b1e16132d41e30c4dafd60d2e7d336a08351f762f2c2f5247bad2af3bf2155c9",
+      "coverage": "partial_rendered_dom",
+      "overview_sections": 52
+    }
+  },
+  "development_probe": {
+    "section_click_tested_with_network_disabled": true,
+    "seat_tooltip_tested_with_network_disabled": true,
+    "initial_probe_identification_timed_out": true,
+    "later_ordinary_sessions_succeeded": true
+  },
+  "verification": {
+    "rust_tests_passed": 245,
+    "browser_tests_passed": 66,
+    "browser_tests_skipped": 0,
+    "formatting": "passed",
+    "clippy": "passed",
+    "release_build": "passed"
+  },
+  "limitations": {
+    "ticket_selection_attempted": false,
+    "reservation_attempted": false,
+    "available_quantity_verified": false,
+    "complete_checkout_fees_verified": false,
+    "adjacency_verified": false,
+    "complete_event_coverage_verified": false,
+    "standard_seat_hover_verified": false,
+    "android_apk_updated": false
+  }
+}

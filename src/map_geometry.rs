@@ -109,6 +109,17 @@ pub fn extract_svg_geometry(region: ElementRef<'_>) -> Result<Option<MapGeometry
         if blocked_ancestor(svg) || own_hidden(svg, true) {
             continue;
         }
+        // A zoomed map replaces most overview polygons with seat blocks. Its
+        // remaining polygons are a partial viewport, not a conflicting copy of
+        // the overview/minimap. Seat extraction validates that separate layer.
+        if svg.children().filter_map(ElementRef::wrap).any(|e| {
+            e.value().name() == "g"
+                && e.value().classes().any(|c| c == "seats")
+                && !own_hidden(e, false)
+                && e.children().any(|node| ElementRef::wrap(node).is_some())
+        }) {
+            continue;
+        }
         ensure!(
             svg.ancestors()
                 .filter_map(ElementRef::wrap)
