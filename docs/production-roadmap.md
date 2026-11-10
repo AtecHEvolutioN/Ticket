@@ -6,6 +6,10 @@ experiment. This roadmap does not enable purchases, resale listings or repricing
 
 ## Implemented
 
+- [Always-on NL deployment preparation](netherlands-server.md): Debian service
+  templates, private state/cache paths, an offline preparation helper and a worker
+  bundle with hashes. No paid VM, production install, live routing or startup has
+  been performed. [Handoff](../HANDOFF.md) records the current deployed state.
 - Rust artist/location subscriptions, Discovery catalog refresh, website adapters,
   persistent observations/outbox, deduplication, pacing and saved cooldowns.
   Displayed prices, listing quantities and unknown inventory remain distinct.

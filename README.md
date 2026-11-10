@@ -6,6 +6,10 @@ Rust monitoring that combines **Ticketmaster Discovery API searches** with **web
 
 ## Downloads
 
+For the current deployment state and next steps, read [HANDOFF.md](HANDOFF.md).
+The [always-on Netherlands server guide](docs/netherlands-server.md) prepares a
+dedicated worker; no paid server or live feed has been activated yet.
+
 The [0.7.0-test release](https://github.com/AtecHEvolutioN/Ticket/releases/tag/v0.7.0-test)
 contains the tested app/bot builds and SHA-256 checksums. The venue catalog is
 maintained separately on `main`:

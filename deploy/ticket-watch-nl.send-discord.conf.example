@@ -1,0 +1,6 @@
+# Opt-in only: copy to /etc/systemd/system/ticket-watch-nl.service.d/send-discord.conf
+# after configuring one channel, storing the bot token privately, and checking delivery.
+# This does not add multi-channel routing or guarantee immediate event detection.
+[Service]
+ExecStart=
+ExecStart=/opt/ticket-watch/target/release/ticket-watch --config /etc/ticket-watch-nl/config.toml run --send-discord

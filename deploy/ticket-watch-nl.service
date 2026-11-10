@@ -1,0 +1,42 @@
+[Unit]
+Description=Ticket Watch Netherlands availability monitor
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=exec
+User=ticketwatch-nl
+Group=ticketwatch-nl
+WorkingDirectory=/opt/ticket-watch
+EnvironmentFile=/etc/ticket-watch-nl/environment
+Environment=HOME=/var/lib/ticket-watch-nl
+Environment=XDG_CONFIG_HOME=/var/lib/ticket-watch-nl/browser-config
+Environment=XDG_CACHE_HOME=/var/cache/ticket-watch-nl
+ExecStartPre=/opt/ticket-watch/target/release/ticket-watch --config /etc/ticket-watch-nl/config.toml validate
+# Preview still fetches providers once the subscription is enabled and started.
+# Delivery requires the separately installed, reviewed send-discord drop-in.
+ExecStart=/opt/ticket-watch/target/release/ticket-watch --config /etc/ticket-watch-nl/config.toml run
+StateDirectory=ticket-watch-nl
+StateDirectoryMode=0700
+CacheDirectory=ticket-watch-nl
+CacheDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=30
+# The ordinary monitor handles SIGINT for graceful browser/database shutdown.
+KillSignal=SIGINT
+KillMode=mixed
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/ticket-watch-nl /var/cache/ticket-watch-nl
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ticket-watch-nl
+
+[Install]
+WantedBy=multi-user.target

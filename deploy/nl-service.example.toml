@@ -1,0 +1,58 @@
+# Install as /etc/ticket-watch-nl/config.toml. Secrets go in environment, never TOML.
+# This is a prepared, inactive scope: enable the subscription only after reviewing
+# the catalog/access results and the intended Discord destination.
+database = "/var/lib/ticket-watch-nl/ticket.sqlite"
+map_database = "/var/lib/ticket-watch-nl/map-unused.sqlite"
+request_timeout_secs = 45
+per_host_interval_secs = 60
+blocked_retry_secs = 900
+unknown_retry_secs = 120
+max_in_flight = 2
+alert_max_age_secs = 120
+
+[catalog]
+refresh_interval_secs = 900
+max_requests_per_refresh = 10
+max_requests_per_day = 4000
+max_events = 1000
+# Bounded country query, not exhaustive coverage. At 60 seconds per host request,
+# 1000 event pages take over 16 hours per sweep before response time/backoff.
+# A profile interval is not a per-event freshness or instant-alert guarantee.
+
+[browser]
+node = "/usr/bin/node"
+script = "/opt/ticket-watch/browser/worker.cjs"
+executable_path = "/usr/bin/chromium"
+render_wait_ms = 1500
+headed = false
+
+[discord]
+token_env = "DISCORD_BOT_TOKEN"
+# Set one actual numeric channel ID before installing the sending drop-in.
+# Automatic routing to separate NL price/sale/status channels is not implemented.
+# channel_id = "YOUR_NUMERIC_CHANNEL_ID"
+mention_user_ids = []
+mention_role_ids = []
+
+[[subscriptions]]
+id = "netherlands-all-artists"
+all_artists = true
+country = "NL"
+profile = "ticketmaster-nl"
+enabled = false
+exclude_keywords = []
+# An optional city narrows the scope. No attraction_id is valid in all-artists mode.
+# city = "Amsterdam"
+
+[[profiles]]
+id = "ticketmaster-nl"
+hosts = ["www.ticketmaster.nl", "ticketmaster.nl"]
+mode = "browser"
+interval_secs = 60
+notify_initial = false
+notify_offer_changes = true
+
+[profiles.parser]
+adapter = "ticketmaster"
+# Unknown layouts/access failures remain unknown; sale schedules are metadata.
+# No Netherlands map watches: live Dutch seat scanning is not supported yet.
