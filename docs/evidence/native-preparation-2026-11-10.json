@@ -1,0 +1,147 @@
+{
+  "recorded_at_utc": "2026-11-10T10:11:08.454389+00:00",
+  "scope": "configuration and offline native filter rehearsal; no ticket search or reservation",
+  "live_rehearsals": [
+    {
+      "source": "live_browser_offline_filter_rehearsal",
+      "event_url": "https://www.ticketmaster.cz/event/1472650657",
+      "event_name": "KoRn",
+      "quantity": 2,
+      "category_id": "2",
+      "category_title": "Sezení",
+      "discount_type": "STANDARD",
+      "price_id": "6",
+      "observed_price_label": "1 889,00 Kč • Sezení 5. kategorie",
+      "configured_unit_total_minor": 188900,
+      "currency": "CZK",
+      "requested_native_section_ids": [
+        "4P"
+      ],
+      "effective_native_section_ids": [
+        "4P"
+      ],
+      "observed_section_labels": [
+        "4. POSCHODÍ"
+      ],
+      "elapsed_ms": 21516,
+      "offline_phase_ms": 13705,
+      "network_disabled_before_changes": true,
+      "price_selection_verified": true,
+      "section_selection_verified": true,
+      "filters_restored": true,
+      "form_restored": true,
+      "initial_quantity": 0,
+      "final_quantity": 0,
+      "stock_verified": false,
+      "adjacency_verified": false,
+      "fees_complete": false,
+      "cheapest_available_verified": false,
+      "hold_verified": false,
+      "reservation_attempted": false
+    },
+    {
+      "source": "live_browser_offline_filter_rehearsal",
+      "event_url": "https://www.ticketmaster.cz/event/493115848",
+      "event_name": "Andrea Bocelli",
+      "quantity": 2,
+      "category_id": "1",
+      "category_title": "Základní",
+      "discount_type": "STANDARD",
+      "price_id": "11",
+      "observed_price_label": "1 490,00 Kč • Základní 6. kategorie",
+      "configured_unit_total_minor": 149000,
+      "currency": "CZK",
+      "requested_native_section_ids": [
+        "4P"
+      ],
+      "effective_native_section_ids": [
+        "4P"
+      ],
+      "observed_section_labels": [
+        "4. POSCHODÍ"
+      ],
+      "elapsed_ms": 22664,
+      "offline_phase_ms": 14400,
+      "network_disabled_before_changes": true,
+      "price_selection_verified": true,
+      "section_selection_verified": true,
+      "filters_restored": true,
+      "form_restored": true,
+      "initial_quantity": 0,
+      "final_quantity": 0,
+      "stock_verified": false,
+      "adjacency_verified": false,
+      "fees_complete": false,
+      "cheapest_available_verified": false,
+      "hold_verified": false,
+      "reservation_attempted": false
+    }
+  ],
+  "saved_configuration_checks": [
+    {
+      "source": "saved_html",
+      "event": "KoRn",
+      "configured_candidates": 22,
+      "quantity": 2,
+      "lowest_configured": {
+        "category_id": "23",
+        "category_title": "Omezený výhled",
+        "configured_group_subtotal_minor": 342400,
+        "configured_section_ids": [
+          "4P"
+        ],
+        "configured_unit_total_minor": 171200,
+        "native_category_control_supported": true,
+        "price_id": "11",
+        "price_level_title": "6. kategorie - omezený boční výhled"
+      },
+      "stock_verified": false,
+      "reservation_authorized": false
+    },
+    {
+      "source": "saved_html",
+      "event": "Andrea Bocelli",
+      "configured_candidates": 37,
+      "quantity": 2,
+      "lowest_configured": {
+        "category_id": "1",
+        "category_title": "Základní",
+        "configured_group_subtotal_minor": 298000,
+        "configured_section_ids": [
+          "4P"
+        ],
+        "configured_unit_total_minor": 149000,
+        "native_category_control_supported": true,
+        "price_id": "11",
+        "price_level_title": "6. kategorie"
+      },
+      "stock_verified": false,
+      "reservation_authorized": false
+    },
+    {
+      "source": "saved_html",
+      "event": "Ross Noble",
+      "configured_candidates": 2,
+      "quantity": 2,
+      "lowest_configured": {
+        "category_id": "1",
+        "category_title": "Základní",
+        "configured_group_subtotal_minor": 118000,
+        "configured_section_ids": [
+          "P"
+        ],
+        "configured_unit_total_minor": 59000,
+        "native_category_control_supported": true,
+        "price_id": "2",
+        "price_level_title": "2. kategorie"
+      },
+      "stock_verified": false,
+      "reservation_authorized": false
+    }
+  ],
+  "limitations": [
+    "STANDARD ticket-type flow only; Platinum and Collector native preparation unsupported",
+    "Configured prices and native floor filters do not establish stock, exact seat sections, rows, adjacency or complete fees",
+    "Native reservation submission and authenticated receipt capture are not connected"
+  ]
+}

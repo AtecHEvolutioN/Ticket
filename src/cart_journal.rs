@@ -20,7 +20,7 @@ use sha2::{Digest, Sha256};
 use crate::cart::{self, CartPlanRequest, PlanOutcome, QuoteFees, RankingScope, SeatIdentity};
 
 const APPLICATION_ID: i64 = 0x54434A31; // TCJ1, distinct from the inventory database.
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 const ACTIVE_INDEX_SQL: &str =
     "CREATE UNIQUE INDEX cart_one_active_event ON cart_attempts(event_key)
   WHERE state IN ('prepared','dispatch_started','needs_reconciliation','held')";
@@ -44,6 +44,18 @@ CREATE TABLE cart_transitions (
   attempt_id TEXT NOT NULL REFERENCES cart_attempts(attempt_id),
   state TEXT NOT NULL,
   occurred_at_ms INTEGER NOT NULL
+);";
+const SEARCH_HISTORY_SCHEMA: &str = "
+CREATE TABLE cart_search_outcomes (
+  sequence INTEGER PRIMARY KEY,
+  attempt_id TEXT NOT NULL REFERENCES cart_attempts(attempt_id),
+  reconciliation_id TEXT,
+  operation_hash TEXT,
+  supersedes_outcome_hash TEXT,
+  outcome_hash TEXT NOT NULL,
+  receipt_json TEXT NOT NULL,
+  recorded_at_ms INTEGER NOT NULL,
+  UNIQUE(attempt_id,reconciliation_id)
 );";
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -205,12 +217,47 @@ pub struct NativeSearchUncertainReceipt {
     pub reason: NativeSearchUncertainty,
 }
 
+/// Explicit native confirmation that a previously observed hold was released.
+/// An empty cart, elapsed timer or navigation alone cannot supply these claims.
+/// This is accepted only by reconciliation of that same previously observed hold.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct NativeSearchReleasedReceipt {
+    pub context: NativeSearchReceiptContext,
+    pub hold_correlation_id: String,
+    pub release_correlation_id: String,
+    pub release_explicitly_confirmed: bool,
+    pub absence_explicitly_confirmed: bool,
+    pub request_terminal: bool,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", content = "receipt", rename_all = "snake_case")]
 pub enum NativeSearchOutcome {
     Hold(Box<NativeSearchHoldReceipt>),
     NoHold(NativeSearchNoHoldReceipt),
     Uncertain(NativeSearchUncertainReceipt),
+    Released(NativeSearchReleasedReceipt),
+}
+
+/// A compare-and-swap observation, never a request to submit or release tickets.
+/// The operation ID binds the complete sanitized input for idempotent replay.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct NativeSearchReconciliation {
+    pub reconciliation_id: String,
+    pub expected_outcome_hash: String,
+    pub outcome: NativeSearchOutcome,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct NativeSearchHistoryEntry {
+    pub sequence: i64,
+    pub reconciliation_id: Option<String>,
+    pub supersedes_outcome_hash: Option<String>,
+    pub outcome_hash: String,
+    pub recorded_at_ms: i64,
+    pub receipt: RecordedSearchOutcome,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -226,6 +273,7 @@ pub enum SearchReviewReason {
     CheapestRankingUnconfirmed,
     OutcomeUncertain,
     NoHoldNotFinal,
+    ReleaseNotFinal,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -248,6 +296,10 @@ pub struct AttemptRecord {
     pub updated_at_ms: i64,
     pub dispatch_at_ms: Option<i64>,
     pub receipt: Option<OutcomeReceipt>,
+    /// Current native evidence fingerprint for reconciliation compare-and-swap.
+    /// This is not a provider token or proof that the evidence is authentic.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub native_outcome_hash: Option<String>,
     pub evidence_basis: &'static str,
     pub reservation_authorized: bool,
     pub source_authenticated: bool,
@@ -376,6 +428,7 @@ impl CartJournal {
             )?;
             if application_id == 0 && version == 0 && table_count == 0 {
                 tx.execute_batch(SCHEMA)?;
+                tx.execute_batch(SEARCH_HISTORY_SCHEMA)?;
                 tx.execute_batch(ACTIVE_INDEX_SQL)?;
                 tx.pragma_update(None, "application_id", APPLICATION_ID)?;
                 tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -384,6 +437,12 @@ impl CartJournal {
                 if version < 3 {
                     // Preserve existing rows, dates, receipts and shared locks.
                     tx.execute_batch("ALTER TABLE cart_attempts ADD COLUMN workflow TEXT NOT NULL DEFAULT 'quoted_plan' CHECK(workflow IN ('quoted_plan','native_search'))")?;
+                }
+                if version < 4 {
+                    tx.execute_batch(SEARCH_HISTORY_SCHEMA)?;
+                    // Preserve the last v3 native observation verbatim before
+                    // making reconciliation available. Never invent lost history.
+                    tx.execute("INSERT INTO cart_search_outcomes(attempt_id,outcome_hash,receipt_json,recorded_at_ms) SELECT attempt_id,receipt_hash,receipt_json,updated_at_ms FROM cart_attempts WHERE workflow='native_search' AND receipt_json IS NOT NULL", [])?;
                     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
                 }
             }
@@ -558,6 +617,10 @@ impl CartJournal {
         validate_time(now_ms)?;
         let mut outcome = outcome.clone();
         sanitize_search_outcome(&mut outcome)?;
+        ensure!(
+            !matches!(outcome, NativeSearchOutcome::Released(_)),
+            "hold release requires reconciliation of a recorded hold"
+        );
         let input = serde_json::to_vec(&outcome)?;
         ensure!(
             input.len() <= cart::MAX_INPUT_BYTES,
@@ -573,6 +636,14 @@ impl CartJournal {
             "outcome workflow mismatch"
         );
         if stored.receipt_hash.as_deref() == Some(&receipt_hash) {
+            tx.commit()?;
+            return Ok(stored.record);
+        }
+        let initial_replay: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM cart_search_outcomes WHERE attempt_id=?1 AND reconciliation_id IS NULL AND outcome_hash=?2)",
+            params![attempt_id,receipt_hash], |r| r.get(0)
+        )?;
+        if initial_replay {
             tx.commit()?;
             return Ok(stored.record);
         }
@@ -592,18 +663,127 @@ impl CartJournal {
             "transition timestamp goes backwards"
         );
         let recorded = assess_search_outcome(&stored.record, outcome, now_ms)?;
-        let state = if recorded.review_reasons.is_empty() {
-            match &recorded.outcome {
-                NativeSearchOutcome::Hold(_) => "held",
-                NativeSearchOutcome::NoHold(_) => "no_hold_confirmed",
-                NativeSearchOutcome::Uncertain(_) => "needs_reconciliation",
-            }
-        } else {
-            "needs_reconciliation"
-        };
+        let state = search_outcome_state(&recorded);
         let receipt = OutcomeReceipt::NativeSearch(recorded);
+        let receipt_json = serde_json::to_string(&receipt)?;
+        ensure!(
+            receipt_json.len() <= cart::MAX_INPUT_BYTES,
+            "recorded native outcome exceeds input limit"
+        );
         tx.execute("UPDATE cart_attempts SET state=?2,updated_at_ms=?3,receipt_json=?4,receipt_hash=?5 WHERE attempt_id=?1",
-            params![attempt_id,state,now_ms,serde_json::to_string(&receipt)?,receipt_hash])?;
+            params![attempt_id,state,now_ms,receipt_json,receipt_hash])?;
+        tx.execute("INSERT INTO cart_search_outcomes(attempt_id,outcome_hash,receipt_json,recorded_at_ms) VALUES (?1,?2,?3,?4)",params![attempt_id,receipt_hash,receipt_json,now_ms])?;
+        transition(&tx, attempt_id, state, now_ms)?;
+        let record = require(&tx, attempt_id)?.record;
+        tx.commit()?;
+        Ok(record)
+    }
+
+    /// Reconcile fresh native evidence in the original request lineage without
+    /// resubmission. Prior outcomes remain in the append-only history. A known
+    /// hold can only be confirmed as the same hold, or explicitly released.
+    /// Exact retries return the CURRENT record without rewinding later history.
+    pub fn reconcile_search(
+        &mut self,
+        attempt_id: &str,
+        reconciliation: &NativeSearchReconciliation,
+        now_ms: i64,
+    ) -> Result<AttemptRecord> {
+        validate_id(attempt_id)?;
+        validate_time(now_ms)?;
+        let mut reconciliation = reconciliation.clone();
+        validate_id(&reconciliation.reconciliation_id)?;
+        ensure!(
+            valid_digest(&reconciliation.expected_outcome_hash),
+            "invalid expected outcome fingerprint"
+        );
+        sanitize_search_outcome(&mut reconciliation.outcome)?;
+        let input = serde_json::to_vec(&reconciliation)?;
+        ensure!(
+            input.len() <= cart::MAX_INPUT_BYTES,
+            "reconciliation exceeds input limit"
+        );
+        let operation_hash = digest(&input);
+        let outcome_hash = digest(&serde_json::to_vec(&reconciliation.outcome)?);
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let stored = require(&tx, attempt_id)?;
+        ensure!(
+            stored.record.workflow == AttemptWorkflow::NativeSearch,
+            "reconciliation workflow mismatch"
+        );
+        let prior_operation: Option<String> = tx.query_row(
+            "SELECT operation_hash FROM cart_search_outcomes WHERE attempt_id=?1 AND reconciliation_id=?2",
+            params![attempt_id,reconciliation.reconciliation_id], |r| r.get(0)
+        ).optional()?;
+        if let Some(previous_hash) = prior_operation {
+            ensure!(
+                previous_hash == operation_hash,
+                "reconciliation ID is bound to different evidence"
+            );
+            tx.commit()?;
+            return Ok(stored.record);
+        }
+        ensure!(
+            matches!(stored.raw_state.as_str(), "needs_reconciliation" | "held"),
+            "reconciliation is out of order"
+        );
+        ensure!(
+            stored.receipt_hash.as_deref() == Some(reconciliation.expected_outcome_hash.as_str()),
+            "native outcome changed; inspect the current record before reconciling"
+        );
+        let previous = match &stored.record.receipt {
+            Some(OutcomeReceipt::NativeSearch(v)) => v,
+            _ => bail!("reconciliation requires a recorded native outcome"),
+        };
+        let latest: (String,String) = tx.query_row(
+            "SELECT outcome_hash,receipt_json FROM cart_search_outcomes WHERE attempt_id=?1 ORDER BY sequence DESC LIMIT 1",
+            [attempt_id], |r| Ok((r.get(0)?,r.get(1)?))
+        ).context("native outcome history is missing")?;
+        ensure!(
+            latest.0 == reconciliation.expected_outcome_hash
+                && latest.1 == serde_json::to_string(stored.record.receipt.as_ref().unwrap())?,
+            "native outcome history does not match the current record"
+        );
+        let context = search_context(&reconciliation.outcome);
+        validate_time(context.observed_at_ms)?;
+        ensure!(
+            now_ms >= stored.record.updated_at_ms
+                && context.observed_at_ms > stored.record.updated_at_ms
+                && (previous
+                    .review_reasons
+                    .contains(&SearchReviewReason::InvalidObservationTime)
+                    || context.observed_at_ms > search_context(&previous.outcome).observed_at_ms)
+                && context.observed_at_ms <= now_ms
+                && now_ms - context.observed_at_ms < cart::MAX_QUOTE_AGE_MS,
+            "reconciliation requires a newer, fresh native observation"
+        );
+        validate_search_reconciliation(&stored.record, previous, &reconciliation.outcome, now_ms)?;
+        let recorded = assess_search_outcome(&stored.record, reconciliation.outcome, now_ms)?;
+        // A recovery observation must come from the bound session and event.
+        // Unknown stock/fees/ranking may remain unresolved, but a different page
+        // cannot replace the evidence from the attempted reservation.
+        ensure!(
+            !recorded.review_reasons.iter().any(|reason| matches!(
+                reason,
+                SearchReviewReason::ContextMismatch
+                    | SearchReviewReason::EventOrDateMismatch
+                    | SearchReviewReason::InvalidObservationTime
+                    | SearchReviewReason::ReleaseNotFinal
+            )),
+            "reconciliation evidence is not bound to the original request or terminal release"
+        );
+        let state = search_outcome_state(&recorded);
+        let receipt_json = serde_json::to_string(&OutcomeReceipt::NativeSearch(recorded))?;
+        ensure!(
+            receipt_json.len() <= cart::MAX_INPUT_BYTES,
+            "recorded native outcome exceeds input limit"
+        );
+        tx.execute("INSERT INTO cart_search_outcomes(attempt_id,reconciliation_id,operation_hash,supersedes_outcome_hash,outcome_hash,receipt_json,recorded_at_ms) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+            params![attempt_id,reconciliation.reconciliation_id,operation_hash,reconciliation.expected_outcome_hash,outcome_hash,receipt_json,now_ms])?;
+        tx.execute("UPDATE cart_attempts SET state=?2,updated_at_ms=?3,receipt_json=?4,receipt_hash=?5 WHERE attempt_id=?1",
+            params![attempt_id,state,now_ms,receipt_json,outcome_hash])?;
         transition(&tx, attempt_id, state, now_ms)?;
         let record = require(&tx, attempt_id)?.record;
         tx.commit()?;
@@ -894,6 +1074,85 @@ pub fn inspect_file(path: &Path) -> Result<Vec<AttemptRecord>> {
     Ok(records)
 }
 
+/// Read all retained native observations without creating or migrating a file.
+/// A legacy native receipt is exposed as a single snapshot; earlier evidence
+/// predating schema 4 was not retained and is never reconstructed here.
+pub fn inspect_search_history(
+    path: &Path,
+    attempt_id: &str,
+) -> Result<Vec<NativeSearchHistoryEntry>> {
+    validate_id(attempt_id)?;
+    ensure!(
+        path.is_file(),
+        "cart journal does not exist or is not a file"
+    );
+    let mut connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    connection.busy_timeout(Duration::from_secs(5))?;
+    let tx = connection.transaction()?;
+    let version = validate_schema(&tx)?;
+    let stored = require(&tx, attempt_id)?;
+    ensure!(
+        stored.record.workflow == AttemptWorkflow::NativeSearch,
+        "history requires a native search attempt"
+    );
+    let records = if version < 4 {
+        match stored.record.receipt {
+            Some(OutcomeReceipt::NativeSearch(receipt)) => vec![NativeSearchHistoryEntry {
+                sequence: 0,
+                reconciliation_id: None,
+                supersedes_outcome_hash: None,
+                outcome_hash: stored
+                    .receipt_hash
+                    .context("legacy native fingerprint missing")?,
+                recorded_at_ms: stored.record.updated_at_ms,
+                receipt,
+            }],
+            None => vec![],
+            _ => bail!("native history has an incompatible receipt"),
+        }
+    } else {
+        let mut statement = tx.prepare("SELECT sequence,reconciliation_id,supersedes_outcome_hash,outcome_hash,recorded_at_ms,receipt_json FROM cart_search_outcomes WHERE attempt_id=?1 ORDER BY sequence")?;
+        let rows = statement.query_map([attempt_id], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, Option<String>>(1)?,
+                r.get::<_, Option<String>>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, i64>(4)?,
+                r.get::<_, String>(5)?,
+            ))
+        })?;
+        rows.map(|row| {
+            let (
+                sequence,
+                reconciliation_id,
+                supersedes_outcome_hash,
+                outcome_hash,
+                recorded_at_ms,
+                json,
+            ) = row?;
+            ensure!(
+                json.len() <= cart::MAX_INPUT_BYTES,
+                "native history record exceeds input limit"
+            );
+            let OutcomeReceipt::NativeSearch(receipt) = serde_json::from_str(&json)? else {
+                bail!("native history has an incompatible receipt")
+            };
+            Ok(NativeSearchHistoryEntry {
+                sequence,
+                reconciliation_id,
+                supersedes_outcome_hash,
+                outcome_hash,
+                recorded_at_ms,
+                receipt,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?
+    };
+    tx.commit()?;
+    Ok(records)
+}
+
 fn validate_schema(connection: &Connection) -> Result<i64> {
     let application_id: i64 =
         connection.pragma_query_value(None, "application_id", |r| r.get(0))?;
@@ -904,6 +1163,9 @@ fn validate_schema(connection: &Connection) -> Result<i64> {
     );
     if version >= 3 {
         connection.prepare("SELECT workflow FROM cart_attempts LIMIT 0")?;
+    }
+    if version >= 4 {
+        connection.prepare("SELECT sequence,attempt_id,reconciliation_id,operation_hash,supersedes_outcome_hash,outcome_hash,receipt_json,recorded_at_ms FROM cart_search_outcomes LIMIT 0")?;
     }
     // Preparing these queries also rejects damaged/incomplete journal schemas.
     connection.prepare("SELECT attempt_id,event_key,request_hash,binding_json,state,created_at_ms,updated_at_ms,dispatch_at_ms,receipt_json,receipt_hash FROM cart_attempts LIMIT 0")?;
@@ -1008,6 +1270,11 @@ fn load(connection: &Connection, attempt_id: &str) -> Result<Option<StoredAttemp
             created_at_ms,
             updated_at_ms,
             dispatch_at_ms,
+            native_outcome_hash: if workflow == AttemptWorkflow::NativeSearch {
+                receipt_hash.clone()
+            } else {
+                None
+            },
             receipt,
             evidence_basis: "caller_supplied_evidence",
             reservation_authorized: false,
@@ -1261,6 +1528,7 @@ fn search_context(outcome: &NativeSearchOutcome) -> &NativeSearchReceiptContext 
         NativeSearchOutcome::Hold(v) => &v.context,
         NativeSearchOutcome::NoHold(v) => &v.context,
         NativeSearchOutcome::Uncertain(v) => &v.context,
+        NativeSearchOutcome::Released(v) => &v.context,
     }
 }
 
@@ -1269,6 +1537,7 @@ fn sanitize_search_outcome(outcome: &mut NativeSearchOutcome) -> Result<()> {
         NativeSearchOutcome::Hold(v) => &mut v.context,
         NativeSearchOutcome::NoHold(v) => &mut v.context,
         NativeSearchOutcome::Uncertain(v) => &mut v.context,
+        NativeSearchOutcome::Released(v) => &mut v.context,
     };
     for id in [
         &context.attempt_id,
@@ -1350,6 +1619,9 @@ fn sanitize_search_outcome(outcome: &mut NativeSearchOutcome) -> Result<()> {
         }
     } else if let NativeSearchOutcome::NoHold(v) = outcome {
         validate_id(&v.receipt_correlation_id)?;
+    } else if let NativeSearchOutcome::Released(v) = outcome {
+        validate_id(&v.hold_correlation_id)?;
+        validate_id(&v.release_correlation_id)?;
     }
     Ok(())
 }
@@ -1504,12 +1776,151 @@ fn assess_search_outcome(
             }
         }
         NativeSearchOutcome::Uncertain(_) => reasons.push(R::OutcomeUncertain),
+        NativeSearchOutcome::Released(receipt) => {
+            if !receipt.release_explicitly_confirmed
+                || !receipt.absence_explicitly_confirmed
+                || !receipt.request_terminal
+            {
+                reasons.push(R::ReleaseNotFinal);
+            }
+        }
     }
     Ok(RecordedSearchOutcome {
         outcome,
         review_reasons: reasons,
         hold_identity_confirmed,
     })
+}
+
+fn search_outcome_state(recorded: &RecordedSearchOutcome) -> &'static str {
+    if !recorded.review_reasons.is_empty() {
+        return "needs_reconciliation";
+    }
+    match &recorded.outcome {
+        NativeSearchOutcome::Hold(_) => "held",
+        NativeSearchOutcome::NoHold(_) | NativeSearchOutcome::Released(_) => "no_hold_confirmed",
+        NativeSearchOutcome::Uncertain(_) => "needs_reconciliation",
+    }
+}
+
+fn valid_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+}
+
+fn same_search_lineage(record: &AttemptRecord, context: &NativeSearchReceiptContext) -> bool {
+    let Some(binding) = record.search_binding() else {
+        return false;
+    };
+    context.attempt_id == record.attempt_id
+        && context.session_id == binding.request.session_id
+        && context.source_document_id == binding.request.document_id
+        && context.config_id == binding.request.config_id
+}
+
+fn validate_search_reconciliation(
+    record: &AttemptRecord,
+    previous: &RecordedSearchOutcome,
+    next: &NativeSearchOutcome,
+    now_ms: i64,
+) -> Result<()> {
+    if let NativeSearchOutcome::Hold(hold) = next {
+        ensure!(
+            hold.hold_expires_at_ms > now_ms,
+            "reconciliation cannot confirm an already expired hold"
+        );
+    }
+    match (&previous.outcome, next) {
+        (NativeSearchOutcome::Hold(old), NativeSearchOutcome::Hold(new)) => {
+            ensure!(
+                same_search_lineage(record, &old.context),
+                "previous hold came from a conflicting request lineage"
+            );
+            ensure!(
+                old.hold_correlation_id == new.hold_correlation_id
+                    && old.group_id == new.group_id
+                    && old.category_id == new.category_id
+                    && old.price_id == new.price_id
+                    && old.unit_price_minor == new.unit_price_minor
+                    && old.quantity == new.quantity
+                    && old.total_minor == new.total_minor
+                    && old.currency == new.currency
+                    && old.hold_expires_at_ms == new.hold_expires_at_ms,
+                "reconciliation cannot replace or renew an observed hold"
+            );
+            ensure!(
+                !old.context.alternate_event_or_date_reported
+                    && old.context.event_url.as_ref().is_none_or(|url| new
+                        .context
+                        .event_url
+                        .as_ref()
+                        .is_some_and(|next| crate::event_identity::same_event(url, next)))
+                    && old.context.event_start.as_ref().is_none_or(|start| new
+                        .context
+                        .event_start
+                        .as_ref()
+                        == Some(start)),
+                "reconciliation cannot overwrite a concrete conflicting event or date"
+            );
+            ensure!(
+                old.ticket_type
+                    .as_ref()
+                    .is_none_or(|label| new.ticket_type.as_ref().is_some_and(|next| {
+                        cart::normalized_label(label) == cart::normalized_label(next)
+                    }))
+                    && (old.seating == cart::SeatingKind::Unknown || old.seating == new.seating)
+                    && (matches!(
+                        old.adjacency,
+                        cart::AdjacencyEvidence::Unknown | cart::AdjacencyEvidence::SeatNumbersOnly
+                    ) || old.adjacency == new.adjacency)
+                    && (old.fees != QuoteFees::Complete || new.fees == QuoteFees::Complete),
+                "reconciliation cannot contradict known hold evidence"
+            );
+            // Fill missing seat identities/labels, but never drop or substitute
+            // an already observed seat. Source IDs still establish no adjacency.
+            ensure!(
+                old.seats
+                    .iter()
+                    .all(|seat| new.seats.iter().any(|next| seat.id == next.id
+                        && cart::normalized_label(&seat.section)
+                            == cart::normalized_label(&next.section)
+                        && cart::normalized_label(&seat.row) == cart::normalized_label(&next.row)
+                        && seat.label.as_ref().is_none_or(|label| next
+                            .label
+                            .as_ref()
+                            .is_some_and(|value| cart::normalized_label(label)
+                                == cart::normalized_label(value))))),
+                "reconciliation cannot replace observed seat identities"
+            );
+        }
+        (NativeSearchOutcome::Hold(old), NativeSearchOutcome::Released(released)) => {
+            ensure!(
+                same_search_lineage(record, &old.context),
+                "previous hold came from a conflicting request lineage"
+            );
+            ensure!(
+                released.hold_correlation_id == old.hold_correlation_id,
+                "release must identify the previously observed hold"
+            );
+            ensure!(
+                released.release_explicitly_confirmed
+                    && released.absence_explicitly_confirmed
+                    && released.request_terminal,
+                "release requires explicit terminal native confirmation"
+            );
+        }
+        (NativeSearchOutcome::Hold(_), _) => {
+            bail!("an observed hold requires matching hold evidence or explicit correlated release")
+        }
+        (_, NativeSearchOutcome::Released(_)) => {
+            bail!("release requires a previously observed hold")
+        }
+        (NativeSearchOutcome::Released(_), _) => bail!("released outcome is terminal"),
+        _ => {}
+    }
+    Ok(())
 }
 
 fn search_ranking_matches(

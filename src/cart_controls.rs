@@ -55,6 +55,36 @@ pub struct BrowserCartControls {
     pub fees_complete: bool,
     pub hold_verified: bool,
     pub reservation_attempted: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preparation: Option<BrowserPreparation>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreparedPriceOption {
+    pub checkbox_id: String,
+    pub label: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreparedSectionOption {
+    pub section_id: String,
+    pub checkbox_id: String,
+    pub label: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct BrowserPreparation {
+    pub price_id: String,
+    pub section_ids: Vec<String>,
+    pub effective_section_ids: Vec<String>,
+    pub price_option: PreparedPriceOption,
+    pub section_options: Vec<PreparedSectionOption>,
+    pub price_selection_verified: bool,
+    pub section_selection_verified: bool,
+    pub filters_restored: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -75,6 +105,29 @@ pub fn validate(
     raw: &serde_json::Value,
     now_ms: i64,
 ) -> Result<CartControlsReport> {
+    validate_inner(
+        expected_url,
+        actual_url,
+        category_id,
+        demo_quantity,
+        html,
+        raw,
+        now_ms,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn validate_inner(
+    expected_url: &str,
+    actual_url: &str,
+    category_id: &str,
+    demo_quantity: u32,
+    html: &str,
+    raw: &serde_json::Value,
+    now_ms: i64,
+    allow_preparation: bool,
+) -> Result<CartControlsReport> {
     ensure!(
         (1..=20).contains(&demo_quantity),
         "Demo quantity must be from 1 to 20"
@@ -85,6 +138,10 @@ pub fn validate(
     );
     let controls: BrowserCartControls =
         serde_json::from_value(raw.clone()).context("Invalid cart control evidence")?;
+    ensure!(
+        allow_preparation || controls.preparation.is_none(),
+        "Unexpected native preparation evidence"
+    );
     let catalog = extract_cz_cart_catalog(expected_url, actual_url, html)?;
     ensure!(
         controls.event_id == catalog.event_id

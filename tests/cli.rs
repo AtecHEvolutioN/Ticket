@@ -1,6 +1,110 @@
 use std::process::Command;
 
 #[test]
+fn cart_catalog_applies_preferences_without_treating_configured_prices_as_stock() {
+    let directory = tempfile::tempdir().unwrap();
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/cart-catalog-cz.html");
+    let preferences = directory.path().join("preferences.json");
+    let mut document: serde_json::Value =
+        serde_json::from_str(include_str!("../examples/ticket-preferences.json")).unwrap();
+    let run = || {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+            .current_dir(directory.path())
+            .env_remove("TICKETMASTER_API_KEY")
+            .env_remove("DISCORD_BOT_TOKEN")
+            .args([
+                "cart-catalog",
+                "--url",
+                "https://www.ticketmaster.cz/event/synthetic-vstupenky/1234567890",
+                "--html",
+                fixture.to_str().unwrap(),
+                "--preferences",
+                preferences.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    std::fs::write(&preferences, serde_json::to_vec(&document).unwrap()).unwrap();
+    let result = run();
+    assert_eq!(result["reservation_attempted"], false);
+    assert_eq!(result["catalog"]["stock_verified"], false);
+    assert_eq!(result["catalog"]["current_selected_count"], 0);
+    assert_eq!(
+        result["preparation_candidates"]["candidates"][0]["category_id"],
+        "23"
+    );
+    assert_eq!(
+        result["preparation_candidates"]["candidates"][0]["price_id"],
+        "11"
+    );
+    // An exact seat-section preference must not be misinterpreted as a native
+    // floor ID and silently remove candidates before seat evidence exists.
+    document["defaults"]["allowed_ticket_types"] = serde_json::json!(["sezení"]);
+    document["defaults"]["allowed_sections"] = serde_json::json!(["110"]);
+    document["defaults"]["allowed_rows"] = serde_json::json!(["12"]);
+    std::fs::write(&preferences, serde_json::to_vec(&document).unwrap()).unwrap();
+    let result = run();
+    assert_eq!(
+        result["preparation_candidates"]["candidates"][0]["category_id"],
+        "2"
+    );
+    assert_eq!(
+        result["preparation_candidates"]["candidates"][0]["price_id"],
+        "6"
+    );
+    assert!(!directory.path().join("data").exists());
+}
+
+#[test]
+fn preparation_and_history_invalid_targets_do_not_start_browser_or_create_state() {
+    let directory = tempfile::tempdir().unwrap();
+    for url in [
+        "https://www.ticketmaster.pl/event/synthetic/1234567890",
+        "https://secure.ticketmaster.cz/payment?token=synthetic-private-marker",
+        "https://www.ticketmaster.cz/artist/synthetic/1234567890",
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+            .current_dir(directory.path())
+            .args([
+                "cart-prepare",
+                "--url",
+                url,
+                "--category-id",
+                "2",
+                "--price-id",
+                "6",
+            ])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("synthetic-private-marker"));
+    }
+    let journal = directory.path().join("absent.sqlite");
+    let output = Command::new(env!("CARGO_BIN_EXE_ticket-watch"))
+        .current_dir(directory.path())
+        .args([
+            "cart-journal",
+            "--file",
+            journal.to_str().unwrap(),
+            "--history-attempt",
+            "attempt-1",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(!journal.exists());
+    assert!(!directory.path().join("data").exists());
+}
+
+#[test]
 fn cart_preferences_defaults_and_event_overrides_round_trip_without_monitor_setup() {
     let directory = tempfile::tempdir().unwrap();
     let run = |args: &[&str]| {

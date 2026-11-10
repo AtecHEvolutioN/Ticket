@@ -3,6 +3,7 @@ pub mod cart_catalog;
 pub mod cart_controls;
 pub mod cart_journal;
 pub mod cart_preferences;
+pub mod cart_preparation;
 pub mod catalog;
 pub mod config;
 pub mod database;

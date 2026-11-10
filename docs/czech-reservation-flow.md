@@ -50,7 +50,8 @@ The source contains several response normalizers with different price and expiry
 fields; none is yet a validated Czech receipt contract. Its alternate-date result
 branch reinforces the need to bind the resulting event date separately.
 
-The user purchase quantity is still unspecified. Category minima overlap, and
+Saved [ticket preferences](ticket-preferences.md) now default to two adjacent
+tickets and can be changed globally or per event. Category minima overlap, and
 the cheapest configured category or first successful reservation cannot prove the
 cheapest available adjacent group. Exhaustive search coverage also remains
 unverified; do not create multiple holds to manufacture that evidence.
@@ -64,4 +65,11 @@ earlier saved panel. Its result remains configuration only.
 The [journal's native-search workflow](cart-journal.md#a-native-search-that-may-reserve)
 can now persist the requested quantity and filters before Find tickets without
 pretending that the later quote already existed. Actual submission, native
-receipt extraction and unresolved-outcome reconciliation remain unconnected.
+receipt extraction remain unconnected. Durable reconciliation of supplied native
+outcome evidence is available in the journal; obtaining authenticated browser
+evidence for that recovery still requires the native adapter.
+
+The [native preparation rehearsal](native-preparation.md) applies an explicit
+configured price and compatible native area filters with the saved quantity,
+verifies their mapping, and restores them offline. It does not use the lowest
+configured price as proof of the cheapest available adjacent group.

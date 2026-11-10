@@ -96,6 +96,72 @@ function fixture({ merged = false, mergedOther = false, initialQuantity = 0, oth
     </script></body></html>`;
 }
 
+// Synthetic implementation of the observed native temporary/apply filter model.
+// It deliberately remounts checkbox IDs and toolbar buttons between opens.
+function preparationFixture({ preselected = false, missingApply = false, brokenApply = false,
+  lostPriceAfterSection = false, multiplePriceSections = false, onCheckbox = '', discountType = 'STANDARD' } = {}) {
+  let html = fixture();
+  const match = /<script id="__NEXT_DATA__" type="application\/json">([^<]+)<\/script>/.exec(html);
+  const metadata = JSON.parse(match[1]);
+  const state = metadata.props.pageProps.initialReduxState;
+  state.ticketSelection.ticketTypes[0].discountType = discountType;
+  metadata.props.pageProps.globalTranslations = { global: { filters: { apply: 'Použít filtry', reset: 'Resetovat' } } };
+  state.translations = { 'edp.tselection.sections': 'Sekce' };
+  const amounts = [[2, 1950, 411], [3, 1850, 393], [4, 1750, 375], [5, 1750, 375], [6, 1550, 339]];
+  state.ticketSelection.ticketTypes[0].prices = amounts.map(([id, faceValue, serviceFeeChargesValue]) => ({
+    id: String(id), faceValue, serviceFeeChargesValue, upsellFeeChargesValue: 0,
+    priceBreakdown: [{ name: 'Cena', value: faceValue * 100 }],
+  }));
+  state.ticketSelection.priceLevels = amounts.map(([id]) => ({ id: String(id), title: `${id - 1}. kategorie` }));
+  state.ticketSelection.sections = sections.map((title, index) => ({ id: index ? '4P' : '1P', title, rawId: index ? '4P' : '1P' }));
+  state.ticketSelection.priceToSections = amounts.map(([id]) => ({ priceIdentifier: String(id), sectionIdentifier: [5, 6].includes(id) ? '4P' : '1P' }));
+  if (multiplePriceSections) state.ticketSelection.priceToSections.push({ priceIdentifier: '6', sectionIdentifier: '1P' });
+  Object.assign(state.ticketSelection, { feeRollup: 'ROLLUP', priceDisplays: { primary: 'ROLLUP' }, handlingFeeValue: 0 });
+  html = html.replace(match[0], `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify(metadata)}</script>`);
+  return html.replace('</body>', `<script>
+    const priceIds=['2','3','5','4','6'], sectionIds=['1P','4P'];
+    const priceLabels=${JSON.stringify(prices)}, sectionLabels=${JSON.stringify(sections)};
+    const compatible={'2':['1P'],'3':['1P'],'4':['1P'],'5':['4P'],'6':${multiplePriceSections ? "['1P','4P']" : "['4P']"}};
+    let committedPrices=[],committedSections=[],temporaryPrices=[],temporarySections=[],panelKind='price';
+    function newToolbarButton(id,label){const old=document.getElementById(id),button=document.createElement('button');
+      button.type='button';button.id=id;button.textContent=label;old.replaceWith(button);
+      button.onclick=()=>openPanel(id==='price-filter'?'price':'section')}
+    refresh=()=>{const total=[...document.querySelectorAll('[role=spinbutton]')].reduce((n,s)=>n+Number(s.getAttribute('aria-valuenow')),0);
+      document.getElementById('price-filter').disabled=total===0;document.getElementById('section-filter').disabled=total===0;
+      for(const spin of document.querySelectorAll('[role=spinbutton]')){const count=Number(spin.getAttribute('aria-valuenow'));
+        spin.previousElementSibling.disabled=count===0;spin.nextElementSibling.disabled=total>=6}};
+    function toolbar(){newToolbarButton('price-filter',committedPrices.length===1?priceLabels[priceIds.indexOf(committedPrices[0])].split(' • ')[0]:'Všechny ceny');
+      newToolbarButton('section-filter',committedSections.length===1?sectionLabels[sectionIds.indexOf(committedSections[0])]
+        :committedSections.length?committedSections.length+' Sekce':'Všechny sekce');refresh()}
+    function renderPreparationPanel(){const panel=container.querySelector('[data-testid=panelPriceSection]');
+      const ids=panelKind==='price'?priceIds:sectionIds,labels=panelKind==='price'?priceLabels:sectionLabels;
+      const choices=panelKind==='price'?temporaryPrices:temporarySections;
+      const possible=new Set(temporaryPrices.flatMap(id=>compatible[id]));
+      panel.innerHTML='<h1>'+(panelKind==='price'?'Cena':'Sekce')+'</h1><fieldset>'+ids.map((id,index)=>{
+        const domId='_prep_'+panelKind+'_'+document.body.dataset.panelOpens+'_'+index+'-input';
+        const disabled=panelKind==='section'&&temporaryPrices.length>0&&!possible.has(id);
+        return '<label for="'+domId+'"><input type="checkbox" id="'+domId+'" data-config-id="'+id+'" '+(choices.includes(id)?'checked':'')+' '+(disabled?'disabled':'')+'><span>'+labels[index]+'</span></label>'
+      }).join('')+'</fieldset>' + (${missingApply}?'':'<button type="button" id="apply-preparation" '+(JSON.stringify(temporaryPrices)===JSON.stringify(committedPrices)&&JSON.stringify(temporarySections)===JSON.stringify(committedSections)?'disabled':'')+'>Použít filtry</button>');
+      panel.querySelectorAll('input').forEach(input=>input.onchange=()=>{bump('checkboxChanges');const id=input.dataset.configId;
+        const selected=panelKind==='price'?temporaryPrices:temporarySections;
+        if(input.checked)selected.push(id);else selected.splice(selected.indexOf(id),1);selected.sort();
+        if(panelKind==='price')temporarySections=[...new Set(temporaryPrices.flatMap(id=>compatible[id]))].sort();
+        else if(${lostPriceAfterSection})temporaryPrices=['2'];
+        ${onCheckbox}
+        renderPreparationPanel()});
+      const apply=panel.querySelector('#apply-preparation');if(apply)apply.onclick=()=>{
+        if(!${brokenApply}){committedPrices=temporaryPrices.length&&temporarySections.length?[...temporaryPrices]:[];
+          committedSections=committedPrices.length?[...temporarySections]:[]}
+        closePanel();toolbar()}
+    }
+    openPanel=kind=>{bump('panelOpens');panelKind=kind;form.hidden=true;form.setAttribute('aria-hidden','true');container.hidden=false;
+      temporaryPrices=[...committedPrices];temporarySections=[...committedSections];
+      if(${preselected}&&kind==='price'&&!committedPrices.length)temporaryPrices=['2'];
+      renderPreparationPanel()};
+    toolbar();
+  </script></body>`);
+}
+
 async function browserTest(run) {
   const { chromium } = require('playwright');
   const browser = await chromium.launch({ headless: true,
@@ -306,5 +372,115 @@ test('native controls reject event-date and configured-price changes during demo
       await noPurchaseActions(page, networkAttempts);
       await page.close();
     }
+  });
+});
+
+async function noPurchaseDuringPreparation(page, networkAttempts) {
+  const counts = await counters(page);
+  for (const key of ['reserveClicks', 'seatClicks', 'resaleClicks', 'escapes', 'submitCalls', 'descriptionClicks'])
+    assert.equal(counts[key], '0', key);
+  assert.equal(networkAttempts(), 0, 'No provider request was made during the offline rehearsal');
+}
+
+test('native preparation rejects malformed explicit filters before touching a page', async () => {
+  for (const selection of [null, [], {}, { priceId: '6', sectionIds: ['4P', '4P'] },
+    { priceId: '6', sectionIds: ['4P"] button'] }, { priceId: '6', sectionIds: [], reserve: true }]) {
+    const result = await inspectTicketmasterCartControls({}, target, { ...options(), selection }, 1000, current);
+    assert.equal(result.state, 'cart_controls_unsupported');
+  }
+});
+
+test('native preparation selects exact equal-price level and linked floor, reads back then restores all state', { skip: !enabled }, async () => {
+  await browserTest(async context => {
+    const { page, networkAttempts } = await open(context, preparationFixture());
+    const result = await inspectTicketmasterCartControls(page, target,
+      { ...options(), selection: { priceId: '5', sectionIds: ['4P'] } }, 15000, current);
+    assert.equal(result.state, 'cart_controls_ready');
+    const report = result.inspection;
+    assert.deepEqual(report.preparation.section_ids, ['4P']);
+    assert.deepEqual(report.preparation.effective_section_ids, ['4P']);
+    assert.equal(report.preparation.price_id, '5');
+    assert.equal(report.preparation.price_option.label, '2 125,00 Kč • Sezení 4. kategorie');
+    const pricePanel = report.panels.find(panel => panel.kind === 'price');
+    const selected = pricePanel.options.filter(option => option.checked);
+    assert.equal(selected.length, 1);
+    assert.equal(selected[0].checkbox_id, report.preparation.price_option.checkbox_id);
+    assert.equal(selected[0].label, report.preparation.price_option.label);
+    assert.deepEqual(report.panels.find(panel => panel.kind === 'section').options.filter(option => option.checked)
+      .map(option => option.label), ['4. POSCHODÍ']);
+    assert.equal(report.preparation.section_options[0].label, '4. POSCHODÍ');
+    assert.equal(report.preparation.filters_restored, true);
+    assert.equal(report.form_restored, true);
+    assert.equal(report.final_quantity, 0);
+    assert.equal((await counters(page)).checkboxChanges, '2');
+    assert.equal(await page.getByRole('button', { name: 'Všechny ceny', exact: true }).isDisabled(), true);
+    assert.equal(await page.getByRole('button', { name: 'Všechny sekce', exact: true }).isDisabled(), true);
+    await assertCartControlsCurrent(page, target, report);
+    await assert.rejects(assertCartControlsCurrent(page, target,
+      { ...report, preparation: { ...report.preparation, price_id: '4' } }), /cart_controls_changed/);
+    await noPurchaseDuringPreparation(page, networkAttempts);
+  });
+});
+
+test('native preparation records auto-linked floor scope for an empty request and honors a chosen compatible subset', { skip: !enabled }, async () => {
+  await browserTest(async context => {
+    for (const requested of [[], ['1P']]) {
+      const { page, networkAttempts } = await open(context, preparationFixture({ multiplePriceSections: true }));
+      const result = await inspectTicketmasterCartControls(page, target,
+        { ...options(), selection: { priceId: '6', sectionIds: requested } }, 15000, current);
+      assert.equal(result.state, 'cart_controls_ready');
+      assert.deepEqual(result.inspection.preparation.section_ids, requested);
+      assert.deepEqual(result.inspection.preparation.effective_section_ids, requested.length ? requested : ['1P', '4P']);
+      assert.equal(result.inspection.final_quantity, 0);
+      await noPurchaseDuringPreparation(page, networkAttempts);
+      await page.close();
+    }
+  });
+});
+
+test('native preparation refuses incompatible, unknown or preselected filters before changing any checkbox', { skip: !enabled }, async () => {
+  await browserTest(async context => {
+    for (const [setup, selection] of [
+      [{}, { priceId: '6', sectionIds: ['1P'] }],
+      [{}, { priceId: 'absent', sectionIds: [] }],
+      [{ preselected: true }, { priceId: '6', sectionIds: ['4P'] }],
+      [{ discountType: 'PLATINUM' }, { priceId: '6', sectionIds: [] }],
+    ]) {
+      const { page, networkAttempts } = await open(context, preparationFixture(setup));
+      const result = await inspectTicketmasterCartControls(page, target, { ...options(), selection }, 10000, current);
+      assert.equal(result.state, 'cart_controls_unrecognized');
+      assert.equal(result.inspection, undefined);
+      assert.equal((await counters(page)).checkboxChanges, '0');
+      await noPurchaseDuringPreparation(page, networkAttempts);
+      await page.close();
+    }
+  });
+});
+
+test('native preparation rejects missing Apply, ignored changes and preference drift without claiming restoration', { skip: !enabled }, async () => {
+  await browserTest(async context => {
+    for (const setup of [{ missingApply: true }, { brokenApply: true },
+      { multiplePriceSections: true, lostPriceAfterSection: true }]) {
+      const { page, networkAttempts } = await open(context, preparationFixture(setup));
+      const result = await inspectTicketmasterCartControls(page, target,
+        { ...options(), selection: { priceId: '6', sectionIds: setup.multiplePriceSections ? ['1P'] : [] } }, 4000, current);
+      assert.notEqual(result.state, 'cart_controls_ready');
+      assert.equal(result.inspection, undefined);
+      await noPurchaseDuringPreparation(page, networkAttempts);
+      await page.close();
+    }
+  });
+});
+
+test('native preparation stops when the network fence is lost during a checkbox change', { skip: !enabled }, async () => {
+  await browserTest(async context => {
+    const { page, networkAttempts } = await open(context, preparationFixture());
+    const result = await inspectTicketmasterCartControls(page, target,
+      { ...options(), selection: { priceId: '6', sectionIds: [] },
+        assertNetworkDisabled: async () => Number((await counters(page)).checkboxChanges) === 0 }, 10000, current);
+    assert.equal(result.state, 'cart_controls_network_required');
+    assert.equal(result.inspection, undefined);
+    assert.equal((await counters(page)).checkboxChanges, '1');
+    await noPurchaseDuringPreparation(page, networkAttempts);
   });
 });

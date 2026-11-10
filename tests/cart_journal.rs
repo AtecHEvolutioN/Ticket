@@ -609,8 +609,10 @@ fn make_legacy_v1(path: &Path) {
     );
     let db = Connection::open(path).unwrap();
     db.execute("UPDATE cart_attempts SET binding_json=json_remove(binding_json,'$.expected_event_start','$.source_event_start'), receipt_json=json_remove(receipt_json,'$.receipt.context.event_start'),request_hash=?1",[old_hash]).unwrap();
-    db.execute_batch("ALTER TABLE cart_attempts DROP COLUMN workflow")
-        .unwrap();
+    db.execute_batch(
+        "DROP TABLE cart_search_outcomes; ALTER TABLE cart_attempts DROP COLUMN workflow",
+    )
+    .unwrap();
     db.pragma_update(None, "user_version", 1).unwrap();
 }
 fn schema_version(path: &Path) -> i64 {
@@ -640,7 +642,7 @@ fn legacy_prepared_plan_is_inspectable_and_abandonable_but_never_dispatchable() 
             .is_none()
     );
     let mut journal = CartJournal::open(&path).unwrap();
-    assert_eq!(schema_version(&path), 3);
+    assert_eq!(schema_version(&path), 4);
     let mut old_request = request();
     old_request.intent.expected_event_start = None;
     old_request.snapshot.event_start = None;
@@ -670,7 +672,7 @@ fn legacy_uncertain_attempt_keeps_event_locked_after_migration_and_restart() {
     drop(dispatched(&path));
     make_legacy_v1(&path);
     let mut journal = CartJournal::open(&path).unwrap();
-    assert_eq!(schema_version(&path), 3);
+    assert_eq!(schema_version(&path), 4);
     assert!(
         !journal
             .mark_dispatch_started("attempt-1", NOW + 200)
@@ -730,7 +732,7 @@ fn legacy_confirmed_hold_receipt_remains_readable_and_can_only_expire_at_its_dea
             .state,
         AttemptState::Expired
     );
-    assert_eq!(schema_version(&path), 3);
+    assert_eq!(schema_version(&path), 4);
 }
 
 fn search_request() -> NativeSearchRequest {
@@ -818,6 +820,651 @@ fn recorded_search(record: &AttemptRecord) -> &RecordedSearchOutcome {
         panic!("native outcome missing")
     };
     receipt
+}
+
+fn uncertain_outcome(at: i64) -> NativeSearchOutcome {
+    let mut context = search_context();
+    context.observed_at_ms = at;
+    NativeSearchOutcome::Uncertain(NativeSearchUncertainReceipt {
+        context,
+        reason: NativeSearchUncertainty::Timeout,
+    })
+}
+
+fn no_hold_outcome(at: i64) -> NativeSearchOutcome {
+    let NativeSearchOutcome::NoHold(mut value) = search_no_hold() else {
+        unreachable!()
+    };
+    value.context.observed_at_ms = at;
+    NativeSearchOutcome::NoHold(value)
+}
+
+fn fresh_hold(at: i64) -> NativeSearchOutcome {
+    let mut value = search_hold();
+    value.context.observed_at_ms = at;
+    value.context.outcome_document_id = "checkout-reopened".into();
+    let ranking = value.post_action_ranking_evidence.as_mut().unwrap();
+    ranking.observed_at_ms = at;
+    ranking.expires_at_ms = at + MAX_QUOTE_AGE_MS;
+    ranking.document_id = value.context.outcome_document_id.clone();
+    NativeSearchOutcome::Hold(Box::new(value))
+}
+
+fn released_outcome(at: i64) -> NativeSearchOutcome {
+    let mut context = search_context();
+    context.observed_at_ms = at;
+    NativeSearchOutcome::Released(NativeSearchReleasedReceipt {
+        context,
+        hold_correlation_id: "native-hold-1".into(),
+        release_correlation_id: "release-1".into(),
+        release_explicitly_confirmed: true,
+        absence_explicitly_confirmed: true,
+        request_terminal: true,
+    })
+}
+
+fn reconciliation(
+    id: &str,
+    previous: &AttemptRecord,
+    outcome: NativeSearchOutcome,
+) -> NativeSearchReconciliation {
+    NativeSearchReconciliation {
+        reconciliation_id: id.into(),
+        expected_outcome_hash: previous.native_outcome_hash.clone().unwrap(),
+        outcome,
+    }
+}
+
+#[test]
+fn native_reconciliation_recovers_terminal_absence_after_restart_and_retains_history() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cart.sqlite");
+    let mut journal = search_dispatched(&path);
+    let uncertain = journal
+        .record_search_outcome("attempt-1", &uncertain_outcome(NOW + 200), NOW + 300)
+        .unwrap();
+    let first_hash = uncertain.native_outcome_hash.clone().unwrap();
+    drop(journal);
+    let mut journal = CartJournal::open(&path).unwrap();
+    let resolved = journal
+        .reconcile_search(
+            "attempt-1",
+            &reconciliation("recover-1", &uncertain, no_hold_outcome(NOW + 500)),
+            NOW + 600,
+        )
+        .unwrap();
+    assert_eq!(resolved.state, AttemptState::NoHoldConfirmed);
+    assert!(
+        !resolved.reservation_authorized
+            && !resolved.source_authenticated
+            && !resolved.date_verified
+    );
+    let history = inspect_search_history(&path, "attempt-1").unwrap();
+    assert_eq!(history.len(), 2);
+    assert!(matches!(
+        history[0].receipt.outcome,
+        NativeSearchOutcome::Uncertain(_)
+    ));
+    assert!(matches!(
+        history[1].receipt.outcome,
+        NativeSearchOutcome::NoHold(_)
+    ));
+    assert_eq!(
+        history[1].supersedes_outcome_hash.as_deref(),
+        Some(first_hash.as_str())
+    );
+    assert_eq!(
+        history[1].outcome_hash,
+        resolved.native_outcome_hash.unwrap()
+    );
+    assert_eq!(
+        journal
+            .record_search_outcome("attempt-1", &uncertain_outcome(NOW + 200), NOW + 700)
+            .unwrap()
+            .state,
+        AttemptState::NoHoldConfirmed
+    );
+    assert!(
+        !journal
+            .mark_search_dispatch_started("attempt-1", NOW + 700)
+            .unwrap()
+            .newly_started
+    );
+    journal
+        .begin_search("next", &search_request(), NOW + 700)
+        .unwrap();
+}
+
+#[test]
+fn native_reconciliation_confirms_a_fresh_hold_without_resubmitting() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cart.sqlite");
+    let mut journal = search_dispatched(&path);
+    let uncertain = journal
+        .record_search_outcome("attempt-1", &uncertain_outcome(NOW + 200), NOW + 300)
+        .unwrap();
+    let held = journal
+        .reconcile_search(
+            "attempt-1",
+            &reconciliation("recover", &uncertain, fresh_hold(NOW + 500)),
+            NOW + 600,
+        )
+        .unwrap();
+    assert_eq!(held.state, AttemptState::Held);
+    assert_eq!(held.dispatch_at_ms, Some(NOW + 100));
+    assert!(!held.source_authenticated && !held.reservation_authorized);
+    assert!(
+        !journal
+            .mark_search_dispatch_started("attempt-1", NOW + 700)
+            .unwrap()
+            .newly_started
+    );
+    assert!(
+        journal
+            .begin_search("another", &search_request(), NOW + 700)
+            .is_err()
+    );
+    assert_eq!(inspect_search_history(&path, "attempt-1").unwrap().len(), 2);
+}
+
+#[test]
+fn native_reconciliation_rejects_stale_future_unbound_and_conflicting_evidence_atomically() {
+    for case in 0..12 {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("cart.sqlite");
+        let mut journal = search_dispatched(&path);
+        let initial = journal
+            .record_search_outcome("attempt-1", &uncertain_outcome(NOW + 200), NOW + 300)
+            .unwrap();
+        let mut recovery = reconciliation("recover", &initial, no_hold_outcome(NOW + 500));
+        let NativeSearchOutcome::NoHold(value) = &mut recovery.outcome else {
+            unreachable!()
+        };
+        let mut now = NOW + 600;
+        match case {
+            0 => value.context.observed_at_ms = NOW + 200,
+            1 => value.context.observed_at_ms = NOW + 250,
+            2 => value.context.observed_at_ms = NOW + 601,
+            3 => now = NOW + 5500,
+            4 => value.context.session_id = "other-session".into(),
+            5 => value.context.source_document_id = "other-source".into(),
+            6 => value.context.config_id = "other-config".into(),
+            7 => value.context.event_url = Some("https://ticketmaster.cz/event/1472650658".into()),
+            8 => value.context.event_start = Some("2026-11-17T17:00:00Z".into()),
+            9 => value.context.alternate_event_or_date_reported = true,
+            10 => recovery.expected_outcome_hash = "a".repeat(64),
+            _ => recovery.expected_outcome_hash = "not-a-fingerprint".into(),
+        }
+        assert!(
+            journal
+                .reconcile_search("attempt-1", &recovery, now)
+                .is_err(),
+            "case {case}"
+        );
+        assert_eq!(inspect_file(&path).unwrap().remove(0), initial);
+        assert_eq!(inspect_search_history(&path, "attempt-1").unwrap().len(), 1);
+    }
+}
+
+#[test]
+fn native_reconciliation_replay_returns_current_record_and_binds_the_full_operation() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cart.sqlite");
+    let mut journal = search_dispatched(&path);
+    let initial = journal
+        .record_search_outcome("attempt-1", &uncertain_outcome(NOW + 200), NOW + 300)
+        .unwrap();
+    let first = reconciliation("recover-1", &initial, uncertain_outcome(NOW + 500));
+    let mid = journal
+        .reconcile_search("attempt-1", &first, NOW + 600)
+        .unwrap();
+    let second = reconciliation("recover-2", &mid, no_hold_outcome(NOW + 800));
+    let terminal = journal
+        .reconcile_search("attempt-1", &second, NOW + 900)
+        .unwrap();
+    assert_eq!(
+        journal
+            .reconcile_search("attempt-1", &first, NOW + 50000)
+            .unwrap(),
+        terminal
+    );
+    assert_eq!(
+        journal
+            .reconcile_search("attempt-1", &second, NOW + 50000)
+            .unwrap(),
+        terminal
+    );
+    let mut conflict = first.clone();
+    conflict.expected_outcome_hash = mid.native_outcome_hash.unwrap();
+    assert!(
+        journal
+            .reconcile_search("attempt-1", &conflict, NOW + 50000)
+            .is_err()
+    );
+    conflict = first;
+    conflict.outcome = no_hold_outcome(NOW + 500);
+    assert!(
+        journal
+            .reconcile_search("attempt-1", &conflict, NOW + 50000)
+            .is_err()
+    );
+    assert_eq!(inspect_search_history(&path, "attempt-1").unwrap().len(), 3);
+}
+
+#[test]
+fn concurrent_native_reconciliation_has_one_compare_and_swap_winner() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cart.sqlite");
+    let mut journal = search_dispatched(&path);
+    let initial = journal
+        .record_search_outcome("attempt-1", &uncertain_outcome(NOW + 200), NOW + 300)
+        .unwrap();
+    drop(journal);
+    let barrier = Arc::new(Barrier::new(2));
+    let workers: Vec<_> = (0..2)
+        .map(|index| {
+            let path = path.clone();
+            let barrier = barrier.clone();
+            let initial = initial.clone();
+            std::thread::spawn(move || {
+                let mut journal = CartJournal::open(&path).unwrap();
+                barrier.wait();
+                journal
+                    .reconcile_search(
+                        "attempt-1",
+                        &reconciliation(
+                            &format!("recover-{index}"),
+                            &initial,
+                            no_hold_outcome(NOW + 500),
+                        ),
+                        NOW + 600,
+                    )
+                    .is_ok()
+            })
+        })
+        .collect();
+    assert_eq!(
+        workers
+            .into_iter()
+            .map(|worker| usize::from(worker.join().unwrap()))
+            .sum::<usize>(),
+        1
+    );
+    assert_eq!(inspect_search_history(&path, "attempt-1").unwrap().len(), 2);
+    assert_eq!(
+        inspect_file(&path).unwrap().remove(0).state,
+        AttemptState::NoHoldConfirmed
+    );
+}
+
+#[test]
+fn native_reconciliation_can_fill_unknown_same_hold_evidence_without_renewing_it() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cart.sqlite");
+    let mut journal = search_dispatched(&path);
+    let mut partial = search_hold();
+    partial.fees = QuoteFees::Unknown;
+    partial.adjacency = AdjacencyEvidence::Unknown;
+    partial.seats.truncate(1);
+    partial.seats[0].label = None;
+    partial.post_action_ranking_evidence = None;
+    let initial = journal
+        .record_search_outcome(
+            "attempt-1",
+            &NativeSearchOutcome::Hold(Box::new(partial)),
+            NOW + 300,
+        )
+        .unwrap();
+    assert_eq!(initial.state, AttemptState::NeedsReconciliation);
+    let held = journal
+        .reconcile_search(
+            "attempt-1",
+            &reconciliation("recover", &initial, fresh_hold(NOW + 500)),
+            NOW + 600,
+        )
+        .unwrap();
+    assert_eq!(held.state, AttemptState::Held);
+    let NativeSearchOutcome::Hold(receipt) = &recorded_search(&held).outcome else {
+        unreachable!()
+    };
+    assert_eq!(receipt.hold_expires_at_ms, NOW + 600000);
+    assert_eq!(receipt.seats.len(), 2);
+    assert_eq!(inspect_search_history(&path, "attempt-1").unwrap().len(), 2);
+}
+
+#[test]
+fn native_reconciliation_cannot_replace_concrete_hold_identity_or_extend_expiry() {
+    for case in 0..12 {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("cart.sqlite");
+        let mut journal = search_dispatched(&path);
+        let initial = journal
+            .record_search_outcome(
+                "attempt-1",
+                &NativeSearchOutcome::Hold(Box::new(search_hold())),
+                NOW + 300,
+            )
+            .unwrap();
+        let mut next = fresh_hold(NOW + 500);
+        let NativeSearchOutcome::Hold(hold) = &mut next else {
+            unreachable!()
+        };
+        match case {
+            0 => hold.hold_correlation_id = "replacement".into(),
+            1 => hold.hold_expires_at_ms += 1,
+            2 => hold.total_minor += 1,
+            3 => hold.unit_price_minor += 1,
+            4 => hold.price_id = "different-price".into(),
+            5 => hold.category_id = "different-category".into(),
+            6 => hold.group_id = "different-group".into(),
+            7 => hold.seats[0].id = "different-seat".into(),
+            8 => hold.seats[0].label = Some("9".into()),
+            9 => hold.quantity = 1,
+            10 => hold.adjacency = AdjacencyEvidence::NotAdjacent,
+            _ => hold.context.event_start = Some("2026-11-17T17:00:00Z".into()),
+        }
+        assert!(
+            journal
+                .reconcile_search(
+                    "attempt-1",
+                    &reconciliation("recover", &initial, next),
+                    NOW + 600
+                )
+                .is_err(),
+            "case {case}"
+        );
+        assert_eq!(inspect_file(&path).unwrap().remove(0), initial);
+        assert_eq!(inspect_search_history(&path, "attempt-1").unwrap().len(), 1);
+    }
+}
+
+#[test]
+fn known_hold_cannot_be_laundered_through_uncertainty_absence_or_incomplete_release() {
+    for case in 0..6 {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("cart.sqlite");
+        let mut journal = search_dispatched(&path);
+        let initial = journal
+            .record_search_outcome(
+                "attempt-1",
+                &NativeSearchOutcome::Hold(Box::new(search_hold())),
+                NOW + 300,
+            )
+            .unwrap();
+        let next = match case {
+            0 => uncertain_outcome(NOW + 500),
+            1 => no_hold_outcome(NOW + 500),
+            _ => {
+                let NativeSearchOutcome::Released(mut release) = released_outcome(NOW + 500) else {
+                    unreachable!()
+                };
+                match case {
+                    2 => release.hold_correlation_id = "different-hold".into(),
+                    3 => release.release_explicitly_confirmed = false,
+                    4 => release.absence_explicitly_confirmed = false,
+                    _ => release.request_terminal = false,
+                }
+                NativeSearchOutcome::Released(release)
+            }
+        };
+        assert!(
+            journal
+                .reconcile_search(
+                    "attempt-1",
+                    &reconciliation("recover", &initial, next),
+                    NOW + 600
+                )
+                .is_err(),
+            "case {case}"
+        );
+        assert_eq!(inspect_file(&path).unwrap().remove(0), initial);
+        assert_eq!(inspect_search_history(&path, "attempt-1").unwrap().len(), 1);
+        assert!(
+            journal
+                .begin_search("another", &search_request(), NOW + 700)
+                .is_err()
+        );
+    }
+}
+
+#[test]
+fn explicit_correlated_release_resolves_a_mismatched_hold_without_erasing_it() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cart.sqlite");
+    let mut journal = search_dispatched(&path);
+    let mut wrong = search_hold();
+    wrong.context.event_start = Some("2026-11-17T17:00:00Z".into());
+    let initial = journal
+        .record_search_outcome(
+            "attempt-1",
+            &NativeSearchOutcome::Hold(Box::new(wrong)),
+            NOW + 300,
+        )
+        .unwrap();
+    assert_eq!(initial.state, AttemptState::NeedsReconciliation);
+    assert!(
+        journal
+            .reconcile_search(
+                "attempt-1",
+                &reconciliation("rewrite-date", &initial, fresh_hold(NOW + 500)),
+                NOW + 600
+            )
+            .is_err()
+    );
+    let released = journal
+        .reconcile_search(
+            "attempt-1",
+            &reconciliation("release", &initial, released_outcome(NOW + 500)),
+            NOW + 600,
+        )
+        .unwrap();
+    assert_eq!(released.state, AttemptState::NoHoldConfirmed);
+    let history = inspect_search_history(&path, "attempt-1").unwrap();
+    assert_eq!(history.len(), 2);
+    let NativeSearchOutcome::Hold(original) = &history[0].receipt.outcome else {
+        unreachable!()
+    };
+    assert_eq!(
+        original.context.event_start.as_deref(),
+        Some("2026-11-17T17:00:00Z")
+    );
+    assert!(matches!(
+        history[1].receipt.outcome,
+        NativeSearchOutcome::Released(_)
+    ));
+    assert!(!released.reservation_authorized && !released.source_authenticated);
+    journal
+        .begin_search("next", &search_request(), NOW + 700)
+        .unwrap();
+}
+
+#[test]
+fn release_cannot_invent_a_prior_hold_or_clear_a_different_session_hold() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cart.sqlite");
+    let mut journal = search_dispatched(&path);
+    assert!(
+        journal
+            .record_search_outcome("attempt-1", &released_outcome(NOW + 200), NOW + 300)
+            .is_err()
+    );
+    assert!(
+        inspect_search_history(&path, "attempt-1")
+            .unwrap()
+            .is_empty()
+    );
+    let mut wrong = search_hold();
+    wrong.context.session_id = "different-session".into();
+    let initial = journal
+        .record_search_outcome(
+            "attempt-1",
+            &NativeSearchOutcome::Hold(Box::new(wrong)),
+            NOW + 300,
+        )
+        .unwrap();
+    assert!(
+        journal
+            .reconcile_search(
+                "attempt-1",
+                &reconciliation("release", &initial, released_outcome(NOW + 500)),
+                NOW + 600
+            )
+            .is_err()
+    );
+    assert_eq!(inspect_search_history(&path, "attempt-1").unwrap().len(), 1);
+}
+
+#[test]
+fn native_reconciliation_audit_failure_rolls_back_history_and_event_unlock() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cart.sqlite");
+    let mut journal = search_dispatched(&path);
+    let initial = journal
+        .record_search_outcome("attempt-1", &uncertain_outcome(NOW + 200), NOW + 300)
+        .unwrap();
+    let recovery = reconciliation("recover", &initial, no_hold_outcome(NOW + 500));
+    let db = Connection::open(&path).unwrap();
+    db.execute_batch("CREATE TRIGGER reject_recovery BEFORE INSERT ON cart_transitions WHEN NEW.state='no_hold_confirmed' BEGIN SELECT RAISE(ABORT,'injected recovery audit failure'); END;").unwrap();
+    assert!(
+        journal
+            .reconcile_search("attempt-1", &recovery, NOW + 600)
+            .is_err()
+    );
+    assert_eq!(inspect_file(&path).unwrap().remove(0), initial);
+    assert_eq!(inspect_search_history(&path, "attempt-1").unwrap().len(), 1);
+    assert!(
+        journal
+            .begin_search("another", &search_request(), NOW + 700)
+            .is_err()
+    );
+    db.execute_batch("DROP TRIGGER reject_recovery").unwrap();
+    assert_eq!(
+        journal
+            .reconcile_search("attempt-1", &recovery, NOW + 600)
+            .unwrap()
+            .state,
+        AttemptState::NoHoldConfirmed
+    );
+}
+
+#[test]
+fn v3_native_history_migrates_without_reinterpreting_prior_evidence_or_unlocking() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cart.sqlite");
+    let mut journal = search_dispatched(&path);
+    let before = journal
+        .record_search_outcome("attempt-1", &uncertain_outcome(NOW + 200), NOW + 300)
+        .unwrap();
+    drop(journal);
+    let db = Connection::open(&path).unwrap();
+    db.execute_batch("DROP TABLE cart_search_outcomes").unwrap();
+    db.pragma_update(None, "user_version", 3).unwrap();
+    drop(db);
+    let legacy = inspect_search_history(&path, "attempt-1").unwrap();
+    assert_eq!(legacy.len(), 1);
+    assert_eq!(legacy[0].sequence, 0);
+    assert_eq!(schema_version(&path), 3);
+    let mut journal = CartJournal::open(&path).unwrap();
+    assert_eq!(schema_version(&path), 4);
+    assert_eq!(inspect_file(&path).unwrap().remove(0), before);
+    let migrated = inspect_search_history(&path, "attempt-1").unwrap();
+    assert_eq!(migrated.len(), 1);
+    assert_eq!(legacy[0].receipt, migrated[0].receipt);
+    assert_eq!(legacy[0].outcome_hash, migrated[0].outcome_hash);
+    assert!(
+        journal
+            .begin_search("another", &search_request(), NOW + 700)
+            .is_err()
+    );
+    assert_eq!(
+        journal
+            .reconcile_search(
+                "attempt-1",
+                &reconciliation("recover", &before, no_hold_outcome(NOW + 500)),
+                NOW + 600
+            )
+            .unwrap()
+            .state,
+        AttemptState::NoHoldConfirmed
+    );
+}
+
+#[test]
+fn recovery_rejects_history_drift_and_cannot_reconfirm_an_expired_hold() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cart.sqlite");
+    let mut journal = search_dispatched(&path);
+    let initial = journal
+        .record_search_outcome("attempt-1", &uncertain_outcome(NOW + 200), NOW + 300)
+        .unwrap();
+    let expired = fresh_hold(NOW + 600000);
+    assert!(
+        journal
+            .reconcile_search(
+                "attempt-1",
+                &reconciliation("expired", &initial, expired),
+                NOW + 600000
+            )
+            .is_err()
+    );
+    let db = Connection::open(&path).unwrap();
+    db.execute(
+        "UPDATE cart_search_outcomes SET outcome_hash=?1",
+        ["a".repeat(64)],
+    )
+    .unwrap();
+    assert!(
+        journal
+            .reconcile_search(
+                "attempt-1",
+                &reconciliation("drift", &initial, no_hold_outcome(NOW + 500)),
+                NOW + 600
+            )
+            .is_err()
+    );
+    assert_eq!(inspect_file(&path).unwrap().remove(0), initial);
+}
+
+#[test]
+fn reconciliation_orders_after_record_time_when_the_prior_source_clock_was_invalid() {
+    for bad_clock in [-1, NOW + 50000, i64::MAX] {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("cart.sqlite");
+        let mut journal = search_dispatched(&path);
+        let initial = journal
+            .record_search_outcome("attempt-1", &uncertain_outcome(bad_clock), NOW + 300)
+            .unwrap();
+        assert!(
+            recorded_search(&initial)
+                .review_reasons
+                .contains(&SearchReviewReason::InvalidObservationTime)
+        );
+        assert!(
+            journal
+                .reconcile_search(
+                    "attempt-1",
+                    &reconciliation("same-tick", &initial, no_hold_outcome(NOW + 300)),
+                    NOW + 600
+                )
+                .is_err()
+        );
+        let recovered = journal
+            .reconcile_search(
+                "attempt-1",
+                &reconciliation("recover", &initial, no_hold_outcome(NOW + 500)),
+                NOW + 600,
+            )
+            .unwrap();
+        assert_eq!(recovered.state, AttemptState::NoHoldConfirmed);
+        let NativeSearchOutcome::Uncertain(original) = &inspect_search_history(&path, "attempt-1")
+            .unwrap()[0]
+            .receipt
+            .outcome
+        else {
+            unreachable!()
+        };
+        assert_eq!(original.context.observed_at_ms, bad_clock);
+    }
 }
 
 #[test]
@@ -1194,14 +1841,16 @@ fn v2_migration_preserves_quoted_rows_and_blocks_parallel_native_search() {
     let before = journal.begin("quoted", &request(), NOW).unwrap();
     drop(journal);
     let db = Connection::open(&path).unwrap();
-    db.execute_batch("ALTER TABLE cart_attempts DROP COLUMN workflow")
-        .unwrap();
+    db.execute_batch(
+        "DROP TABLE cart_search_outcomes; ALTER TABLE cart_attempts DROP COLUMN workflow",
+    )
+    .unwrap();
     db.pragma_update(None, "user_version", 2).unwrap();
     drop(db);
     assert_eq!(inspect_file(&path).unwrap().remove(0), before);
     assert_eq!(schema_version(&path), 2);
     let mut migrated = CartJournal::open(&path).unwrap();
-    assert_eq!(schema_version(&path), 3);
+    assert_eq!(schema_version(&path), 4);
     assert_eq!(inspect_file(&path).unwrap().remove(0), before);
     assert!(
         migrated

@@ -111,6 +111,33 @@ test('cart context is closed if websocket fencing is unsupported', async () => {
   assert.equal(closed,true);
 });
 
+test('cart preparation accepts only explicit bounded metadata IDs in the isolated cart flow', async () => {
+  const request = { id:1,url:'https://www.ticketmaster.cz/event/synthetic/12345678',
+    timeout_ms:45000,max_body_bytes:4096,render_wait_ms:0,adapter:'ticketmaster',
+    display:'cart_controls',cart_category_id:'category-1',cart_demo_quantity:2,
+    cart_selection:{price_id:'price-6',section_ids:['1P','4P']} };
+  assert.doesNotThrow(() => validateRequest(request));
+  assert.doesNotThrow(() => validateRequest({...request,cart_selection:{price_id:'price-6',section_ids:[]}}));
+  const browser = { newContext() { throw new Error('must reject before creating a context'); } };
+  for (const selection of [
+    null, false, [], 'price-6', {}, {price_id:'price-6'}, {section_ids:[]},
+    {price_id:'',section_ids:[]}, {price_id:'p'.repeat(129),section_ids:[]},
+    {price_id:'price] *',section_ids:[]}, {price_id:6,section_ids:[]},
+    {price_id:'price-6',section_ids:'1P'}, {price_id:'price-6',section_ids:[null]},
+    {price_id:'price-6',section_ids:['1P','1P']}, {price_id:'price-6',section_ids:['section] *']},
+    {price_id:'price-6',section_ids:['s'.repeat(129)]},
+    {price_id:'price-6',section_ids:Array.from({length:129},(_,i)=>`section-${i}`)},
+    {price_id:'price-6',section_ids:[],submit:true},
+  ]) {
+    assert.throws(() => validateRequest({...request,cart_selection:selection}), /invalid_request/);
+    await assert.rejects(captureCartControls(browser,{...request,cart_selection:selection}), /invalid_request/);
+  }
+  for (const display of [undefined,'map']) {
+    assert.throws(() => validateRequest({...request,display,cart_category_id:undefined,cart_demo_quantity:undefined}), /invalid_request/);
+  }
+  await assert.rejects(capture({},request), /invalid_request/);
+});
+
 test('event identity binds region and event ID rather than page slug', () => {
   const event = 'https://www.ticketmaster.pl/event/korn/496543017';
   assert.ok(sameEvent(event, 'https://ticketmaster.pl/event/new-slug/496543017?language=en'));

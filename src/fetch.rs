@@ -156,6 +156,50 @@ impl Fetcher {
         category_id: &str,
         demo_quantity: u32,
     ) -> Result<FetchResult> {
+        self.fetch_cart_target(url, category_id, demo_quantity, None)
+            .await
+    }
+
+    /// Rehearse explicit configured filters in the same isolated offline flow.
+    /// Metadata IDs are inputs, not stock or a reservation authorization.
+    pub async fn fetch_cart_preparation(
+        &self,
+        url: &str,
+        category_id: &str,
+        quantity: u32,
+        price_id: &str,
+        section_ids: &[String],
+    ) -> Result<FetchResult> {
+        if !map_identifier(price_id)
+            || section_ids.len() > 128
+            || section_ids.iter().any(|id| !map_identifier(id))
+            || section_ids
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                != section_ids.len()
+        {
+            bail!("Cart preparation requires bounded unique configured price and section IDs");
+        }
+        self.fetch_cart_target(
+            url,
+            category_id,
+            quantity,
+            Some(BrowserCartSelection {
+                price_id,
+                section_ids,
+            }),
+        )
+        .await
+    }
+
+    async fn fetch_cart_target(
+        &self,
+        url: &str,
+        category_id: &str,
+        demo_quantity: u32,
+        selection: Option<BrowserCartSelection<'_>>,
+    ) -> Result<FetchResult> {
         let mut safe_url = validate_public_url(url)?;
         safe_url.set_fragment(None);
         if !crate::event_identity::identity(safe_url.as_str())
@@ -176,6 +220,7 @@ impl Fetcher {
                     display: Some(BrowserDisplay::CartControls),
                     cart_category_id: Some(category_id),
                     cart_demo_quantity: Some(demo_quantity),
+                    cart_selection: selection,
                     ..BrowserTarget::default()
                 },
             )
@@ -260,6 +305,7 @@ impl Fetcher {
             map_scan_limit: target.map_scan_limit,
             cart_category_id: target.cart_category_id,
             cart_demo_quantity: target.cart_demo_quantity,
+            cart_selection: target.cart_selection,
         };
         worker.next_id += 1;
         // Include a bounded browser-startup allowance in addition to the navigation deadline.
@@ -458,6 +504,13 @@ struct BrowserTarget<'a> {
     map_scan_limit: Option<u32>,
     cart_category_id: Option<&'a str>,
     cart_demo_quantity: Option<u32>,
+    cart_selection: Option<BrowserCartSelection<'a>>,
+}
+
+#[derive(Serialize)]
+struct BrowserCartSelection<'a> {
+    price_id: &'a str,
+    section_ids: &'a [String],
 }
 
 #[derive(Serialize)]
@@ -480,6 +533,8 @@ struct BrowserRequest<'a> {
     cart_category_id: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     cart_demo_quantity: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cart_selection: Option<BrowserCartSelection<'a>>,
 }
 
 #[derive(Deserialize)]
@@ -762,6 +817,33 @@ impl BrowserProcess {
                     }
                     if !(200..300).contains(&status) || adapter_state.as_deref() != Some("ready") {
                         bail!("Cart controls inspection lacks a ready document");
+                    }
+                    match (&request.cart_selection, inspection.get("preparation")) {
+                        (None, Some(_)) => bail!("Unsolicited cart filter preparation"),
+                        (Some(_), None) => {
+                            bail!("Browser omitted the requested cart filter preparation")
+                        }
+                        (Some(selection), Some(preparation)) => {
+                            let sections_match = preparation
+                                .get("section_ids")
+                                .and_then(serde_json::Value::as_array)
+                                .is_some_and(|values| {
+                                    values.len() == selection.section_ids.len()
+                                        && values
+                                            .iter()
+                                            .zip(selection.section_ids)
+                                            .all(|(value, id)| value.as_str() == Some(id.as_str()))
+                                });
+                            if preparation
+                                .get("price_id")
+                                .and_then(serde_json::Value::as_str)
+                                != Some(selection.price_id)
+                                || !sections_match
+                            {
+                                bail!("Cart filter preparation target mismatch");
+                            }
+                        }
+                        _ => {}
                     }
                 }
                 (Some(_), None)
@@ -1332,6 +1414,159 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cart_preparation_rejects_invalid_ids_before_browser_startup() {
+        let fetcher = Fetcher::new(&Config::default()).unwrap();
+        let event = "https://www.ticketmaster.cz/event/synthetic/12345678";
+        for (price, sections) in [
+            ("".to_string(), vec![]),
+            ("price] *".to_string(), vec![]),
+            ("p".repeat(129), vec![]),
+            ("price".to_string(), vec!["".to_string()]),
+            (
+                "price".to_string(),
+                vec!["1P".to_string(), "1P".to_string()],
+            ),
+            ("price".to_string(), vec!["section] *".to_string()]),
+            ("price".to_string(), vec!["s".repeat(129)]),
+            (
+                "price".to_string(),
+                (0..129).map(|n| format!("section-{n}")).collect(),
+            ),
+        ] {
+            assert!(
+                fetcher
+                    .fetch_cart_preparation(event, "category", 2, &price, &sections)
+                    .await
+                    .unwrap_err()
+                    .to_string()
+                    .contains("bounded unique configured")
+            );
+        }
+        assert!(
+            fetcher
+                .fetch_cart_preparation(event, "category", 0, "price", &[])
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("bounded category ID")
+        );
+        assert!(
+            fetcher
+                .fetch_cart_preparation(
+                    "https://www.ticketmaster.pl/event/synthetic/12345678",
+                    "category",
+                    2,
+                    "price",
+                    &[]
+                )
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("public Czech event URL")
+        );
+        assert!(fetcher.browser.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn cart_preparation_protocol_binds_requested_filters_and_rejects_unsolicited_or_failed_reports()
+     {
+        let mut script = tempfile::NamedTempFile::new().unwrap();
+        script.write_all(br#"
+            require('node:readline').createInterface({input:process.stdin}).on('line',line=>{
+                const r=JSON.parse(line),kind=new URL(r.url).pathname.split('/')[2];
+                const preparation={price_id:r.cart_selection?.price_id||'price-6',section_ids:r.cart_selection?.section_ids||[]};
+                if(kind==='wrong-price') preparation.price_id='price-7';
+                if(kind==='wrong-sections') preparation.section_ids=['other'];
+                if(kind==='string-sections') preparation.section_ids='1P';
+                if(kind==='nonstring-section') preparation.section_ids=[1];
+                const inspection={category_id:r.cart_category_id||'category',demo_quantity:r.cart_demo_quantity||2,
+                    preparation:kind==='missing-preparation'?undefined:kind==='null-preparation'?null:preparation};
+                process.stdout.write(JSON.stringify({id:r.id,status:kind==='http-blocked'?403:200,
+                    html:JSON.stringify(r),final_url:r.url,retry_after_secs:120,
+                    adapter_state:kind==='http-blocked'||kind==='blocked-with-report'?'blocked':kind==='unsupported'?'unsupported':'ready',
+                    adapter_reason:kind==='private-reason'?'private-secret-marker':kind==='unsupported'?'cart_controls_changed':'cart_controls_ready',
+                    cart_controls:['http-blocked','unsupported','missing-controls'].includes(kind)?undefined:inspection})+'\n');
+            });
+        "#).unwrap();
+        let mut config = Config::default();
+        config.browser.script = script.path().to_owned();
+        let fetcher = Fetcher::new(&config).unwrap();
+        let event = "https://www.ticketmaster.cz/event/synthetic/12345678";
+        let sections = vec!["1P".to_string(), "4P".to_string()];
+        let page = fetcher
+            .fetch_cart_preparation(event, "category", 2, "price-6", &sections)
+            .await
+            .unwrap();
+        let sent: serde_json::Value = serde_json::from_str(&page.html).unwrap();
+        assert_eq!(sent["display"], "cart_controls");
+        assert_eq!(sent["cart_demo_quantity"], 2);
+        assert_eq!(
+            sent["cart_selection"],
+            serde_json::json!({"price_id":"price-6","section_ids":["1P","4P"]})
+        );
+        assert!(sent.get("map_scan_limit").is_none());
+        assert_eq!(
+            page.cart_controls.unwrap()["preparation"]["price_id"],
+            "price-6"
+        );
+        let all_sections = fetcher
+            .fetch_cart_preparation(event, "category", 2, "price-6", &[])
+            .await
+            .unwrap();
+        assert_eq!(
+            all_sections.cart_controls.unwrap()["preparation"]["section_ids"],
+            serde_json::json!([])
+        );
+        for (kind, reason) in [
+            ("wrong-price", "target mismatch"),
+            ("wrong-sections", "target mismatch"),
+            ("string-sections", "target mismatch"),
+            ("nonstring-section", "target mismatch"),
+            ("null-preparation", "target mismatch"),
+            ("missing-preparation", "omitted the requested cart filter"),
+            ("missing-controls", "omitted the requested cart controls"),
+            ("blocked-with-report", "lacks a ready document"),
+        ] {
+            let url = format!("https://www.ticketmaster.cz/event/{kind}/12345678");
+            let error = fetcher
+                .fetch_cart_preparation(&url, "category", 2, "price-6", &sections)
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains(reason), "{kind}: {error}");
+        }
+        assert!(
+            fetcher
+                .fetch_cart_controls(event, "category", 2)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("Unsolicited cart filter preparation")
+        );
+        for kind in ["http-blocked", "unsupported"] {
+            let url = format!("https://www.ticketmaster.cz/event/{kind}/12345678");
+            let page = fetcher
+                .fetch_cart_preparation(&url, "category", 2, "price-6", &sections)
+                .await
+                .unwrap();
+            assert!(page.cart_controls.is_none());
+            assert_eq!(page.retry_after_secs, Some(120));
+        }
+        let page = fetcher
+            .fetch_cart_preparation(
+                "https://www.ticketmaster.cz/event/private-reason/12345678",
+                "category",
+                2,
+                "price-6",
+                &sections,
+            )
+            .await
+            .unwrap();
+        assert!(!page.detail.contains("private-secret-marker"));
+        assert!(!page.detail.contains("cart controls="));
+        fetcher.shutdown().await;
+    }
+
+    #[tokio::test]
     async fn cart_controls_protocol_is_exclusive_ready_and_bound_to_requested_demo() {
         let mut script = tempfile::NamedTempFile::new().unwrap();
         script.write_all(br#"
@@ -1366,6 +1601,7 @@ mod tests {
         assert_eq!(request["adapter"], "ticketmaster");
         assert_eq!(request["cart_category_id"], "category");
         assert_eq!(request["cart_demo_quantity"], 2);
+        assert!(request.get("cart_selection").is_none());
         assert!(request.get("map_section_id").is_none());
         assert!(request.get("map_scan_limit").is_none());
         assert_eq!(result.cart_controls.unwrap()["demo_quantity"], 2);

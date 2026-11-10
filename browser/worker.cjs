@@ -87,7 +87,17 @@ function validateRequest(request) {
         || request.cart_demo_quantity < 1 || request.cart_demo_quantity > 20
         || request.map_section_id !== undefined || request.map_seat_id !== undefined
         || request.map_scan_limit !== undefined) throw new Error('invalid_request');
-  } else if (request.cart_category_id !== undefined || request.cart_demo_quantity !== undefined) {
+    if (request.cart_selection !== undefined) {
+      const selection = request.cart_selection;
+      if (!selection || typeof selection !== 'object' || Array.isArray(selection)
+          || Object.keys(selection).length !== 2 || !Object.hasOwn(selection, 'price_id')
+          || !Object.hasOwn(selection, 'section_ids') || !identifier(selection.price_id)
+          || !Array.isArray(selection.section_ids) || selection.section_ids.length > 128
+          || selection.section_ids.some(id => !identifier(id))
+          || new Set(selection.section_ids).size !== selection.section_ids.length) throw new Error('invalid_request');
+    }
+  } else if (request.cart_category_id !== undefined || request.cart_demo_quantity !== undefined
+      || request.cart_selection !== undefined) {
     throw new Error('invalid_request');
   }
   return url;
@@ -309,6 +319,8 @@ async function capture(context, request, cartIsolation) {
             prepared = await inspectTicketmasterCartControls(page, target.href, {
               categoryId: request.cart_category_id, quantity: request.cart_demo_quantity,
               networkDisabled: true, assertNetworkDisabled: cartIsolation.assertNetworkDisabled,
+              ...(request.cart_selection ? { selection: { priceId: request.cart_selection.price_id,
+                sectionIds: request.cart_selection.section_ids } } : {}),
             }, remaining(), cartGuard);
           }
           // A recognizable listing without the requested controls is unsupported.

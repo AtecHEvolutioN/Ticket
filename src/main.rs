@@ -53,6 +53,9 @@ enum Command {
     CartJournal {
         #[arg(long)]
         file: PathBuf,
+        /// Read the append-only native outcome history for one attempt.
+        #[arg(long)]
+        history_attempt: Option<String>,
     },
     /// Inspect quantity-dependent Czech controls offline after loading the event; never reserves.
     CartControls {
@@ -63,6 +66,23 @@ enum Command {
         /// Local form demo only; this does not configure a purchase quantity.
         #[arg(long, value_parser = clap::value_parser!(u32).range(1..=20))]
         demo_quantity: u32,
+        #[arg(long)]
+        headed: bool,
+    },
+    /// Rehearse saved quantity and exact native filters offline, then restore them; never reserves.
+    CartPrepare {
+        #[arg(long)]
+        url: String,
+        /// Android export or another validated preferences document; defaults to two adjacent tickets.
+        #[arg(long)]
+        preferences: Option<PathBuf>,
+        #[arg(long)]
+        category_id: String,
+        #[arg(long)]
+        price_id: String,
+        /// Native filter IDs from cart-catalog, not individual seat-section labels.
+        #[arg(long)]
+        native_section_id: Vec<String>,
         #[arg(long)]
         headed: bool,
     },
@@ -116,6 +136,9 @@ enum Command {
         /// Show ordinary Chromium on an available graphical display.
         #[arg(long)]
         headed: bool,
+        /// Rank configured choices against saved preferences; does not establish stock or complete fees.
+        #[arg(long)]
+        preferences: Option<PathBuf>,
     },
     /// Evaluate supplied group quotes offline; a decision never authorizes a reservation.
     CartPlan {
@@ -776,6 +799,7 @@ async fn main() -> Result<()> {
         | Command::Inspect { .. }
         | Command::CartCatalog { .. }
         | Command::CartControls { .. }
+        | Command::CartPrepare { .. }
         | Command::CartJournal { .. }
         | Command::CartPreferences { .. }
         | Command::CartPlan { .. } => Config::default(),
@@ -815,8 +839,18 @@ async fn main() -> Result<()> {
                 bail!("Map observation health check failed; see JSON report");
             }
         }
-        Command::CartJournal { file } => {
-            print_json(&ticket_watch::cart_journal::inspect_file(&file)?)?;
+        Command::CartJournal {
+            file,
+            history_attempt,
+        } => {
+            if let Some(attempt_id) = history_attempt {
+                print_json(&ticket_watch::cart_journal::inspect_search_history(
+                    &file,
+                    &attempt_id,
+                )?)?;
+            } else {
+                print_json(&ticket_watch::cart_journal::inspect_file(&file)?)?;
+            }
         }
         Command::CartControls {
             url,
@@ -857,6 +891,90 @@ async fn main() -> Result<()> {
                 "transport_binding":"observed_main_document", "elapsed_ms":page.elapsed_ms,
                 "report":report}),
             )?;
+        }
+        Command::CartPrepare {
+            url,
+            preferences,
+            category_id,
+            price_id,
+            native_section_id,
+            headed,
+        } => {
+            let document = match preferences {
+                Some(path) => read_cart_preferences(&path)?,
+                None => ticket_watch::cart_preferences::PreferencesDocument::default(),
+            };
+            let effective = ticket_watch::cart_preferences::resolve(&document, &url)?;
+            if effective.preferences.currency != "CZK" {
+                bail!("Current native preparation supports Czech events and CZK only");
+            }
+            if !effective.preferences.allowed_category_ids.is_empty()
+                && !effective
+                    .preferences
+                    .allowed_category_ids
+                    .contains(&category_id)
+            {
+                bail!("Selected category does not match saved preferences");
+            }
+            let selection = ticket_watch::cart_preparation::NativeSelection {
+                price_id,
+                section_ids: native_section_id,
+            };
+            let quantity = effective.preferences.quantity;
+            let mut config = config;
+            config.browser.headed = headed;
+            config.request_timeout_secs = 60;
+            let fetcher = Fetcher::new(&config)?;
+            let result = fetcher
+                .fetch_cart_preparation(
+                    &url,
+                    &category_id,
+                    quantity,
+                    &selection.price_id,
+                    &selection.section_ids,
+                )
+                .await;
+            fetcher.shutdown().await;
+            let page = result?;
+            if !(200..300).contains(&page.status) || page.adapter_state.as_deref() != Some("ready")
+            {
+                bail!(
+                    "HTTP {}; {}; no native preparation report produced",
+                    page.status,
+                    page.detail
+                );
+            }
+            let report = ticket_watch::cart_preparation::validate_preparation(
+                &url,
+                &page.final_url,
+                &category_id,
+                quantity,
+                &selection,
+                &page.html,
+                page.cart_controls
+                    .as_ref()
+                    .context("Missing native preparation evidence")?,
+                chrono::Utc::now().timestamp_millis(),
+            )?;
+            let candidates = ticket_watch::cart_preparation::evaluate(
+                &document,
+                &report.catalog,
+                Some(&report.controls),
+            )?;
+            ticket_watch::cart_preparation::validate_selected(
+                &candidates,
+                &category_id,
+                &selection,
+            )?;
+            print_json(&serde_json::json!({
+                "source":"live_browser_offline_filter_rehearsal",
+                "transport_binding":"observed_main_document",
+                "elapsed_ms":page.elapsed_ms,
+                "reservation_attempted":false,
+                "effective_preferences":effective,
+                "report":report,
+                "preparation_candidates":candidates,
+            }))?;
         }
         Command::MapScan {
             url,
@@ -1072,7 +1190,16 @@ async fn main() -> Result<()> {
                 ))?;
             }
         }
-        Command::CartCatalog { url, html, headed } => {
+        Command::CartCatalog {
+            url,
+            html,
+            headed,
+            preferences,
+        } => {
+            let preferences = preferences
+                .as_deref()
+                .map(read_cart_preferences)
+                .transpose()?;
             let parsed = config::validate_public_url(&url)
                 .context("Use a public Ticketmaster Czech event URL")?;
             if !matches!(
@@ -1126,12 +1253,20 @@ async fn main() -> Result<()> {
             };
             let catalog =
                 ticket_watch::cart_catalog::extract_cz_cart_catalog(&url, &final_url, &body)?;
-            print_json(&serde_json::json!({
+            let preparation = preferences
+                .as_ref()
+                .map(|document| ticket_watch::cart_preparation::evaluate(document, &catalog, None))
+                .transpose()?;
+            let mut output = serde_json::json!({
                 "source": source,
                 "transport_binding": transport_binding,
                 "reservation_attempted": false,
                 "catalog": catalog,
-            }))?;
+            });
+            if let Some(preparation) = preparation {
+                output["preparation_candidates"] = serde_json::to_value(preparation)?;
+            }
+            print_json(&output)?;
         }
         Command::Venues { action } => {
             let _lock = if matches!(action, VenueCommand::Import { .. }) {

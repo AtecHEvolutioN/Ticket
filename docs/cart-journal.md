@@ -52,7 +52,7 @@ keep `reservation_authorized=false`, `source_authenticated=false` and `date_veri
 native receipt parser is still required before connecting the journal to real
 cart actions.
 
-Version 1 and 2 journals migrate to version 3 without rewriting historical evidence.
+Version 1, 2 and 3 journals migrate to version 4 without rewriting historical evidence.
 Undated prepared attempts may be abandoned but cannot dispatch. Existing confirmed
 holds may expire by their recorded expiry. Undated uncertain attempts stay
 blocked; the migration does not invent an expected date or unlock another attempt.
@@ -91,10 +91,10 @@ at its confirmed deadline. A mismatched or unknown hold cannot release the event
 using an unverified timer. An explicit terminal no-hold result can release a new
 attempt only when its bindings and finality checks pass.
 
-An outcome is immutable apart from exact idempotent replay. A recorded uncertain
-or mismatched outcome cannot be overwritten with a generic no-hold claim; a
-separate native reconciliation flow is still needed for those cases. An empty
-cart, timeout, selection counter or expired configuration never proves release.
+The initial outcome remains immutable through `record_search_outcome`. Later
+observations use the explicit reconciliation API below, preserving the original
+receipt in an append-only history. An empty cart, timeout, selection counter or
+expired configuration never proves release.
 
 Inspection JSON includes `workflow`; native bindings appear under
 `binding.request`. Old quoted binding fields retain their previous JSON shape.
@@ -107,3 +107,56 @@ cookies, authentication tokens, checkout URLs or private cart identifiers.
 Tests cover concurrent writers, duplicate dispatch, restart recovery, stale and
 incomplete plans, mismatched receipts, uncertain outcomes and transaction
 rollback. These are synthetic consistency tests, not a live Ticketmaster hold.
+
+## Recover an interrupted native attempt
+
+`CartJournal::reconcile_search` accepts a `NativeSearchReconciliation` containing
+an application-generated `reconciliation_id`, the inspected `native_outcome_hash`
+as `expected_outcome_hash`, and a new native outcome. It does not submit another
+ticket search. The evidence must remain bound to the original attempt, session,
+source document, configuration and performance; the outcome document may have
+changed as the native flow navigated.
+
+The update checks the expected outcome hash and writes the new receipt, history
+entry and state transition in one transaction. Only one concurrent recovery can
+supersede a given outcome. Replaying the same reconciliation ID with identical
+evidence returns the current record, even after later recovery steps; it never
+rewinds history. Reusing an ID with different evidence is rejected.
+
+Observations must be newer than the retained evidence/recording time and less
+than five seconds old. An invalid clock on an earlier uncertain receipt cannot
+prevent recovery forever: the persisted recording time supplies the minimum in
+that case, while the invalid original receipt remains visible in history.
+
+- An uncertain attempt with no observed hold may become terminal `NoHold` only
+  with matching, fresh evidence that the request finished and no hold exists.
+- An observed hold cannot become a generic `NoHold` or `Uncertain` outcome.
+  Recovery may fill missing evidence for the same hold, including its seating,
+  fee or ranking evidence, but cannot change known seat identities, total, price,
+  expiry or a concrete event/date claim. It cannot replace or renew a hold.
+- Releasing an observed hold requires `NativeSearchOutcome::Released`, with its
+  original hold correlation, a release correlation, explicit release and absence
+  confirmation, and a terminal request. This retains the fact that a hold was
+  observed instead of rewriting history to say no hold ever existed.
+
+The unchanged-expiry requirement is conservative: a malformed or missing original
+expiry cannot be replaced with a new timer through hold-to-hold recovery. An
+explicit correlated release is required to resolve that case. Mismatched request
+lineage also remains locked for review.
+
+Inspect retained observations without creating or migrating a database:
+
+```bash
+./target/release/ticket-watch cart-journal --file data/cart-attempts.sqlite \
+  --history-attempt APP_ATTEMPT_ID
+```
+
+Schema 4 adds `cart_search_outcomes`. Migration preserves the last stored native
+receipt from schema 3 as its initial history entry; it does not invent earlier
+observations. Read-only inspection of an older journal exposes that retained
+receipt without writing a migration.
+
+These APIs validate supplied evidence consistently. Native receipt extraction
+and source authentication are still unfinished; a successful reconciliation does
+not independently establish Ticketmaster stock, authorize a reservation or send
+a Discord message.
