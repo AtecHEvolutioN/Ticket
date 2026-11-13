@@ -90,6 +90,7 @@ Catalog refreshes preserve matching cached watches through partial failures and 
 On a Linux desktop, [install/open Discord and the bot interface](docs/linux-desktop.md)
 with `bash deploy/open-ticket-watch-linux.sh`. The launcher reuses an existing
 Discord installation or installs the official build for your user.
+For the current PC-first validation task, use [the Arch local pilot](docs/arch-local-pilot.md).
 
 - [Broader country discovery](docs/discovery-partitions.md) and [priority checks](docs/scheduling.md): resumable date windows expand beyond one query's 1,000-result ceiling; imminent sales and changed observations get priority with fair older checks. Backlog, freshness and processing timings remain explicit; provider pacing is unchanged.
 - [Netherlands Discord layout](docs/discord-netherlands.md): nine created channels separate sale schedules, observed original/resale offers, price changes, charts, event updates and monitor status. Country subscriptions can discover all returned artists; coverage and worker capacity limits remain explicit. Live feeds and multi-channel routing still need deployment.

@@ -2,11 +2,17 @@
 
 ## Current goal and stopping point
 
-**Latest access decision:** the user's PC is remote-only. Run Codex directly
-inside the existing Debian VM through an SSH terminal from the Proxmox node.
-[The one-time connection helper and handoff](docs/remote-codex.md) prepare this
-route. Its setup has been implemented locally but not confirmed on the server.
-Do not claim this cloud session can type into the user's Proxmox browser Shell.
+**Latest decision: PC first.** The user wants the bot fully set up and validated
+on their **Arch Linux desktop**, which they can control, before moving it to the
+always-on Debian VM. Follow [the Arch pilot task](docs/arch-local-pilot.md).
+The VM Codex route below is historical context; keep that watcher paused.
+This cloud session has no desktop-control connection to the user's PC.
+
+The user's VM screenshot confirmed a working local Codex session. It applied the
+longer wait with a backup/hash record and reported one headed HTTP200 after
+about 24 seconds, followed by unsupported parsing with no offers/categories. The
+worker remained stopped/disabled; both credentials were absent. That VM report
+has not been inspected directly by this cloud session or pushed to this checkout.
 
 Build a fast Ticketmaster monitor with Discord availability/asking-price alerts,
 history charts and eventually verified carting. The latest scope is **all artists
@@ -267,9 +273,9 @@ built local worker bundle is not automatically a published GitHub Release.
 
 ## Next work, in order
 
-1. Complete the chosen Codex-inside-VM access route using the Proxmox Shell and
-   dedicated, pinned SSH key. Read [the remote handoff](docs/remote-codex.md).
-   Recheck installed files/service state and privately configure credentials.
+1. Set up and validate the Arch desktop pilot according to
+   [the current local task](docs/arch-local-pilot.md). Keep the VM paused; migrate
+   only after live extraction, Discord and automatic history updates are proven.
 2. Implement durable channel routing/publishers for catalog schedules, sale-open
    status, original/resale observations, price changes and event updates. Keep
    unknown provenance out of primary/resale-only channels; do not duplicate nine

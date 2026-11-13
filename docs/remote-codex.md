@@ -1,5 +1,9 @@
 # Continue directly inside the Debian VM
 
+**Current direction:** validate on the [Arch desktop first](arch-local-pilot.md).
+This document records the earlier VM connection route; keep its watcher paused
+until the desktop pilot has been validated.
+
 The user's PC has only remote access. The chosen route is therefore to run Codex
 inside the existing Debian VM, using an SSH terminal from the Proxmox node Shell.
 This cloud chat has no verified LAN/VPN route or terminal-control tool for that
