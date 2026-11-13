@@ -2,6 +2,12 @@
 
 ## Current goal and stopping point
 
+**Latest access decision:** the user's PC is remote-only. Run Codex directly
+inside the existing Debian VM through an SSH terminal from the Proxmox node.
+[The one-time connection helper and handoff](docs/remote-codex.md) prepare this
+route. Its setup has been implemented locally but not confirmed on the server.
+Do not claim this cloud session can type into the user's Proxmox browser Shell.
+
 Build a fast Ticketmaster monitor with Discord availability/asking-price alerts,
 history charts and eventually verified carting. The latest scope is **all artists
 and returned event types on Ticketmaster.nl**, across Dutch cities/venues. The
@@ -169,8 +175,11 @@ their VM: Chromium156, Node/Playwright and the worker validate. The worker remai
 stopped and disabled. One headless live check as the service account returned
 HTTP 403/blocked with no offers or categories; a normal PC browser displays ticket
 types/prices for the same event. This narrows the comparison but does not identify
-the cause. Virtual-display tools and a controlled headed comparison are next;
-respect the configured 900-second backoff rather than repeating the blocked read.
+the cause. A subsequent Xvfb headed check returned identification HTTP401 after
+7434ms, with no offers/categories. Its timestamp was 1794589178. The ordinary
+worker's five-second passive wait may be too short; new source adds an explicit
+bounded fifteen-second option. This is locally tested but has not been deployed
+or shown to fix live access. Respect the configured 900-second host backoff.
 The private Proxmox credential helper is implemented and locally tested, but
 credential installation has not been confirmed. It uses hidden terminal prompts,
 guest stdin and an atomic mode0600 environment file; it refuses existing values.
@@ -220,6 +229,12 @@ paste keys into chat or copy credentials into Git/public logs.
 
 ## Verification completed
 
+- Latest source changes:26 local worker/navigation regressions and4 SSH bootstrap
+  tests passed, along with the4 private-credential tests. The bounded fifteen-second
+  navigation option has not been verified against the live VM. Check the newest CI
+  run for the complete source validation; prior full-suite counts below are the
+  pre-navigation-option baseline.
+
 - Rust: **584 tests passed**; formatting, Clippy `--all-targets -D warnings` and
   optimized release build passed.
 - Discord/scripts/viewer/history API: **89 tests passed**, including four preview
@@ -240,7 +255,8 @@ paste keys into chat or copy credentials into Git/public logs.
 - Previous feature CI [42857781689](https://github.com/AtecHEvolutioN/Ticket/actions/runs/42857781689)
   passed both jobs. Check the newest commit's GitHub run for this revision's result.
 - NL preparation: six checks passed, one explicit systemd-runtime check skipped
-  because of the sandbox; no real host install/start was tested.
+  because of the sandbox. The user confirmed target-host installation; sustained
+  watcher startup and delivery remain unverified.
 - Linux bundle: archive and per-file checksums, service-readable permissions and
   packaged offline replay passed. The extracted source passed offline locked
   `cargo check --all-targets`, including the embedded chart assets.
@@ -251,15 +267,16 @@ built local worker bundle is not automatically a published GitHub Release.
 
 ## Next work, in order
 
-1. Confirm provider/budget, provision the approved VM, establish private access,
-   install the reviewed checkout/bundle and private environment. Validate ordinary
-   headless website access before enabling a long-running watcher.
+1. Complete the chosen Codex-inside-VM access route using the Proxmox Shell and
+   dedicated, pinned SSH key. Read [the remote handoff](docs/remote-codex.md).
+   Recheck installed files/service state and privately configure credentials.
 2. Implement durable channel routing/publishers for catalog schedules, sale-open
    status, original/resale observations, price changes and event updates. Keep
    unknown provenance out of primary/resale-only channels; do not duplicate nine
    independent scrapers. Preserve outbox identity, cooldowns and deduplication.
-3. Validate the partitioned catalog and priority scheduler on the actual account
-   and host. Measure freshness/latency under real pacing and coverage gaps. Expand
+3. Validate provider access first, including the bounded identification wait;
+   then validate the partitioned catalog and priorities on the actual account.
+   Measure freshness/latency under real pacing and coverage gaps. Expand
    undated discovery separately if required; do not imply exhaustive coverage.
 4. Run a measured preview/soak, verify delivery to the intended routes, then enable
    startup at boot. Check restart/stop behavior, disk growth, consistent SQLite

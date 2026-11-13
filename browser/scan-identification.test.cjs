@@ -20,9 +20,9 @@ async function browserFixture(run) {
   try { await run(browser); } finally { await browser.close(); }
 }
 
-test('section inspections and scans wait for normal identification after five seconds while ordinary checks keep their shorter window', { skip: !enabled }, async () => {
+test('ordinary checks can opt into a longer normal navigation wait while defaults keep their shorter window', { skip: !enabled }, async () => {
   await browserFixture(async browser => {
-    await Promise.all(['scan', 'section', 'ordinary'].map(async mode => {
+    await Promise.all(['scan', 'section', 'ordinary', 'ordinary-extended'].map(async mode => {
       const context = await browser.newContext({ serviceWorkers: 'block' });
       let documents = 0, gotos = 0;
       context.on('page', page => {
@@ -38,9 +38,16 @@ test('section inspections and scans wait for normal identification after five se
       });
       const input = mode === 'scan' ? request : mode === 'section' ? { ...request, map_scan_limit: undefined }
         : { ...request, adapter: 'selectors', display: undefined,
+        ...(mode === 'ordinary-extended' ? { identification_wait_ms: 15000 } : {}),
         map_section_id: undefined, map_scan_limit: undefined };
       const result = await capture(context, input);
-      if (mode !== 'ordinary') {
+      if (mode === 'ordinary-extended') {
+        assert.equal(result.status, 200);
+        assert.match(result.html, /data-section-clicks="0" data-ticket-clicks="0"/);
+        assert.equal(result.map_scan, undefined);
+        assert.equal(result.map_inspection, undefined);
+        assert.equal(documents, 2);
+      } else if (mode !== 'ordinary') {
         assert.equal(result.status, 200);
         assert.equal(result.adapter_reason, mode === 'scan' ? 'scan_ready' : 'section_ready');
         if (mode === 'scan') {
@@ -67,47 +74,51 @@ test('section inspections and scans wait for normal identification after five se
   });
 });
 
-test('a short scan request still caps the longer identification window at its own deadline', { skip: !enabled }, async () => {
+test('a short request caps both configured ordinary and scan identification waits at its own deadline', { skip: !enabled }, async () => {
   await browserFixture(async browser => {
-    const context = await browser.newContext({ serviceWorkers: 'block' });
-    let documents = 0;
-    await context.route('**/*', route => {
-      if (route.request().isNavigationRequest()) documents++;
-      return route.fulfill({ status: 401, contentType: 'text/html', headers: { 'tm-bl': '1' }, body: identification });
-    });
-    const started = performance.now();
-    const result = await capture(context, { ...request, timeout_ms: 650 });
-    assert.equal(result.status, 401);
-    assert.equal(result.manual_intervention, 'identification_incomplete');
-    assert.equal(result.adapter_state, 'blocked');
-    assert.equal(result.map_scan, undefined);
-    assert.equal(documents, 1);
-    assert.ok(performance.now() - started < 1600);
-    assert.equal(context.pages().length, 0);
-    await context.close();
+    for (const extra of [{}, { display: undefined, map_section_id: undefined, map_scan_limit: undefined, identification_wait_ms: 15000 }]) {
+      const context = await browser.newContext({ serviceWorkers: 'block' });
+      let documents = 0;
+      await context.route('**/*', route => {
+        if (route.request().isNavigationRequest()) documents++;
+        return route.fulfill({ status: 401, contentType: 'text/html', headers: { 'tm-bl': '1' }, body: identification });
+      });
+      const started = performance.now();
+      const result = await capture(context, { ...request, ...extra, timeout_ms: 650 });
+      assert.equal(result.status, 401);
+      assert.equal(result.manual_intervention, 'identification_incomplete');
+      assert.equal(result.adapter_state, 'blocked');
+      assert.equal(result.map_scan, undefined);
+      assert.equal(documents, 1);
+      assert.ok(performance.now() - started < 1600);
+      assert.equal(context.pages().length, 0);
+      await context.close();
+    }
   });
 });
 
 test('scan identification never consumes the extended wait when Retry-After prohibits continuation', { skip: !enabled }, async () => {
   await browserFixture(async browser => {
     for (const cooldown of ['60', 'invalid', '0, 120']) {
-      const context = await browser.newContext({ serviceWorkers: 'block' });
-      let documents = 0;
-      context.on('page', page => { page.evaluate = () => { throw new Error('must not inspect restricted response HTML'); }; });
-      await context.route('**/*', route => {
-        if (route.request().isNavigationRequest()) documents++;
-        return route.fulfill({ status: 401, contentType: 'text/html',
-          headers: { 'tm-bl': '1', 'retry-after': cooldown }, body: identification });
-      });
-      const started = performance.now();
-      const result = await capture(context, request);
-      assert.equal(result.status, 401);
-      assert.equal(result.html, '');
-      assert.equal(result.map_scan, undefined);
-      assert.equal(documents, 1);
-      assert.ok(performance.now() - started < 1600);
-      assert.equal(context.pages().length, 0);
-      await context.close();
+      for (const extra of [{}, { display: undefined, map_section_id: undefined, map_scan_limit: undefined, identification_wait_ms: 15000 }]) {
+        const context = await browser.newContext({ serviceWorkers: 'block' });
+        let documents = 0;
+        context.on('page', page => { page.evaluate = () => { throw new Error('must not inspect restricted response HTML'); }; });
+        await context.route('**/*', route => {
+          if (route.request().isNavigationRequest()) documents++;
+          return route.fulfill({ status: 401, contentType: 'text/html',
+            headers: { 'tm-bl': '1', 'retry-after': cooldown }, body: identification });
+        });
+        const started = performance.now();
+        const result = await capture(context, { ...request, ...extra });
+        assert.equal(result.status, 401);
+        assert.equal(result.html, '');
+        assert.equal(result.map_scan, undefined);
+        assert.equal(documents, 1);
+        assert.ok(performance.now() - started < 1600);
+        assert.equal(context.pages().length, 0);
+        await context.close();
+      }
     }
   });
 });

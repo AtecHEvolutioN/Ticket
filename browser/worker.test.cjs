@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { validateUrl, validateRequest, retryAfter, identificationRetryAllowed, proxyOptions, capture, captureCartControls } = require('./worker.cjs');
+const { validateUrl, validateRequest, withIdentificationWait, retryAfter, identificationRetryAllowed, proxyOptions, capture, captureCartControls } = require('./worker.cjs');
 const { captureRendered, sameEvent, challengeText } = require('./rendered.cjs');
 const { EventEmitter } = require('node:events');
 
@@ -50,6 +50,23 @@ test('request protocol has bounded sizes and durations', () => {
   assert.doesNotThrow(() => validateRequest(request));
   assert.throws(() => validateRequest({...request,max_body_bytes:Infinity}));
   assert.throws(() => validateRequest({...request,timeout_ms:0}));
+});
+
+test('passive identification wait is explicit, bounded and leaves default requests unchanged', () => {
+  const request = { id:1,url:'https://www.ticketmaster.nl/event/synthetic/12345678',timeout_ms:1000,max_body_bytes:1024,render_wait_ms:0 };
+  assert.equal(withIdentificationWait(request, {}), request);
+  for (const value of [0, 5000, 15000]) {
+    const configured = withIdentificationWait(request, { TICKET_BROWSER_IDENTIFICATION_WAIT_MS: String(value) });
+    assert.equal(configured.identification_wait_ms, value);
+    assert.doesNotThrow(() => validateRequest(configured));
+    assert.equal(request.identification_wait_ms, undefined);
+  }
+  for (const value of ['', '15001', '-1', 'Infinity', '1.5', ' 5000', '5000\n', '05000']) {
+    assert.throws(() => withIdentificationWait(request, { TICKET_BROWSER_IDENTIFICATION_WAIT_MS: value }), /invalid_request/);
+  }
+  for (const value of [null, -1, 15001, '15000', Infinity, 1.5]) {
+    assert.throws(() => validateRequest({ ...request, identification_wait_ms: value }), /invalid_request/);
+  }
 });
 
 test('section inspection requires explicit bounded Czech or draft Netherlands map targets', () => {

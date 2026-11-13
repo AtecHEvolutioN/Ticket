@@ -70,6 +70,8 @@ function validateRequest(request) {
       !Number.isSafeInteger(request.render_wait_ms) || request.render_wait_ms < 0 || request.render_wait_ms > 30000) {
     throw new Error('invalid_request');
   }
+  if (request.identification_wait_ms !== undefined && (!Number.isSafeInteger(request.identification_wait_ms)
+      || request.identification_wait_ms < 0 || request.identification_wait_ms > 15000)) throw new Error('invalid_request');
   if (request.adapter !== undefined && !['ticketmaster', 'selectors'].includes(request.adapter)) throw new Error('invalid_request');
   if (request.display !== undefined && (!['map', 'cart_controls'].includes(request.display)
       || request.adapter !== 'ticketmaster')) throw new Error('invalid_request');
@@ -104,6 +106,17 @@ function validateRequest(request) {
     throw new Error('invalid_request');
   }
   return url;
+}
+
+// Explicit operator setting for slow normal page navigation. It changes only
+// the passive wait, retaining the document identity, deadline and cooldown rules.
+function withIdentificationWait(request, env = process.env) {
+  const value = env.TICKET_BROWSER_IDENTIFICATION_WAIT_MS;
+  if (value === undefined) return request;
+  if (typeof value !== 'string' || !/^(0|[1-9][0-9]{0,4})$/.test(value) || Number(value) > 15000) {
+    throw new Error('invalid_request');
+  }
+  return { ...request, identification_wait_ms: Number(value) };
 }
 
 // Quantity/filter demonstrations never share cookies, pages or in-flight traffic
@@ -254,7 +267,8 @@ async function capture(context, request, cartIsolation) {
       // Section inspections/scans allow a longer initial page load. A successful
       // normal identification navigation may take more than five seconds; this
       // passive grace remains inside the original request deadline and cooldown.
-      const identificationGrace = request.map_section_id !== undefined || request.display === 'cart_controls' ? 15000 : 5000;
+      const identificationGrace = request.identification_wait_ms
+        ?? (request.map_section_id !== undefined || request.display === 'cart_controls' ? 15000 : 5000);
       snapshot = await documents.waitForIdentification(Math.min(identificationGrace, Math.max(0, remaining() - 5)), identification, validateDocument);
       identificationPending = false;
       if (identification(snapshot)) return incompleteIdentification();
@@ -446,7 +460,7 @@ async function main() {
       let request;
       try {
         if (line.length > 8192) throw new Error('invalid_request');
-        request = JSON.parse(line);
+        request = withIdentificationWait(JSON.parse(line));
         validateRequest(request);
       } catch {
         send({ id: request?.id || null, error: 'invalid_request' });
@@ -479,5 +493,5 @@ async function main() {
   lines.once('close', () => { void requests.finally(close); });
 }
 
-module.exports = { validateUrl, validateRequest, retryAfter, identificationRetryAllowed, proxyOptions, capture, captureCartControls };
+module.exports = { validateUrl, validateRequest, withIdentificationWait, retryAfter, identificationRetryAllowed, proxyOptions, capture, captureCartControls };
 if (require.main === module) main().catch(() => { process.exitCode = 1; });

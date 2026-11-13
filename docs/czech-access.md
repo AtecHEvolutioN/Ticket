@@ -83,6 +83,14 @@ browser test, not a working remote desktop handoff. The shared desktop control
 tool was unavailable in this session. Manual intervention still requires the
 operator workflow described in [manual verification](manual-intervention.md).
 
+For a slower normal identification navigation, an operator can explicitly set
+`TICKET_BROWSER_IDENTIFICATION_WAIT_MS=15000` in the worker environment. The
+supported range is 0–15000 milliseconds; an unset value retains five seconds for
+ordinary checks and fifteen for section/control inspection. This only extends
+the passive wait within the original request deadline. It initiates no retry,
+reload or verification action. Positive/invalid Retry-After and other blocked
+responses retain their handling. Invalid settings fail before browser launch.
+
 ## Price snapshot
 
 Opening the recognized Czech best-available display tab exposed these categories:
