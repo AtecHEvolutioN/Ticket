@@ -21,6 +21,9 @@ through that local session; launching Codex alone is not a validated bot.
    existing Node, Chromium, libraries and the verified Linux worker before
    installing anything. Reuse compatible software. Keep this a local pilot;
    don't run Proxmox helpers or change the server's applications.
+   If using the prebuilt server archive, extract its binary into separate staging
+   and retain the current checkout's browser scripts. Unpacking the older full
+   source bundle over this checkout would discard the new navigation option.
 2. Configure one selected Dutch event initially. Discovery can later expand to
    all returned NL artists/events using the implemented dated partitions. Keep
    provider pacing, host cooldowns and one concurrent browser check. Use the
