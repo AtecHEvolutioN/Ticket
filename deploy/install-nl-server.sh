@@ -84,7 +84,7 @@ printf 'Installing Debian dependencies; existing Docker apps are not managed by 
 apt-get update
 DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l apt-get install -y --no-install-recommends \
     ca-certificates curl python3 tar nodejs npm chromium sqlite3 passwd util-linux
-base='https://github.com/AtecHEvolutioN/Ticket/releases/download/v0.8.0-server-test'
+base='https://raw.githubusercontent.com/AtecHEvolutioN/Ticket/v0.8.0-server-test/downloads'
 archive='ticket-watch-bot-linux-x86_64.tar.gz'
 for file in "$archive" "$archive.sha256"; do
     curl --fail --show-error --silent --location --proto '=https' --proto-redir '=https' \
