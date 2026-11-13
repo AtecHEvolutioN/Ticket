@@ -2,7 +2,7 @@
 //!
 //! The API key is held only in memory, sent only to the fixed HTTPS API origin,
 //! and deliberately excluded from errors, returned data, and Debug implementations.
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use reqwest::{Client, StatusCode, header::HeaderMap, redirect::Policy};
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -132,7 +132,7 @@ impl Discovery {
         city: Option<&str>,
         page: u32,
     ) -> Result<Value> {
-        self.events_query_page(Some(attraction_id), country, city, page)
+        self.events_query_page(Some(attraction_id), country, city, page, None)
             .await
     }
 
@@ -144,8 +144,51 @@ impl Discovery {
         city: Option<&str>,
         page: u32,
     ) -> Result<Value> {
-        self.events_query_page(None, Some(country), city, page)
+        self.events_query_page(None, Some(country), city, page, None)
             .await
+    }
+
+    /// One UTC date-window page. Provider paging/quotas still apply to each
+    /// window. Missing/TBA dates and dates outside the window are not covered.
+    pub async fn events_country_window_page(
+        &mut self,
+        country: &str,
+        city: Option<&str>,
+        page: u32,
+        start: i64,
+        end: i64,
+    ) -> Result<Value> {
+        if start > end {
+            bail!("Country discovery date window must be ordered");
+        }
+        let format = |timestamp| {
+            chrono::DateTime::from_timestamp(timestamp, 0)
+                .map(|date| date.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+                .ok_or_else(|| anyhow!("Country discovery date window is outside supported dates"))
+        };
+        // The provider describes these filters as "after"/"before" without
+        // promising inclusivity. Overlap by a second so exact split/day
+        // boundaries cannot fall between strict wire comparisons. Catalog
+        // merging deduplicates events returned by adjacent windows.
+        let query_start = format(
+            start
+                .checked_sub(1)
+                .context("Country date window underflow")?,
+        )?;
+        let query_end = format(end.checked_add(1).context("Country date window overflow")?)?;
+        let mut output = self
+            .events_query_page(
+                None,
+                Some(country),
+                city,
+                page,
+                Some((query_start.clone(), query_end.clone())),
+            )
+            .await?;
+        output["date_window"] = json!({"start":format(start)?,"end":format(end)?,
+            "request_start":query_start,"request_end":query_end,
+            "include_tba":false,"include_tbd":false});
+        Ok(output)
     }
 
     async fn events_query_page(
@@ -154,6 +197,7 @@ impl Discovery {
         country: Option<&str>,
         city: Option<&str>,
         page: u32,
+        window: Option<(String, String)>,
     ) -> Result<Value> {
         if page >= 10 {
             bail!(
@@ -198,12 +242,20 @@ impl Discovery {
         if let Some(city) = city {
             params.push(("city", input_text(city, "City", 200)?));
         }
+        if let Some((start, end)) = &window {
+            params.push(("startDateTime", start.clone()));
+            params.push(("endDateTime", end.clone()));
+            params.push(("includeTBA", "no".into()));
+            params.push(("includeTBD", "no".into()));
+        }
         let raw = self.request("events.json", &params).await?;
-        let events = embedded_items(&raw, "events")?
-            .iter()
-            .take(100)
-            .map(normalize_event)
-            .collect::<Vec<_>>();
+        let items = embedded_items(&raw, "events")?;
+        if items.len() > 100 {
+            bail!(
+                "Discovery event page exceeds the requested 100-item bound; completeness is unknown"
+            );
+        }
+        let events = items.iter().map(normalize_event).collect::<Vec<_>>();
         let mut output = envelope(&raw);
         output["kind"] = json!("event_search");
         output["selection_scope"] = json!(if attraction_id.is_some() {
@@ -214,6 +266,9 @@ impl Discovery {
         output["attraction_id"] = json!(attraction_id);
         output["country"] = json!(country);
         output["city"] = json!(city);
+        if let Some((start, end)) = window {
+            output["date_window"] = json!({"start": start, "end": end});
+        }
         output["events"] = json!(events);
         Ok(output)
     }
@@ -773,7 +828,12 @@ mod tests {
                 .await
                 .is_err()
         );
-        assert!(client.events_query_page(None, None, None, 0).await.is_err());
+        assert!(
+            client
+                .events_query_page(None, None, None, 0, None)
+                .await
+                .is_err()
+        );
         // The unchanged artist API must never interpret an empty ID as all artists.
         assert!(client.events_page("", Some("NL"), None, 0).await.is_err());
         assert!(matches!(
@@ -1004,6 +1064,147 @@ mod tests {
         assert_eq!(request_params(&request.await.unwrap())["page"], "2");
         assert_eq!(output["next_page"], 3);
         assert_eq!(output["deep_paging_limit_reached"], false);
+    }
+
+    #[tokio::test]
+    async fn country_date_window_is_encoded_without_artist_or_secret_leakage() {
+        let body = json!({"_embedded":{"events":[]},"page":{"number":1,"size":100,"totalElements":150,"totalPages":2}}).to_string();
+        let (mut client, request) = mock("200 OK", "", &body).await;
+        let output = client
+            .events_country_window_page("NL", Some("Amsterdam"), 1, 1_893_456_000, 1_893_542_399)
+            .await
+            .unwrap();
+        let params = request_params(&request.await.unwrap());
+        assert_eq!(params["startDateTime"], "2029-12-31T23:59:59Z");
+        assert_eq!(params["endDateTime"], "2030-01-02T00:00:00Z");
+        assert_eq!(params["page"], "1");
+        assert_eq!(params["sort"], "date,asc");
+        assert_eq!(params["countryCode"], "NL");
+        assert_eq!(params["includeTBA"], "no");
+        assert_eq!(params["includeTBD"], "no");
+        assert!(!params.contains_key("attractionId"));
+        assert_eq!(output["date_window"]["start"], "2030-01-01T00:00:00Z");
+        assert_eq!(
+            output["date_window"]["request_start"],
+            params["startDateTime"]
+        );
+        assert!(!output.to_string().contains(FAKE_KEY));
+    }
+
+    #[tokio::test]
+    async fn country_date_window_rejects_reversed_or_unrepresentable_bounds() {
+        let (mut client, _) = mock("200 OK", "", "{}").await;
+        assert!(
+            client
+                .events_country_window_page("NL", None, 0, 10, 9)
+                .await
+                .is_err()
+        );
+        assert!(
+            client
+                .events_country_window_page("NL", None, 0, i64::MIN, i64::MAX)
+                .await
+                .is_err()
+        );
+        assert!(
+            client
+                .events_country_window_page("NL", None, 10, 0, 1)
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn oversized_terminal_event_page_is_rejected_before_catalog_can_claim_completion() {
+        use crate::{
+            catalog::{self, Selection, Snapshot},
+            config::{Config, Watch},
+            database::Db,
+        };
+        let body = json!({"_embedded":{"events":(0..101).map(|index| json!({
+            "id":format!("oversized-{index}"),"name":"synthetic must not be silently truncated",
+            "url":format!("https://www.ticketmaster.nl/event/synthetic/{}",20000000+index)
+        })).collect::<Vec<_>>()},"page":{"number":0,"size":100,"totalElements":101,"totalPages":1}})
+        .to_string();
+        let (mut client, _) = mock("200 OK", "", &body).await;
+        let config: Config =
+            toml::from_str(include_str!("../examples/netherlands-all.example.toml")).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let db = Db::open(&directory.path().join("oversized-catalog.sqlite")).unwrap();
+        let cached = Watch {
+            id: "cached-existing".into(),
+            url: "https://www.ticketmaster.nl/event/synthetic/10000001".into(),
+            ..Watch::default()
+        };
+        let saved = Snapshot {
+            fingerprint: catalog::fingerprint(&config).unwrap(),
+            selections: vec![Selection {
+                id: config.subscriptions[0].id.clone(),
+                watches: vec![cached],
+                complete: true,
+                ..Selection::default()
+            }],
+            ..Snapshot::default()
+        };
+        db.call(move |store| store.catalog_save(&serde_json::to_value(saved)?))
+            .await
+            .unwrap();
+        let result = catalog::refresh(&config, &db, &mut client).await.unwrap();
+        let selection = &result.selections[0];
+        assert_eq!(result.requests_attempted, 1);
+        assert!(!selection.complete);
+        assert_eq!(selection.watches.len(), 1);
+        assert_eq!(selection.watches[0].id, "cached-existing");
+        assert!(
+            selection.metadata.is_empty(),
+            "no silently truncated page is merged"
+        );
+        let scan = selection.country_scan.as_ref().unwrap();
+        assert_eq!(scan.completed_windows, 0);
+        assert_eq!(scan.pending.front().unwrap().start, scan.start);
+        assert_eq!(scan.pending.front().unwrap().page, 0);
+        assert!(
+            selection
+                .notes
+                .iter()
+                .any(|note| note.contains("100-item bound"))
+        );
+        assert!(!serde_json::to_string(&result).unwrap().contains(FAKE_KEY));
+    }
+
+    #[tokio::test]
+    async fn adjacent_date_windows_cover_split_and_day_boundaries_with_strict_filters() {
+        let midnight = 1_893_456_000;
+        let split = midnight + 43_200;
+        let body = r#"{"page":{"number":0,"size":100,"totalElements":0,"totalPages":0}}"#;
+        for (start, end, edges) in [
+            (midnight, split - 1, vec![midnight, split - 1]),
+            (split, midnight + 86_399, vec![split, midnight + 86_399]),
+            (
+                midnight + 86_400,
+                midnight + 172_799,
+                vec![midnight + 86_400],
+            ),
+        ] {
+            let (mut client, request) = mock("200 OK", "", body).await;
+            client
+                .events_country_window_page("NL", None, 0, start, end)
+                .await
+                .unwrap();
+            let params = request_params(&request.await.unwrap());
+            let wire_start = chrono::DateTime::parse_from_rfc3339(&params["startDateTime"])
+                .unwrap()
+                .timestamp();
+            let wire_end = chrono::DateTime::parse_from_rfc3339(&params["endDateTime"])
+                .unwrap()
+                .timestamp();
+            for exact_boundary in edges {
+                assert!(
+                    wire_start < exact_boundary && exact_boundary < wire_end,
+                    "exclusive provider filters must include logical edge {exact_boundary}"
+                );
+            }
+        }
     }
 
     #[test]

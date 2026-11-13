@@ -313,7 +313,8 @@ pub fn extract_seat_map(
             displayed_reference_matched = true;
         }
     }
-    let rendered_seats = crate::seat_geometry::extract_rendered_seats(regions[0])?;
+    let rendered_seats =
+        crate::seat_geometry::extract_rendered_seats_for_market(regions[0], &site_host)?;
     let rendered_geometry =
         crate::map_geometry::extract_svg_geometry_for_site(regions[0], &site_host)?;
     let evidence = if rendered_seats.is_some() {

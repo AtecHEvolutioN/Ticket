@@ -18,6 +18,7 @@ use ticket_watch::{
     notification_delivery::dispatch_batch,
     parser, profile,
     store::Store,
+    watch_scheduler::{DueWatch, Scheduler, TimingSample, millis},
 };
 use tokio::{
     sync::{Notify, watch as updates},
@@ -194,7 +195,7 @@ enum Command {
         /// Export observed section outlines as a rebuilt SVG; no source scripts or styling.
         #[arg(long)]
         geometry_svg: Option<PathBuf>,
-        /// Open one Czech map section without selecting tickets (live browser only).
+        /// Open one supported Czech or Dutch map section without selecting tickets (live browser only).
         #[arg(long, conflicts_with = "html")]
         section_id: Option<String>,
         /// Hover one rendered seat in that section without selecting it.
@@ -575,19 +576,50 @@ fn lock_database(path: &Path) -> Result<std::fs::File> {
 }
 
 async fn observe(fetcher: &Fetcher, watch: &Watch) -> (Observation, Option<u64>) {
-    match fetcher.fetch(watch).await {
+    let measured = observe_measured(fetcher, watch).await;
+    (measured.observation, measured.retry)
+}
+
+struct MeasuredObservation {
+    observation: Observation,
+    retry: Option<u64>,
+    started: Instant,
+    finished: Instant,
+    transport_reported_ms: Option<u64>,
+    parse_ms: Option<u64>,
+}
+
+async fn observe_measured(fetcher: &Fetcher, watch: &Watch) -> MeasuredObservation {
+    let started = Instant::now();
+    let (observation, retry, transport_reported_ms, parse_ms) = match fetcher.fetch(watch).await {
         Ok(page) => {
             eprintln!(
                 "watch={} http_status={} elapsed_ms={} {}",
                 watch.id, page.status, page.elapsed_ms, page.detail
             );
+            let parse_started = Instant::now();
             let obs = page_observation(watch, &page, now());
-            (obs, page.retry_after_secs)
+            (
+                obs,
+                page.retry_after_secs,
+                Some(page.elapsed_ms),
+                Some(millis(parse_started.elapsed())),
+            )
         }
         Err(error) => (
             Observation::unknown(&watch.id, now(), format!("Fetch failed: {error}")),
             None,
+            None,
+            None,
         ),
+    };
+    MeasuredObservation {
+        observation,
+        retry,
+        started,
+        finished: Instant::now(),
+        transport_reported_ms,
+        parse_ms,
     }
 }
 
@@ -675,6 +707,10 @@ async fn run(config: Config, once: bool, send: bool) -> Result<()> {
         bail!("No enabled watches or artist subscriptions");
     }
     db.call(move |s| s.reconcile(&all)).await?;
+    let active_ids: Vec<_> = watches.iter().map(|watch| watch.id.clone()).collect();
+    let saved_status = db.call(move |s| s.scheduler_status(&active_ids)).await?;
+    let mut scheduler = Scheduler::new(&config, &snapshot, &watches, &saved_status)?;
+    drop(saved_status);
     let mut cooldowns = db.call(|s| s.cooldowns()).await?;
     cooldowns.retain(|scope, _| !scope.contains(':'));
     let fetcher = Arc::new(Fetcher::new(&config)?);
@@ -742,6 +778,7 @@ async fn run(config: Config, once: bool, send: bool) -> Result<()> {
         if send { "send" } else { "preview only" }
     );
     let mut interrupted = false;
+    let mut report_due = Instant::now();
     let outcome: Result<()> = async {
         loop {
             if let Some(task) = &mut dispatch_task && task.is_finished() {
@@ -750,28 +787,45 @@ async fn run(config: Config, once: bool, send: bool) -> Result<()> {
             if let Some(task) = &mut catalog_task && task.is_finished() {
                 task.await.context("Catalog worker failed")??; bail!("Catalog worker stopped");
             }
-            let mut order: Vec<usize> = (0..watches.len()).collect();
-            order.sort_by_key(|index| due[&watches[*index].id]);
-            for index in order {
-                let watch = &watches[index];
-                if jobs.len() >= config.max_in_flight { break; }
-                if busy.contains(&watch.id) || (once && done.contains(&watch.id)) || due[&watch.id] > Instant::now() { continue; }
-                let host = config::validate_public_url(&watch.url)?.host_str().unwrap().to_owned();
-                if host_due.get(&host).is_some_and(|at| *at > Instant::now()) {
-                    if once && blocked_hosts.contains(&host) {
-                        eprintln!("watch={} skipped: host cooldown active", watch.id);
-                        done.insert(watch.id.clone());
-                    }
-                    continue;
+            // Build the complete due backlog for health before host gates hide
+            // its size. Priority only orders already eligible work.
+            let instant = Instant::now();
+            let mut candidates: Vec<_> = watches.iter().enumerate()
+                .filter(|(_, watch)| !busy.contains(&watch.id) && !(once && done.contains(&watch.id)) && due[&watch.id] <= instant)
+                .map(|(index, watch)| DueWatch { index, watch_id: watch.id.clone(),
+                    host: scheduler.host(&watch.id).expect("reconciled watch host").to_owned(), due: due[&watch.id] })
+                .collect();
+            if instant >= report_due {
+                eprintln!("{}", scheduler.report(now(), instant, &candidates, &host_due, jobs.len(), config.per_host_interval_secs));
+                report_due = instant + Duration::from_secs(60);
+            }
+            candidates.retain(|candidate| {
+                let gated = host_due.get(&candidate.host).is_some_and(|until| *until > instant);
+                if gated && once && blocked_hosts.contains(&candidate.host) {
+                    eprintln!("watch={} skipped: host cooldown active", candidate.watch_id);
+                    done.insert(candidate.watch_id.clone());
                 }
+                !gated
+            });
+            while jobs.len() < config.max_in_flight {
+                let Some(choice) = scheduler.choose(&candidates, now()) else { break; };
+                let index = choice.index;
+                let watch = &watches[index];
+                let candidate = candidates.iter().find(|candidate| candidate.index == index).expect("selected eligible candidate");
+                let host = candidate.host.clone();
+                let due_lateness_ms = millis(Instant::now().saturating_duration_since(candidate.due));
                 let until = now().saturating_add(config.per_host_interval_secs as i64);
                 let saved_host = host.clone();
                 db.call(move |s| s.set_cooldown(&saved_host, until)).await?;
                 host_due.insert(host.clone(), Instant::now() + Duration::from_secs(config.per_host_interval_secs));
+                scheduler.dispatched(&host);
+                // The just-reserved host slot also excludes other candidates
+                // from this loop; max-in-flight cannot multiply its request rate.
+                candidates.retain(|candidate| candidate.host != host);
                 due.insert(watch.id.clone(), Instant::now() + Duration::from_secs(watch.interval_secs));
                 busy.insert(watch.id.clone());
                 let w = watch.clone(); let f = fetcher.clone();
-                jobs.spawn(async move { let (obs, retry) = observe(&f, &w).await; (w, host, obs, retry) });
+                jobs.spawn(async move { let measured = observe_measured(&f, &w).await; (w, host, measured, choice, due_lateness_ms) });
             }
             if once && done.len() == watches.len() && jobs.is_empty() { break; }
             tokio::select! {
@@ -788,12 +842,14 @@ async fn run(config: Config, once: bool, send: bool) -> Result<()> {
                     }
                     due.retain(|id,_|next.iter().any(|w| &w.id == id));
                     db.call(move |s|s.reconcile(&all)).await?;
+                    scheduler.reconcile(&config, &snapshot, &next)?;
                     watches = next;
                     eprintln!("Catalog updated: {} monitored events, {} API requests, {} incomplete selections; inspect with catalog",
                         watches.len(), snapshot.requests_attempted, snapshot.selections.iter().filter(|s|!s.complete).count());
                 }
                 result = jobs.join_next(), if !jobs.is_empty() => {
-                    let (watch, host, obs, retry) = result.context("Fetch task vanished")?.context("Fetch task failed")?;
+                    let (watch, host, measured, choice, due_lateness_ms) = result.context("Fetch task vanished")?.context("Fetch task failed")?;
+                    let MeasuredObservation { observation: obs, retry, started, finished, transport_reported_ms, parse_ms } = measured;
                     busy.remove(&watch.id);
                     if once { done.insert(watch.id.clone()); }
                     let mut wait = watch.interval_secs;
@@ -822,10 +878,27 @@ async fn run(config: Config, once: bool, send: bool) -> Result<()> {
                     if wait != watch.interval_secs || due[&watch.id] <= Instant::now() {
                         due.insert(watch.id.clone(), Instant::now() + Duration::from_secs(wait.min(86_400 * 365)));
                     }
-                    let summary = serde_json::json!({"watch_id":obs.watch_id,
+                    let mut summary = serde_json::json!({"watch_id":obs.watch_id,
                         "observed_at":obs.observed_at,"availability":obs.availability,
-                        "evidence":obs.evidence,"offer_count":obs.offers.len(),"detail":obs.detail});
+                        "evidence":obs.evidence,"offer_count":obs.offers.len(),"detail":obs.detail,
+                        "scheduling":choice});
+                    let scheduling_observation = obs.clone();
+                    let apply_started = Instant::now();
                     let count = db.call(move |s| s.apply(&watch, &obs)).await?;
+                    let recorded = Instant::now();
+                    scheduler.observed(&scheduling_observation)?;
+                    let timing = TimingSample {
+                        fetch_to_observation_ms: millis(finished.saturating_duration_since(started)),
+                        transport_reported_ms, parse_ms,
+                        observation_to_recorded_ms: millis(recorded.saturating_duration_since(finished)),
+                        durable_apply_ms: millis(recorded.saturating_duration_since(apply_started)),
+                        fetch_to_recorded_ms: millis(recorded.saturating_duration_since(started)),
+                        due_lateness_ms,
+                    };
+                    summary["recorded_at"] = serde_json::json!(now());
+                    summary["timing"] = serde_json::to_value(&timing)?;
+                    summary["timing_notice"] = serde_json::json!("Monotonic elapsed timings from Fetcher invocation through durable recording; not stock-change or Discord delivery latency.");
+                    scheduler.record_timing(timing);
                     if count > 0 { notify.notify_one(); }
                     print_json(&summary)?;
                 }

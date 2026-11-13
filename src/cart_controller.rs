@@ -102,6 +102,9 @@ pub enum SessionCommand {
         attempt_id: String,
         preflight_id: String,
         dispatch_token: String,
+        /// Effective preference from the durable dispatch binding. The browser
+        /// uses it only to diagnose conflicting native split-seat requests.
+        adjacent_required: bool,
     },
     Observe {
         attempt_id: String,
@@ -340,12 +343,19 @@ impl<S: NativeCartSession, C: Clock> NativeCartController<S, C> {
             ));
         }
         // Both journal transactions have committed before any native commit byte.
+        let adjacent_required = dispatch
+            .record
+            .search_binding()
+            .context("native dispatch binding missing")?
+            .request
+            .adjacent_required;
         let response = self
             .session
             .exchange(SessionCommand::Commit {
                 attempt_id: attempt_id.into(),
                 preflight_id: preflight.preflight_id,
                 dispatch_token: attempt_id.into(),
+                adjacent_required,
             })
             .await;
         self.accept_observation(response, None, true)

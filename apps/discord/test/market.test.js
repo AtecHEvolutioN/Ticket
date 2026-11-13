@@ -35,8 +35,116 @@ test('viewer starts empty and uses local assets without CDN or automatic fetchin
   assert.match(html, /<link rel="stylesheet" href="market.css">/);
   assert.match(html, /<script src="market.js" defer><\/script>/);
   assert.match(html, /No live data or example prices are shown by default/);
-  assert.doesNotMatch(script, /\bfetch\s*\(|XMLHttpRequest|\.innerHTML\s*=/);
+  assert.doesNotMatch(script, /XMLHttpRequest|\.innerHTML\s*=|localStorage|sessionStorage/);
+  assert.match(html, /No requests are made until you connect/);
   assert.doesNotMatch(css, /@import|https?:\/\//);
+});
+
+test('live endpoint validation limits credentials to a selected HTTPS or loopback origin', () => {
+  const { liveEndpoint, liveRequestUrl } = globalThis.TicketHistory;
+  assert.equal(liveEndpoint('https://history.example.com'), 'https://history.example.com');
+  assert.equal(liveEndpoint('http://127.0.0.1:8789'), 'http://127.0.0.1:8789');
+  assert.equal(liveEndpoint('http://[::1]:8789'), 'http://[::1]:8789');
+  for (const endpoint of ['http://example.com', 'http://127.0.0.1.example.com', 'https://user:pass@example.com',
+    'https://example.com/api/history', 'https://example.com/?token=secret', 'https://example.com/#secret',
+    'javascript:alert(1)', 'https://exam\nple.com', '//example.com']) assert.throws(() => liveEndpoint(endpoint));
+  const url = new URL(liveRequestUrl('https://history.example.com', 'https://www.ticketmaster.nl/event/123?language=en-us#top', 48, at * 1000));
+  assert.equal(url.pathname, '/api/history');
+  assert.equal(url.searchParams.get('event_url'), 'https://www.ticketmaster.nl/event/123');
+  assert.equal(Date.parse(url.searchParams.get('to')) - Date.parse(url.searchParams.get('from')), 48 * 3600000);
+  assert.throws(() => liveRequestUrl('https://history.example.com', '', 9000, at * 1000));
+  assert.throws(() => liveRequestUrl('https://history.example.com', 'https://www.ticketmaster.nl/payment/', 48, at * 1000));
+});
+
+function liveHarness(fetch) {
+  const timers = new Map(); let sequence = 0;
+  const states = []; const data = []; let idle = 0;
+  const connection = globalThis.TicketHistory.createLiveConnection({ fetch, now: () => at * 1000,
+    setTimeout: (fn, delay) => { const id = ++sequence; timers.set(id, { fn, delay }); return id; },
+    clearTimeout: id => timers.delete(id), onState: value => states.push(value), onData: value => data.push(value), onIdle: () => { idle += 1; } });
+  return { connection, states, data, timers, idle: () => idle };
+}
+const liveInput = { endpoint: 'https://history.example.com', token: 'synthetic-read-only-secret-123456789', eventUrl: '', hours: 48 };
+const settle = () => new Promise(resolve => setImmediate(resolve));
+function liveResponse(data = documentFixture(), status = 200, headers = {}) {
+  return new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', ...headers } });
+}
+
+test('live refresh is opt-in, uses header-only credentials and retains strict transport options', async () => {
+  const requests = [];
+  const h = liveHarness(async (...args) => { requests.push(args); return liveResponse(); });
+  assert.equal(requests.length, 0);
+  h.connection.connect(liveInput); await settle();
+  assert.equal(requests.length, 1); assert.equal(h.data.length, 1);
+  const [url, options] = requests[0];
+  assert.equal(url.includes(liveInput.token), false);
+  assert.equal(options.headers.Authorization, `Bearer ${liveInput.token}`);
+  for (const [key, value] of Object.entries({ credentials: 'omit', redirect: 'error', cache: 'no-store', referrerPolicy: 'no-referrer', mode: 'cors' })) assert.equal(options[key], value);
+  assert.equal(h.states.at(-1).phase, 'live');
+  assert.equal([...h.timers.values()].filter(timer => timer.delay === 30000).length, 1);
+  h.connection.disconnect();
+  assert.equal(h.timers.size, 0); assert.equal(h.states.at(-1).connected, false);
+  await h.connection.refresh(); assert.equal(requests.length, 1);
+  assert.equal(JSON.stringify(h.states).includes(liveInput.token), false);
+});
+
+test('overlapping refreshes and late results cannot overwrite a disconnected or newer connection', async () => {
+  const pending = []; const h = liveHarness((url, options) => new Promise(resolve => pending.push({ resolve, options })));
+  h.connection.connect(liveInput);
+  await h.connection.refresh(); assert.equal(pending.length, 1);
+  h.connection.disconnect(); assert.equal(pending[0].options.signal.aborted, true);
+  h.connection.connect({ ...liveInput, endpoint: 'https://other.example.com' });
+  pending[0].resolve(liveResponse()); await settle(); assert.equal(h.data.length, 0);
+  pending[1].resolve(liveResponse({ ...documentFixture(), generated_at: at + 1 })); await settle();
+  assert.equal(h.data.length, 1); assert.equal(h.data[0].generated_at, at + 1);
+  h.connection.disconnect();
+});
+
+test('authentication failure clears connection and requires explicit reconnect without echoing server errors', async () => {
+  for (const status of [401, 403]) {
+    let requests = 0;
+    const h = liveHarness(async () => { requests += 1; return liveResponse({ error: liveInput.token }, status); });
+    h.connection.connect(liveInput); await settle();
+    assert.equal(h.states.at(-1).phase, 'unauthorized'); assert.equal(h.states.at(-1).connected, false);
+    assert.equal(h.timers.size, 0); assert.equal(h.data.length, 0);
+    await h.connection.refresh(); h.connection.resume(); await settle(); assert.equal(requests, 1);
+    assert.equal(JSON.stringify(h.states).includes(liveInput.token), false);
+  }
+});
+
+test('failed or malformed refreshes preserve last valid data and respect worker backoff', async () => {
+  const responses = [liveResponse(), liveResponse({ error: 'secret-body' }, 429, { 'retry-after': '90' }), liveResponse({ bad: true }), liveResponse()];
+  const h = liveHarness(async () => responses.shift());
+  h.connection.connect(liveInput); await settle(); assert.equal(h.data.length, 1);
+  await h.connection.refresh();
+  assert.equal(h.data.length, 1); assert.equal(h.states.at(-1).phase, 'error');
+  assert.equal([...h.timers.values()].some(timer => timer.delay === 90000), true);
+  assert.equal(JSON.stringify(h.states).includes('secret-body'), false);
+  await h.connection.refresh(); assert.equal(h.data.length, 1); assert.equal(h.states.at(-1).phase, 'error');
+  h.connection.pause(); assert.equal(h.timers.size, 0);
+  await h.connection.refresh(); assert.equal(h.data.length, 1);
+  h.connection.resume(); await settle(); assert.equal(h.data.length, 2);
+  h.connection.disconnect();
+});
+
+test('streamed live responses enforce byte bounds and validate before accepting any history', async () => {
+  const { readLiveExport } = globalThis.TicketHistory;
+  await assert.rejects(readLiveExport(new Response('ignored', { headers: { 'content-type': 'text/html' } })), /unsupported response/);
+  await assert.rejects(readLiveExport(liveResponse({}, 200, { 'content-length': String(MAX_BYTES + 1) })), /16 MiB/);
+  let cancelled = false;
+  const body = new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(MAX_BYTES)); controller.enqueue(new Uint8Array(1)); }, cancel() { cancelled = true; } });
+  await assert.rejects(readLiveExport(new Response(body, { headers: { 'content-type': 'application/json' } })), /16 MiB/);
+  assert.equal(cancelled, true);
+  await assert.rejects(readLiveExport(liveResponse({ schema_version: 2 })), /schema version/);
+});
+
+test('no matching history is distinct from an unavailable database', async () => {
+  const h = liveHarness(async () => liveResponse({ error: { code: 'no_history' } }, 404));
+  h.connection.connect(liveInput); await settle();
+  assert.equal(h.states.at(-1).phase, 'error');
+  assert.match(h.states.at(-1).message, /No observations match this event and time range/);
+  assert.doesNotMatch(h.states.at(-1).message, /database/);
+  h.connection.disconnect();
 });
 
 test('import rejects oversized or invalid JSON without rendering its values', () => {

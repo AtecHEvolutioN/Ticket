@@ -1,11 +1,23 @@
 # Production roadmap
 
-Status: **10 November 2026**. Finish the monitoring and cart workflow first,
+Status: **13 November 2026**. Finish the monitoring and cart workflow first,
 validate Discord delivery when the user is home, then develop the MCP research
 experiment. This roadmap does not enable purchases, resale listings or repricing.
 
 ## Implemented
 
+- [Dated country partitions](discovery-partitions.md) expand Discovery beyond a
+  single query's 1,000-result ceiling, with durable cursors, deduplication and
+  explicit bounded coverage. [Priority scheduling](scheduling.md) favors sale
+  windows and recent changes with oldest-due fairness. Runtime reports measure
+  backlog, observation age and processing time; delivery separately records
+  dispatch/response timing. No host pacing or provider cooldown was bypassed.
+- [Authenticated live charts](live-history-api.md): a separate loopback read-only
+  worker API serves existing SQLite history; the hosted viewer supports private
+  connections, refresh, filters, pause and explicit stale/error states. The
+  complete SQLite-WAL update → Rust export → authenticated API → Chromium flow
+  was tested with synthetic data. Production still needs the worker/API host,
+  private token, TLS and actual source collection.
 - [Always-on NL deployment preparation](netherlands-server.md): Debian service
   templates, private state/cache paths, an offline preparation helper and a worker
   bundle with hashes. No paid VM, production install, live routing or startup has
@@ -39,8 +51,11 @@ experiment. This roadmap does not enable purchases, resale listings or repricing
 - One experimental Czech native cart attempt, durable dispatch/event locks,
   local operator resume/review and recovery inspection. A successful hold receipt
   and usable customer checkout handoff remain unverified.
-- Netherlands overview maps and draft venue presets. Dutch section interaction,
-  individual seat inspection and carting are not implemented. The Android APK
+- Netherlands overview maps, venue presets and a guarded read-only section/seat
+  adapter. [The current validation report](netherlands-seat-validation.md)
+  distinguishes actual headed reads, headless access failures and synthetic
+  fixtures. Scheduled Dutch seat scans and native carting remain disabled.
+  Cart diagnostics now use the saved adjacency preference. The Android APK
   remains 0.7.0-test and does not contain the newer server work.
 
 ## Remaining bot milestones
@@ -48,10 +63,10 @@ experiment. This roadmap does not enable purchases, resale listings or repricing
 | Milestone | Work to finish | Acceptance evidence |
 | --- | --- | --- |
 | Discord setup at home | Configure the bot token privately, destination channel and explicit user/role mentions. Connect watch, preference, status and pause controls to persisted server settings. | A controlled notification reaches the intended channel and mention; record source observation, application message ID and Discord acknowledgement. Exercise restart, stale-message expiry, delivery errors and cooldown recovery. Report ambiguous delivery honestly: Discord nonces do not guarantee exactly-once delivery indefinitely. |
-| Reliable availability and price alerts | Show displayed price changes separately from qualifying available offers. Carry currency, per-ticket/group basis, fees, quantity meaning and source age through every alert. Add timestamps for request, capture, parse, outbox, dispatch and acknowledgement. | Replays and accessible live samples distinguish restock, changed price, schedule, presale, partial listings, empty views and blocked access. Publish p50/p95/p99 pipeline latency and observation gaps. Measure stock-change-to-alert latency only where the change time is known; otherwise label the measured interval. A one-second target remains a measured objective, not a guarantee. |
+| Reliable availability and price alerts | Deploy and measure the new scheduling/timing reports. Verify real delivery, currency, per-ticket/group basis, fees, quantity meaning and source age. Complete semantic channel routing and publishers. | Replays and accessible live samples distinguish restock, changed price, schedule, presale, partial listings, empty views and blocked access. Publish p50/p95/p99 pipeline latency and observation gaps. Measure stock-change-to-alert latency only where the change time is known; otherwise label the measured interval. A one-second target remains a measured objective, not a guarantee. |
 | Verified Czech hold and manual handoff | Implement receipt extraction tied to the same event/performance, browser, document and attempt. Verify quantity, ticket type, exact seats, source-backed adjacency, complete total/fees/currency and provider hold expiry. Keep the original browser available for review and manual checkout. | One successful bounded hold matches the configured preferences and is reviewable before expiry; fixtures also cover mismatch, partial response, challenge, timeout and release. A selected counter, redirect or HTTP success alone never reports a confirmed cart. Discord status includes public event details and application IDs rather than checkout tokens. |
 | Preferences → monitoring → cart | Resolve versioned global/per-event preferences for every trigger. Persist a durable trigger and stable attempt ID; have the cart worker acquire the existing event lock and record dispatch before acting. Recheck source freshness, selected quantity, filters and price immediately before submission. | An eligible transition creates at most one reservation attempt across duplicate observations, concurrent workers, restart and ambiguous responses. Changed preferences invalidate stale work. Default quantity remains two and is editable. Cheapest means the cheapest proven eligible group; configured category ranges cannot establish that claim or satisfy an unknown fee-inclusive budget. |
-| Netherlands section and seat support | Extend the overview work with separately validated Dutch section-opening and seat-hover adapters, then evaluate scheduled seat-price scans. Bind every observation to the current event and layout fingerprint. | Multiple Dutch venues and layouts produce matching section/row/seat/price evidence or an explicit unsupported result. Tests preserve the no-selection boundary. Presets supply geometry references only; colors and section counts never become stock or adjacency evidence. Dutch carting needs its own validated native flow. |
+| Netherlands section and seat support | Broaden live coverage of the new read-only adapter, then evaluate scheduled seat-price scans and a separately reviewed cart/receipt flow. Bind every observation to the current event and layout fingerprint. | Multiple Dutch venues and layouts produce matching section/row/seat/price evidence or an explicit unsupported result. Tests preserve the no-selection boundary. Presets supply geometry references only; colors and section counts never become stock or adjacency evidence. Dutch carting needs its own validated native flow and bounded user request. |
 | Deployment and recovery | Install one supervised instance on the chosen host, coordinate host pacing across inventory/map workers, protect secrets and state, and provide pause/stop controls. Validate backup/restore, upgrades, browser cleanup and operational alerts. | A sustained soak run records source freshness, blocks, delivery status and resource use; a 24-hour run is the initial check. Restart and restore exercises preserve journal locks, pending-message identity and cooldowns. Health reports distinguish a running process from fresh source data and successful delivery. Build and verify updated downloadable artifacts after the source workflow is accepted. |
 
 The existing KoRn attempt is still `needs_reconciliation`: Ticketmaster reported

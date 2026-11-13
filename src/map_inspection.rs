@@ -28,6 +28,8 @@ pub struct SeatTooltip {
 
 #[derive(Debug, Serialize)]
 pub struct SectionInspection {
+    pub adapter_validation: &'static str,
+    pub displayed_inventory_kind: Option<&'static str>,
     pub section_id: String,
     pub section_name: String,
     pub coverage: &'static str,
@@ -62,8 +64,11 @@ pub fn validate_inspection(
     evidence: &MapInspection,
 ) -> Result<SectionInspection> {
     ensure!(
-        snapshot.site_host == "ticketmaster.cz",
-        "section inspection supports Czech pages only"
+        matches!(
+            snapshot.site_host.as_str(),
+            "ticketmaster.cz" | "ticketmaster.nl"
+        ),
+        "section inspection supports Czech or Netherlands pages only"
     );
     ensure!(
         evidence.coverage == "section_only"
@@ -73,9 +78,7 @@ pub fn validate_inspection(
     );
     identifier(&evidence.section_id)?;
     ensure!(
-        !evidence.section_name.is_empty()
-            && evidence.section_name.len() <= 12
-            && evidence.section_name.bytes().all(|b| b.is_ascii_digit()),
+        numbered_section(&snapshot.site_host, &evidence.section_name).is_some(),
         "section inspection requires a numbered seating section"
     );
     let overview = snapshot
@@ -93,11 +96,16 @@ pub fn validate_inspection(
         .rendered_seats
         .as_ref()
         .context("rendered seat layout missing")?;
-    let section = layout
+    let matching_sections = layout
         .sections
         .iter()
-        .find(|s| s.id == evidence.section_id)
-        .context("requested section has no rendered seat block")?;
+        .filter(|s| s.id == evidence.section_id)
+        .collect::<Vec<_>>();
+    ensure!(
+        matching_sections.len() == 1,
+        "requested section has missing or ambiguous rendered blocks"
+    );
+    let section = matching_sections[0];
     let mut hovered = None;
     if let Some(seat_id) = &evidence.seat_id {
         identifier(seat_id)?;
@@ -133,14 +141,24 @@ pub fn validate_inspection(
                 bounded_text(restriction)?;
             }
             ensure!(
-                tip.section == evidence.section_name
+                numbered_section(&snapshot.site_host, &tip.section)
+                    == numbered_section(&snapshot.site_host, &evidence.section_name)
                     && tip.row == row.name
                     && tip.seat == seat.name,
                 "tooltip does not match hovered seat labels"
             );
             ensure!(
-                seat.displayed_ticket_type == Some("resale")
-                    && tip.ticket_type == "Ověřené přeprodávané vstupenky",
+                (seat.displayed_ticket_type == Some("resale")
+                    && tip.ticket_type
+                        == if snapshot.site_host == "ticketmaster.nl" {
+                            "Verified Resale Tickets"
+                        } else {
+                            "Ověřené přeprodávané vstupenky"
+                        })
+                    || (snapshot.site_host == "ticketmaster.nl"
+                        && seat.displayed_ticket_type == Some("primary")
+                        && crate::inventory::classify_inventory_label(&tip.ticket_type)
+                            != crate::model::InventoryKind::Resale),
                 "unsupported or conflicting seat ticket type"
             );
             ensure!(
@@ -157,16 +175,35 @@ pub fn validate_inspection(
                 .split_whitespace()
                 .collect::<Vec<_>>()
                 .join(" ");
-            let amount = normalized
-                .strip_suffix(" za kus")
-                .context("seat price is not explicitly per ticket")?;
-            ensure!(
-                amount.ends_with(" Kč"),
-                "seat price lacks an explicit Czech currency marker"
-            );
-            let price_minor = crate::parser::parse_price_minor(amount, "CZK", ",")
+            let (amount, currency, decimal) = if snapshot.site_host == "ticketmaster.nl" {
+                let (amount, decimal) = if let Some(amount) = normalized.strip_suffix(" each") {
+                    (amount, ".")
+                } else {
+                    (
+                        normalized
+                            .strip_suffix(" per stuk")
+                            .context("Dutch seat price is not explicitly per ticket")?,
+                        ",",
+                    )
+                };
+                ensure!(
+                    amount.starts_with('€'),
+                    "Dutch seat price lacks an explicit euro marker"
+                );
+                (amount, "EUR", decimal)
+            } else {
+                let amount = normalized
+                    .strip_suffix(" za kus")
+                    .context("seat price is not explicitly per ticket")?;
+                ensure!(
+                    amount.ends_with(" Kč"),
+                    "seat price lacks an explicit Czech currency marker"
+                );
+                (amount, "CZK", ",")
+            };
+            let price_minor = crate::parser::parse_price_minor(amount, currency, decimal)
                 .filter(|n| (1..=100_000_000).contains(n))
-                .context("invalid or ambiguous Czech seat price")?;
+                .context("invalid or ambiguous seat price")?;
             Ok(DisplayedSeatQuote {
                 evidence: "rendered_seat_hover".into(),
                 seat_id: seat.id.clone(),
@@ -177,7 +214,7 @@ pub fn validate_inspection(
                 ticket_type: tip.ticket_type.clone(),
                 restriction: tip.restriction.clone(),
                 price_minor,
-                currency: "CZK".into(),
+                currency: currency.into(),
                 price_basis: "per_ticket".into(),
                 price_text: tip.price_text.clone(),
                 fees_complete: false,
@@ -186,6 +223,12 @@ pub fn validate_inspection(
         })
         .transpose()?;
     Ok(SectionInspection {
+        adapter_validation: if snapshot.site_host == "ticketmaster.nl" {
+            "limited_live_validation"
+        } else {
+            "observed_layout"
+        },
+        displayed_inventory_kind: hovered.and_then(|(_, seat)| seat.displayed_ticket_type),
         section_id: evidence.section_id.clone(),
         section_name: evidence.section_name.clone(),
         coverage: "section_only",
@@ -195,6 +238,20 @@ pub fn validate_inspection(
         stock_verified: false,
         adjacency_verified: false,
     })
+}
+
+fn numbered_section<'a>(host: &str, value: &'a str) -> Option<&'a str> {
+    let digits = if host == "ticketmaster.nl"
+        && value
+            .get(..3)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("vak"))
+    {
+        value[3..].trim_start()
+    } else {
+        value
+    };
+    (!digits.is_empty() && digits.len() <= 8 && digits.bytes().all(|b| b.is_ascii_digit()))
+        .then_some(digits)
 }
 
 fn identifier(value: &str) -> Result<()> {

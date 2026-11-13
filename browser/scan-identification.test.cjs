@@ -20,9 +20,9 @@ async function browserFixture(run) {
   try { await run(browser); } finally { await browser.close(); }
 }
 
-test('scan waits for a normal identification document arriving after five seconds while ordinary checks keep their shorter window', { skip: !enabled }, async () => {
+test('section inspections and scans wait for normal identification after five seconds while ordinary checks keep their shorter window', { skip: !enabled }, async () => {
   await browserFixture(async browser => {
-    await Promise.all([true, false].map(async scan => {
+    await Promise.all(['scan', 'section', 'ordinary'].map(async mode => {
       const context = await browser.newContext({ serviceWorkers: 'block' });
       let documents = 0, gotos = 0;
       context.on('page', page => {
@@ -36,14 +36,21 @@ test('scan waits for a normal identification document arriving after five second
           ? route.fulfill({ status: 401, contentType: 'text/html', headers: { 'tm-bl': '1', 'retry-after': '0' }, body: identification })
           : route.fulfill({ status: 200, contentType: 'text/html', body: event });
       });
-      const input = scan ? request : { ...request, adapter: 'selectors', display: undefined,
+      const input = mode === 'scan' ? request : mode === 'section' ? { ...request, map_scan_limit: undefined }
+        : { ...request, adapter: 'selectors', display: undefined,
         map_section_id: undefined, map_scan_limit: undefined };
       const result = await capture(context, input);
-      if (scan) {
+      if (mode !== 'ordinary') {
         assert.equal(result.status, 200);
-        assert.equal(result.adapter_reason, 'scan_ready');
-        assert.equal(result.map_scan.candidate_count, 0);
-        assert.equal(result.map_scan.stock_verified, false);
+        assert.equal(result.adapter_reason, mode === 'scan' ? 'scan_ready' : 'section_ready');
+        if (mode === 'scan') {
+          assert.equal(result.map_scan.candidate_count, 0);
+          assert.equal(result.map_scan.stock_verified, false);
+        } else {
+          assert.equal(result.map_inspection.section_id, 's_1');
+          assert.equal(result.map_inspection.stock_verified, false);
+          assert.equal(result.map_inspection.seat_id, null);
+        }
         assert.match(result.html, /data-section-clicks="1" data-ticket-clicks="0"/);
         assert.equal(documents, 2);
       } else {

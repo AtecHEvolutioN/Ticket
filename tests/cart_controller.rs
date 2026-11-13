@@ -38,6 +38,7 @@ impl NativeCartSession for FakeSession {
                 attempt_id,
                 preflight_id,
                 dispatch_token,
+                adjacent_required,
             } => {
                 assert_eq!(attempt_id, "attempt-1");
                 assert_eq!(dispatch_token, attempt_id);
@@ -48,6 +49,10 @@ impl NativeCartSession for FakeSession {
                 assert_eq!(rows.len(), 1);
                 assert!(rows[0].dispatch_at_ms.is_some());
                 assert_eq!(rows[0].attempt_id, attempt_id);
+                assert_eq!(
+                    adjacent_required,
+                    rows[0].search_binding().unwrap().request.adjacent_required
+                );
                 "commit"
             }
             SessionCommand::Observe { attempt_id } => {
@@ -203,6 +208,64 @@ async fn commits_durably_before_single_action_and_repeat_does_not_refresh() {
             )
             .is_err()
     );
+}
+
+#[tokio::test]
+async fn commit_carries_effective_adjacency_preference_from_persisted_dispatch() {
+    for (default_adjacent, override_adjacent) in [
+        (true, None),
+        (false, None),
+        (true, Some(false)),
+        (false, Some(true)),
+    ] {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("cart.sqlite");
+        let (mut control, commands, _) = controller(
+            path.clone(),
+            vec![
+                Ok(prepared()),
+                Ok(prepared()),
+                Ok(uncertain(NativeSearchUncertainty::Pending)),
+            ],
+        );
+        let mut preferences = PreferencesDocument::default();
+        preferences.defaults.require_adjacent = default_adjacent;
+        if let Some(required) = override_adjacent {
+            let mut event_preferences = preferences.defaults.clone();
+            event_preferences.require_adjacent = required;
+            preferences
+                .event_overrides
+                .push(ticket_watch::cart_preferences::EventOverride {
+                    event_url: EVENT.into(),
+                    preferences: event_preferences,
+                });
+        }
+        control.prepare(&selection()).await.unwrap();
+        let result = control
+            .dispatch_once("attempt-1", &preferences, true)
+            .await
+            .unwrap();
+        // FakeSession independently reads the committed journal and checks the
+        // browser command's boolean before accepting its single synthetic action.
+        assert_eq!(
+            result
+                .attempt
+                .search_binding()
+                .unwrap()
+                .request
+                .adjacent_required,
+            override_adjacent.unwrap_or(default_adjacent)
+        );
+        assert_eq!(result.attempt.state, AttemptState::NeedsReconciliation);
+        preferences.defaults.require_adjacent = !default_adjacent;
+        let repeated = control
+            .dispatch_once("attempt-1", &preferences, true)
+            .await
+            .unwrap();
+        assert!(!repeated.dispatched_this_call);
+        assert_eq!(repeated.attempt, result.attempt);
+        assert_eq!(*commands.lock().unwrap(), ["prepare", "refresh", "commit"]);
+    }
 }
 
 #[tokio::test]

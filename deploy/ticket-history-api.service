@@ -1,0 +1,35 @@
+[Unit]
+Description=Ticket Watch authenticated read-only chart API
+After=network.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=exec
+User=ticketwatch-nl
+Group=ticketwatch-nl
+WorkingDirectory=/opt/ticket-watch
+# Separate from the watcher environment: this file contains only a chart token
+# and fixed binary/database/origin settings, never provider or Discord secrets.
+EnvironmentFile=/etc/ticket-watch-nl/history-api.environment
+ExecStart=/usr/bin/node /opt/ticket-watch/server/history-api.cjs
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=15
+KillSignal=SIGTERM
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/var/lib/ticket-watch-nl
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=512M
+TasksMax=32
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ticket-history-api
+
+[Install]
+WantedBy=multi-user.target

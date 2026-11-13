@@ -3,9 +3,9 @@
 The Discord category and nine channels already exist; `/ticket chart` and the
 Vercel viewer are deployed. **No persistent watcher server has been provisioned.**
 These files prepare the host; they do not create a paid cloud resource or start
-monitoring. Live alert routing, country-catalog partitioning and the high-priority
-inventory scheduler still need implementation/validation before claiming full,
-fast coverage of Ticketmaster.nl.
+monitoring. Live alert routing and actual-host validation remain unfinished.
+Country date partitioning and inventory priorities are implemented with explicit
+coverage/freshness reports; they do not establish full or instant NL coverage.
 
 ## Concrete starting host
 
@@ -25,7 +25,9 @@ provider pacing, catalog-pagination limits or blocked website access.
 Vercel continues to host commands and the chart viewer. SQLite and Chromium run
 on the VM. Initially there is no public worker HTTP service: allow SSH only from
 the operator's trusted addresses; keep the database and browser state private.
-An authenticated live-chart API can be added after the worker is validated.
+The optional [authenticated history API](live-history-api.md) binds to loopback.
+After source validation, expose that read-only service through an HTTPS reverse
+proxy if remote charts are needed; the worker itself has no public control API.
 
 ## Install the reviewed application
 
@@ -78,7 +80,11 @@ credential; this preparation does not extract it.
 ## First activation
 
 The prepared subscription is disabled and its destination is unset. It selects
-all artists in NL when enabled, with explicit catalog and website pacing limits.
+all artists in NL when enabled, using resumable date windows across a 730-day
+horizon and retaining up to 10,000 events within storage/request limits. Undated
+events and saturated windows remain explicit gaps. Inventory priorities favor
+sale windows and recent changes, with regular oldest-due checks. Host pacing and
+provider cooldowns are unchanged; inspect [scheduler reports](scheduling.md).
 The single existing sender cannot yet populate the nine semantic channels on
 its own. Set a reviewed test destination and implement/validate routing before
 enabling ongoing live deliveries. Do not run nine duplicate watchers to imitate

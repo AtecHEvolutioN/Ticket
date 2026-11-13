@@ -52,7 +52,8 @@ The subscription starts disabled, with no destination channel and no map watches
 Only systemctl daemon-reload is run; no enable/start/restart or Discord delivery.
 After preparation, privately edit environment/config, review the bounded NL scope,
 validate access and delivery, and explicitly enable/start the service when ready.
-The 1000-event cap and 60-second host interval cannot provide second-level freshness.
+Date partitions expand the catalog, but the 60-second host interval still limits freshness.
+Priority scheduling does not promise second-level checks of every discovered event.
 TEXT
 }
 

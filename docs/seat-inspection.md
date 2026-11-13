@@ -1,5 +1,10 @@
 # Inspect Czech map sections and seat prices
 
+There is also a [Netherlands inspector](netherlands-seat-validation.md), with
+limited live primary/resale quote validation at two Dutch venues and synthetic
+English/Dutch regressions. Read its separate evidence and limitations; the Czech
+results below do not extend those Dutch coverage claims.
+
 The current source can open a numbered section in the observed Czech map layout
 and optionally hover one explicit resale seat. [Section scans](section-scans.md)
 can discover resale seat candidates automatically and compare displayed prices

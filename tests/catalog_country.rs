@@ -33,8 +33,11 @@ impl Source for CountrySource {
     }
 }
 fn config() -> Config {
-    let config: Config =
+    let mut config: Config =
         toml::from_str(include_str!("../examples/netherlands-all.example.toml")).unwrap();
+    // Legacy country pagination remains supported; partition tests exercise the
+    // enabled configuration separately in catalog_partitions.rs.
+    config.catalog.country_partitioning = false;
     config::validate(&config).unwrap();
     config
 }

@@ -112,16 +112,18 @@ impl Fetcher {
         self.fetch_map_target(url, None, None, None).await
     }
 
-    /// Open one Czech map section and optionally hover one seat; never selects it.
+    /// Open one supported map section and optionally hover one seat; never selects it.
+    /// The Netherlands adapter remains a draft pending live access validation.
     pub async fn fetch_map_section(
         &self,
         url: &str,
         section_id: &str,
         seat_id: Option<&str>,
     ) -> Result<FetchResult> {
-        if !crate::event_identity::identity(url).is_some_and(|(host, _)| host == "ticketmaster.cz")
+        if !crate::event_identity::identity(url)
+            .is_some_and(|(host, _)| matches!(host.as_str(), "ticketmaster.cz" | "ticketmaster.nl"))
         {
-            bail!("Section inspection requires a public Czech event URL");
+            bail!("Section inspection requires a public Czech or Netherlands event URL");
         }
         if !map_identifier(section_id) || seat_id.is_some_and(|id| !map_identifier(id)) {
             bail!("Map section and seat IDs must be bounded ASCII identifiers");
@@ -1245,7 +1247,7 @@ mod tests {
                     .await
                     .unwrap_err()
                     .to_string()
-                    .contains("public Czech event URL")
+                    .contains("public Czech or Netherlands event URL")
             );
         }
         assert!(fetcher.browser.lock().await.is_none());
@@ -1292,6 +1294,16 @@ mod tests {
             assert_eq!(evidence.section_id, "s_1");
             assert_eq!(evidence.seat_id.as_deref(), seat_id);
         }
+        // The draft NL adapter uses the same bounded read-only transport; it
+        // does not expand the separate scan or reservation protocol.
+        let dutch = "https://www.ticketmaster.nl/event/example/12345678";
+        let result = fetcher
+            .fetch_map_section(dutch, "s_1", Some("seat-123"))
+            .await
+            .unwrap();
+        let request: serde_json::Value = serde_json::from_str(&result.html).unwrap();
+        assert_eq!(request["url"], dutch);
+        assert_eq!(request["map_seat_id"], "seat-123");
         for (kind, message) in [
             ("wrong-section", "target mismatch"),
             ("wrong-seat", "target mismatch"),

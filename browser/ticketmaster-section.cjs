@@ -1,13 +1,51 @@
 'use strict';
 
-const { sameEvent } = require('./rendered.cjs');
+const { sameEvent, eventIdentity } = require('./rendered.cjs');
 const { inspectChallenge } = require('./manual-intervention.cjs');
 const { prepareTicketmasterMap } = require('./ticketmaster-map.cjs');
 
-const MAIN_MAP = 'aside[aria-label="Mapa míst"] [data-component="zoomer"] svg[data-component="svg"]';
+const MAIN_MAP = 'aside[aria-label="Mapa míst"],aside[aria-label="Seat Map"],aside[aria-label="Stoelplattegrond"]';
 const IDENTIFIER = /^[A-Za-z0-9_-]{1,128}$/;
 const pendingInspections = new WeakMap();
 const pendingScans = new WeakMap();
+
+// The NL action path is a draft based on reviewed regional overview contracts.
+// Its locale strings must agree with the current event's own configuration;
+// synthetic hover regressions are not a substitute for a live seat validation.
+async function dutchBinding(page, target) {
+  const identity = eventIdentity(target);
+  if (identity?.host !== 'ticketmaster.nl') return null;
+  const binding = await page.evaluate(eventId => {
+    const scripts = document.querySelectorAll('script#__NEXT_DATA__[type="application/json"]');
+    if (scripts.length !== 1 || scripts[0].textContent.length > 2 * 1024 * 1024) return null;
+    let next; try { next = JSON.parse(scripts[0].textContent); } catch { return null; }
+    const state = next.props?.pageProps?.initialReduxState, event = state?.eventInfo;
+    const selection = state?.ticketSelection, translations = state?.translations;
+    if (!event || !selection || !translations || state.config?.countryCode !== 'NL'
+        || state.config?.currencyCode !== 'EUR' || event.marketCode !== 'NL'
+        || [next.query?.eventId, state.eventId, event.eventId, event.params, selection.params?.eventId].some(id => id !== eventId)
+        || [event, selection].some(item => item.stage !== 'success' || item.inFlightParams !== null)) return null;
+    const region = translations['edp.base.seatMap'];
+    const dutch = region === 'Stoelplattegrond';
+    const maps = [...document.querySelectorAll('aside[aria-label]')]
+      .filter(node => ['Seat Map', 'Stoelplattegrond'].includes(node.getAttribute('aria-label'))
+        && node.getClientRects().length);
+    if (maps.length !== 1 || maps[0].getAttribute('aria-label') !== region) return null;
+    if ((!dutch && region !== 'Seat Map')
+        || translations['edp.resale.tooltipName'] !== 'Verified Resale Tickets'
+        || translations['edp.reserve.seatInfoSec'] !== (dutch ? 'Vak' : 'Section')
+        || translations['edp.reserve.seatInfoRow'] !== (dutch ? 'Rij' : 'Row')
+        || translations['edp.reserve.seatInfoSeats'] !== (dutch ? 'Stoel' : 'Seat')
+        || translations['edp.reserve.seatInfoLevel'] !== (dutch ? 'Niveau' : 'Level')
+        || translations['edp.lowDemand.ticketsPriceRange'] !== (dutch ? '{priceRange} per stuk' : '{priceRange} each')) return null;
+    const canonicals = document.querySelectorAll('link[rel="canonical"]');
+    if (canonicals.length !== 1 || typeof event.canonicalUrl !== 'string') return null;
+    return { eventId, region, canonical: canonicals[0].href,
+      embedded: new URL(event.canonicalUrl, location.href).href };
+  }, identity.id);
+  return binding && sameEvent(target, binding.canonical) && sameEvent(target, binding.embedded)
+    ? JSON.stringify(binding) : null;
+}
 
 // This is deliberately a separate read-only inspection path. A section click
 // expands a known map display; a seat is only hovered, never selected.
@@ -39,7 +77,10 @@ function checkElement(element, expected) {
     return right > left && bottom > top;
   };
   if (document.querySelector('dialog:modal')) return null;
-  const maps = [...document.querySelectorAll('aside[aria-label="Mapa míst"]')].filter(n => paint(n));
+  const dutch = ['www.ticketmaster.nl', 'ticketmaster.nl'].includes(location.hostname);
+  const labels = dutch ? ['Seat Map', 'Stoelplattegrond'] : ['Mapa míst'];
+  const maps = [...document.querySelectorAll('aside[aria-label]')]
+    .filter(n => labels.includes(n.getAttribute('aria-label')) && paint(n));
   if (maps.length !== 1) return null;
   const roots = maps[0].querySelectorAll('[data-component="zoomer"] svg[data-component="svg"]');
   const svg = element.closest('svg[data-component="svg"]');
@@ -51,7 +92,8 @@ function checkElement(element, expected) {
     if (matches.length !== 1 || matches[0] !== element || element.parentElement.parentElement !== svg
         || element.getAttribute('data-active') !== 'true') return null;
     const name = element.getAttribute('data-section-name')?.trim();
-    if (!/^\d{1,8}$/.test(name || '') || (expected.sectionName && name !== expected.sectionName)) return null;
+    if (!(dutch ? /^(?:Vak\s*)?\d{1,8}$/i : /^\d{1,8}$/).test(name || '')
+        || (expected.sectionName && name !== expected.sectionName)) return null;
     return { section_id: expected.sectionId, section_name: name };
   }
   const blocks = [...svg.querySelectorAll('g.seats > g[data-component="svg__block"]')]
@@ -84,9 +126,10 @@ function checkElement(element, expected) {
   }
   const seats = [...block.querySelectorAll('[data-component="svg__seat"]')].filter(n => n.id === expected.seatId);
   const row = element.parentElement;
+  const resale = element.tagName.toLowerCase() === 'g' && element.getAttribute('type') === 'resale';
+  const primary = dutch && element.tagName.toLowerCase() === 'circle' && element.getAttribute('type') === 'primary';
   if (seats.length !== 1 || seats[0] !== element || row?.parentElement !== block
-      || row.tagName.toLowerCase() !== 'g' || element.tagName.toLowerCase() !== 'g'
-      || element.getAttribute('type') !== 'resale') return null;
+      || row.tagName.toLowerCase() !== 'g' || (!resale && !primary)) return null;
   const rowName = row.getAttribute('data-row-name')?.trim();
   const seatName = element.getAttribute('data-seat-name')?.trim();
   if (!rowName || rowName.length > 80 || !seatName || seatName.length > 80
@@ -98,8 +141,14 @@ function checkElement(element, expected) {
 function readTooltip(seat, expected) {
   if (!seat.isConnected || !seat.matches(':hover') || document.querySelector('dialog:modal')) return null;
   const svg = seat.closest('svg[data-component="svg"]');
-  const map = svg?.closest('aside[aria-label="Mapa míst"]');
-  if (!map) return null;
+  const dutch = ['www.ticketmaster.nl', 'ticketmaster.nl'].includes(location.hostname);
+  const map = svg?.closest('aside[aria-label]');
+  const region = map?.getAttribute('aria-label');
+  if (!map || !(dutch ? ['Seat Map', 'Stoelplattegrond'] : ['Mapa míst']).includes(region)) return null;
+  const fields = dutch ? (region === 'Seat Map'
+    ? { zone: 'level', section: 'section', row: 'row', seat: 'seat' }
+    : { zone: 'niveau', section: 'vak', row: 'rij', seat: 'stoel' })
+    : { zone: 'zóna', section: 'sekce', row: 'řada', seat: 'místo' };
   const visible = (node, ignoredAria) => {
     let rect = node.getBoundingClientRect();
     let left = Math.max(0, rect.left), top = Math.max(0, rect.top);
@@ -136,21 +185,36 @@ function readTooltip(seat, expected) {
     const dd = dt.nextElementSibling;
     const key = normal(dt.textContent).toLocaleLowerCase();
     const value = normal(dd?.textContent);
-    if (!['zóna', 'sekce', 'řada', 'místo'].includes(key) || Object.hasOwn(values, key)
+    if (!Object.values(fields).includes(key) || Object.hasOwn(values, key)
         || dd?.tagName !== 'DD' || !value || value.length > 160
         || dt.childElementCount || dd.childElementCount || !visible(dt, tip) || !visible(dd, tip)) return null;
     values[key] = value;
   }
-  if (values.sekce !== expected.section_name || values['řada'] !== expected.row || values['místo'] !== expected.seat) return null;
+  const sectionKey = value => dutch ? value.replace(/^Vak\s*/i, '') : value;
+  if (sectionKey(values[fields.section]) !== sectionKey(expected.section_name)
+      || values[fields.row] !== expected.row || values[fields.seat] !== expected.seat) return null;
   const info = tip.querySelectorAll('[data-testid="ticketTypeInfo"]');
   if (info.length !== 1) return null;
   const spans = [...info[0].querySelectorAll('span')];
   if (spans.some(n => n.childElementCount || !visible(n, tip))) return null;
   const lines = spans.map(n => normal(n.textContent));
+  const primary = dutch && seat.tagName.toLowerCase() === 'circle' && seat.getAttribute('type') === 'primary';
+  let configuredPrimary = false;
+  if (primary) {
+    const scripts = document.querySelectorAll('script#__NEXT_DATA__[type="application/json"]');
+    if (scripts.length !== 1 || scripts[0].textContent.length > 2 * 1024 * 1024) return null;
+    try {
+      const types = JSON.parse(scripts[0].textContent).props?.pageProps?.initialReduxState?.ticketSelection?.ticketTypes;
+      configuredPrimary = Array.isArray(types) && types.length <= 128
+        && types.filter(type => type?.title === lines[0]).length === 1
+        && lines[0] !== 'Verified Resale Tickets';
+    } catch { return null; }
+  }
   if (![2, 3].includes(lines.length) || lines.some(s => !s || s.length > 200)
-      || lines[0] !== 'Ověřené přeprodávané vstupenky'
-      || !/^[\d\s.,]+ Kč za kus$/.test(lines.at(-1))) return null;
-  return { zone: values['zóna'], section: values.sekce, row: values['řada'], seat: values['místo'],
+      || (primary ? !configuredPrimary : lines[0] !== (dutch ? 'Verified Resale Tickets' : 'Ověřené přeprodávané vstupenky'))
+      || !(dutch ? (region === 'Seat Map' ? /^€\s*[\d,]+\.\d{2} each$/ : /^€\s*[\d.]+,\d{2} per stuk$/)
+        : /^[\d\s.,]+ Kč za kus$/).test(lines.at(-1))) return null;
+  return { zone: values[fields.zone], section: values[fields.section], row: values[fields.row], seat: values[fields.seat],
     ticket_type: lines[0], restriction: lines.length === 3 ? lines[1] : null, price_text: lines.at(-1) };
 }
 
@@ -158,16 +222,22 @@ async function inspectTicketmasterSection(page, target, { sectionId, seatId }, b
   let host;
   try { host = new URL(target).hostname; } catch { return { state: 'section_unsupported', opened: false }; }
   if (!IDENTIFIER.test(sectionId || '') || (seatId !== undefined && !IDENTIFIER.test(seatId))
-      || !['www.ticketmaster.cz', 'ticketmaster.cz'].includes(host) || !sameEvent(target, target)
+      || !['www.ticketmaster.cz', 'ticketmaster.cz', 'www.ticketmaster.nl', 'ticketmaster.nl'].includes(host) || !sameEvent(target, target)
       || !Number.isFinite(budgetMs) || budgetMs < 1) return { state: 'section_unsupported', opened: false };
   const deadline = performance.now() + Math.min(budgetMs, 15000);
   const remaining = () => Math.max(0, Math.floor(deadline - performance.now()));
   let opened = false;
+  let nlBinding;
   const guard = async (afterMapDisplayAction = false) => {
     if (!sameEvent(target, page.url())) throw new Error('unsafe_redirect');
     await validateCurrent({ afterMapDisplayAction });
     if (await inspectChallenge(page)) return 'blocked';
     if (await page.locator('dialog:modal').count()) return 'section_modal_blocked';
+    if (host.endsWith('.nl')) {
+      const current = await dutchBinding(page, target);
+      if (!current || (nlBinding !== undefined && current !== nlBinding)) return 'section_unsupported';
+      nlBinding = current;
+    }
     return null;
   };
   const failure = state => ({ state, opened });
@@ -182,19 +252,20 @@ async function inspectTicketmasterSection(page, target, { sectionId, seatId }, b
   // control is eligible, and it is never substituted with another button.
   const consent = page.locator('#ketch-banner-button-secondary');
   if (await consent.count() === 1 && await consent.isVisible()
-      && (await consent.innerText()).trim() === 'Odmítnout vše') {
+      && (host.endsWith('.nl') ? ['Reject all', 'Reject All', 'Alles weigeren'] : ['Odmítnout vše'])
+        .includes((await consent.innerText()).trim())) {
     if (!remaining()) return failure('render_timeout');
     try { await consent.click({ timeout: Math.max(1, Math.min(1500, remaining())) }); }
     catch { return failure('consent_blocked'); }
     blocked = await guard(); if (blocked) return failure(blocked);
   }
-  const roots = page.locator(MAIN_MAP);
+  const roots = page.locator(MAIN_MAP).locator('[data-component="zoomer"] svg[data-component="svg"]');
   if (await roots.count() !== 1) return failure('section_ambiguous');
   const svg = await roots.elementHandle();
   let section, block, seat, retained = false;
   const success = inspection => {
     retained = true;
-    pendingInspections.set(page, { target, inspection: JSON.stringify(inspection), svg, block, seat });
+    pendingInspections.set(page, { target, inspection: JSON.stringify(inspection), svg, block, seat, nlBinding });
     return { state: 'section_ready', opened, inspection };
   };
   try {
@@ -236,7 +307,7 @@ async function inspectTicketmasterSection(page, target, { sectionId, seatId }, b
     // Require the old tooltip to disappear, so a stale matching tooltip cannot
     // become evidence for the newly requested hover.
     await page.mouse.move(1, 1);
-    try { await page.locator('aside[aria-label="Mapa míst"] [data-component="tooltip"]:visible')
+    try { await page.locator(MAIN_MAP).locator('[data-component="tooltip"]:visible')
       .waitFor({ state: 'hidden', timeout: Math.max(1, Math.min(750, remaining())) }); }
     catch { return failure('section_tooltip_unavailable'); }
     blocked = await guard(); if (blocked) return failure(blocked);
@@ -269,6 +340,7 @@ async function assertSectionInspectionCurrent(page, target, inspection) {
   try {
     if (!record || record.target !== target || !sameEvent(target, page.url())
         || record.inspection !== JSON.stringify(inspection)
+        || (record.nlBinding !== undefined && await dutchBinding(page, target) !== record.nlBinding)
         || await inspectChallenge(page)
         || !await record.block.evaluate(checkElement, { kind: 'block', sectionId: inspection.section_id, svg: record.svg })) {
       throw new Error('section_inspection_changed');

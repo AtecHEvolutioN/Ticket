@@ -4,6 +4,43 @@ use ticket_watch::seat_map::extract_seat_map;
 const URL: &str = "https://www.ticketmaster.cz/event/synthetic-concert/1234567890";
 const PAGE: &str = include_str!("fixtures/seat-map-regional.html");
 
+#[test]
+fn dutch_explicit_primary_seats_and_distinct_named_skyboxes_keep_scoped_identities() {
+    let first = r#"<g data-component="svg__block" data-section-id="s_shared" data-section-name="4-L6"><g data-row-name="1"><circle data-component="svg__seat" id="seat-a" data-seat-name="1" type="primary" cx="20" cy="20" r="4"/></g></g>"#;
+    let second = first
+        .replace("4-L6", "4-L7")
+        .replace("seat-a", "seat-b")
+        .replace("cx=\"20\"", "cx=\"30\"");
+    let make = |second: &str| {
+        PAGE.replace("</aside>", &format!(r#"<svg data-component="svg" data-ticketwatch-map-painted="true" viewBox="0 0 100 100"><g class="seats">{first}{second}</g><g class="polygons"></g></svg></aside>"#))
+    };
+    let as_dutch = |page: String| {
+        page.replace("ticketmaster.cz", "ticketmaster.nl")
+            .replace("\"CZ\"", "\"NL\"")
+            .replace("Mapa míst", "Seat Map")
+    };
+    let url = URL.replace("ticketmaster.cz", "ticketmaster.nl");
+    let map = extract_seat_map(&url, &url, &as_dutch(make(&second))).unwrap();
+    let seats = map.rendered_seats.unwrap();
+    assert_eq!(seats.sections.len(), 2);
+    assert_eq!(seats.sections[0].id, seats.sections[1].id);
+    assert_ne!(seats.sections[0].name, seats.sections[1].name);
+    assert_eq!(seats.rendered_seat_count, 2);
+    assert_eq!(
+        seats.sections[0].rows[0].seats[0].displayed_ticket_type,
+        Some("primary")
+    );
+    assert!(!seats.stock_verified && !seats.adjacency_verified);
+    for invalid in [
+        second.replace("4-L7", "4-L6"),
+        second.replace("seat-b", "seat-a"),
+    ] {
+        assert!(extract_seat_map(&url, &url, &as_dutch(make(&invalid))).is_err());
+    }
+    assert!(extract_seat_map(URL, URL, &make(&second).replace(" type=\"primary\"", "")).is_err());
+    assert!(extract_seat_map(URL, URL, &make("")).is_err());
+}
+
 fn change_metadata(change: impl FnOnce(&mut Value)) -> String {
     let marker = "<script id=\"__NEXT_DATA__\" type=\"application/json\">";
     let start = PAGE.find(marker).unwrap() + marker.len();

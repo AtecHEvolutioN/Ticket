@@ -72,6 +72,20 @@ pub struct RenderedSeats {
 /// The caller must bind the event and map region before reading seat identities.
 /// Missing, empty or hidden seat layers do not imply that an event is sold out.
 pub fn extract_rendered_seats(region: ElementRef<'_>) -> Result<Option<RenderedSeats>> {
+    extract_bound_rendered_seats(region, false)
+}
+
+pub(crate) fn extract_rendered_seats_for_market(
+    region: ElementRef<'_>,
+    host: &str,
+) -> Result<Option<RenderedSeats>> {
+    extract_bound_rendered_seats(region, host == "ticketmaster.nl")
+}
+
+fn extract_bound_rendered_seats(
+    region: ElementRef<'_>,
+    dutch: bool,
+) -> Result<Option<RenderedSeats>> {
     if crate::parser::hidden_element(region) || blocked_ancestor(region) {
         return Ok(None);
     }
@@ -119,7 +133,7 @@ pub fn extract_rendered_seats(region: ElementRef<'_>) -> Result<Option<RenderedS
             continue;
         }
         let view_box = read_view_box(svg)?;
-        let (sections, seat_count) = read_sections(layer, view_box, &mut total_seats)?;
+        let (sections, seat_count) = read_sections(layer, view_box, &mut total_seats, dutch)?;
         ensure!(recognized == seat_count, "unbound or nested seat elements");
         if seat_count == 0 {
             continue;
@@ -181,6 +195,7 @@ fn read_sections(
     layer: ElementRef<'_>,
     bounds: ViewBox,
     total_seats: &mut usize,
+    dutch: bool,
 ) -> Result<(Vec<SeatSection>, usize)> {
     let mut sections = BTreeMap::new();
     let mut ids = BTreeSet::new();
@@ -230,7 +245,7 @@ fn read_sections(
                 );
                 *total_seats += 1;
                 ensure!(*total_seats <= MAX_SEATS, "too many rendered seats");
-                let seat = read_seat(mark, bounds)?;
+                let seat = read_seat(mark, bounds, dutch)?;
                 ensure!(ids.insert(seat.id.clone()), "duplicate rendered seat ID");
                 ensure!(
                     names.insert(seat.name.clone()),
@@ -255,7 +270,10 @@ fn read_sections(
         ensure!(
             sections
                 .insert(
-                    id.clone(),
+                    // Observed NL skyboxes expose several distinct named
+                    // blocks under one native section ID. Preserve each block;
+                    // callers requiring one section must reject ambiguous IDs.
+                    (id.clone(), if dutch { name.clone() } else { String::new() }),
                     SeatSection {
                         id,
                         name,
@@ -269,7 +287,7 @@ fn read_sections(
     Ok((sections.into_values().collect(), ids.len()))
 }
 
-fn read_seat(mark: ElementRef<'_>, bounds: ViewBox) -> Result<SeatPoint> {
+fn read_seat(mark: ElementRef<'_>, bounds: ViewBox, dutch: bool) -> Result<SeatPoint> {
     no_style_override(mark)?;
     let e = mark.value();
     let id = identifier(e.attr("id").context("seat mark lacks ID")?)?;
@@ -284,7 +302,11 @@ fn read_seat(mark: ElementRef<'_>, bounds: ViewBox) -> Result<SeatPoint> {
                     .is_none(),
                 "nested seat circle content"
             );
-            ensure!(e.attr("type").is_none(), "unsupported circle ticket type");
+            let displayed_type = match e.attr("type") {
+                None => None,
+                Some("primary") if dutch => Some("primary"),
+                _ => anyhow::bail!("unsupported circle ticket type"),
+            };
             let position = point(
                 scalar(e.attr("cx").context("seat circle lacks x")?)?,
                 scalar(e.attr("cy").context("seat circle lacks y")?)?,
@@ -295,7 +317,7 @@ fn read_seat(mark: ElementRef<'_>, bounds: ViewBox) -> Result<SeatPoint> {
                 radius > 0.0 && radius <= bounds.width.min(bounds.height),
                 "invalid seat circle radius"
             );
-            (position, SeatShape::Circle { radius }, None)
+            (position, SeatShape::Circle { radius }, displayed_type)
         }
         "g" => {
             ensure!(

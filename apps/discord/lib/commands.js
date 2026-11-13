@@ -42,7 +42,7 @@ export function commandResponse(interaction) {
       return ephemeral('**Ticket Watch**\n'
         + '• /ticket ping — check the Discord command endpoint.\n'
         + '• /ticket help — show this help.\n'
-        + '• /ticket chart — view exported event price and observed-volume history.\n\n'
+        + '• /ticket chart — view exported history or connect a private live history API.\n\n'
         + 'The Rust watcher sends ticket alerts directly to its configured Discord channel. '
         + 'It runs separately on a persistent host. Configure artists, events and alert filters '
         + 'in the watcher configuration. Watcher status, remote settings and cart commands '
@@ -51,8 +51,9 @@ export function commandResponse(interaction) {
       return ephemeral('**Event price history**\n'
         + 'https://ticket-discord.vercel.app/market.html\n\n'
         + 'Open a watcher history JSON export to chart original/resale prices and observed listings '
-        + 'by ticket type. Files stay on your device. The demo uses synthetic data. '
-        + 'The viewer is not connected to a live watcher yet; observed volume is not confirmed sales.');
+        + 'by ticket type, or connect your deployed read-only history API. Files stay on your device. '
+        + 'The demo uses synthetic data. Live updates require the separate worker/API host; '
+        + 'observed volume is not confirmed sales. Enter history tokens only in the viewer, never in Discord.');
     default:
       return ephemeral('This command is not supported. Use /ticket ping, /ticket help or /ticket chart.');
   }

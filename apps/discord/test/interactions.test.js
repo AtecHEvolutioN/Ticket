@@ -93,13 +93,14 @@ test('help is static, does not echo supplied interaction fields, and mentions no
   assert.deepEqual(result.data.allowed_mentions, { parse: [] });
 });
 
-test('chart command opens a local-import viewer without claiming live sales data', async () => {
+test('chart command explains private live connection without claiming a running watcher or sales data', async () => {
   const response = await invoke(command('chart'));
   const result = await response.json();
   assert.equal(result.data.flags, 64);
   assert.match(result.data.content, /https:\/\/ticket-discord\.vercel\.app\/market\.html/);
   assert.match(result.data.content, /Files stay on your device/);
-  assert.match(result.data.content, /not connected to a live watcher/);
+  assert.match(result.data.content, /Live updates require the separate worker\/API host/);
+  assert.match(result.data.content, /tokens only in the viewer, never in Discord/);
   assert.match(result.data.content, /not confirmed sales/);
   assert.deepEqual(result.data.allowed_mentions, { parse: [] });
 });

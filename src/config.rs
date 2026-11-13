@@ -91,6 +91,10 @@ pub struct CatalogConfig {
     pub max_requests_per_refresh: usize,
     pub max_requests_per_day: u32,
     pub max_events: usize,
+    /// Split all-artist country searches into resumable bounded UTC date ranges.
+    pub country_partitioning: bool,
+    pub country_horizon_days: u32,
+    pub country_window_days: u32,
 }
 impl Default for CatalogConfig {
     fn default() -> Self {
@@ -99,6 +103,9 @@ impl Default for CatalogConfig {
             max_requests_per_refresh: 20,
             max_requests_per_day: 4000,
             max_events: 1000,
+            country_partitioning: false,
+            country_horizon_days: 730,
+            country_window_days: 30,
         }
     }
 }
@@ -609,12 +616,15 @@ fn validate_catalog(config: &Config) -> Result<()> {
         || !(1..=1000).contains(&catalog.max_requests_per_refresh)
         || !(1..=5000).contains(&catalog.max_requests_per_day)
         || catalog.max_requests_per_refresh as u32 > catalog.max_requests_per_day
-        || !(1..=1000).contains(&catalog.max_events)
+        || !(1..=10_000).contains(&catalog.max_events)
+        || !(1..=3650).contains(&catalog.country_horizon_days)
+        || !(1..=365).contains(&catalog.country_window_days)
+        || catalog.country_window_days > catalog.country_horizon_days
         || config.subscriptions.len() > 1000
         || config.profiles.len() > 100
     {
         bail!(
-            "Invalid catalog limits: refresh >=60s, 1–1000 requests/refresh within daily budget, and 1–1000 events"
+            "Invalid catalog limits: refresh >=60s, 1–1000 requests/refresh within daily budget, 1–10000 events, country horizon 1–3650 days, and window 1–365 days within the horizon"
         );
     }
     let mut profile_ids = HashSet::new();

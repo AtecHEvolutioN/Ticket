@@ -545,6 +545,62 @@ impl Store {
         Ok(())
     }
 
+    /// Compact startup seeds for explicitly active watches only. Retired rows,
+    /// outbox/state JSON and raw observations never accumulate in the result.
+    /// Each observation is decoded and hashed individually, bounded by the same
+    /// 16 MiB ceiling enforced by apply().
+    pub fn scheduler_status(&self, watch_ids: &[String]) -> Result<Vec<Value>> {
+        let mut statement = self.connection.prepare(
+            "SELECT w.last_observed_at,
+                CASE WHEN length(CAST(o.observation_json AS BLOB))<=?2 THEN o.observation_json END,
+                length(CAST(o.observation_json AS BLOB))
+             FROM watches w LEFT JOIN watch_observations o ON o.watch_id=w.id
+             WHERE w.id=?1 AND w.enabled=1",
+        )?;
+        let mut seen = HashSet::new();
+        let mut seeds = Vec::new();
+        for id in watch_ids {
+            if !seen.insert(id) {
+                continue;
+            }
+            let row: Option<(Option<i64>, Option<String>, Option<i64>)> = statement
+                .query_row(params![id, 16 * 1024 * 1024], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                })
+                .optional()?;
+            let Some((last_observed_at, raw, size)) = row else {
+                continue;
+            };
+            ensure!(
+                size.is_none_or(|size| (0..=16 * 1024 * 1024).contains(&size)),
+                "Stored scheduler observation exceeds its bound"
+            );
+            let observation = raw
+                .map(|raw| serde_json::from_str::<Observation>(&raw))
+                .transpose()
+                .map_err(|_| anyhow::anyhow!("Invalid stored scheduler observation"))?;
+            if let Some(observation) = &observation {
+                ensure!(
+                    observation.watch_id == *id
+                        && Some(observation.observed_at) == last_observed_at,
+                    "Stored scheduler observation identity or timestamp mismatch"
+                );
+            }
+            let signature = observation
+                .as_ref()
+                .map(crate::watch_scheduler::observation_signature)
+                .transpose()?
+                .flatten();
+            seeds.push(json!({
+                "watch_id": id,
+                "last_observed_at": last_observed_at,
+                "last_availability": observation.as_ref().map(|o| o.availability),
+                "last_signature": signature,
+            }));
+        }
+        Ok(seeds)
+    }
+
     pub fn status(&self) -> Result<Vec<Value>> {
         let mut statement = self.connection.prepare(
             "SELECT w.id,w.enabled,w.observed_availability,w.evidence,w.detail,
@@ -1137,6 +1193,76 @@ mod tests {
             complete,
             ..observation(at, Availability::Available)
         }
+    }
+
+    #[test]
+    fn scheduler_seeds_only_requested_enabled_watches_without_raw_history() {
+        let mut store = Store::open(Path::new(":memory:")).unwrap();
+        let active = watch();
+        let mut observation = offers(100, vec![offer("private-seat-marker")], true);
+        observation.detail = "private-diagnostic-marker".repeat(1000);
+        store.apply(&active, &observation).unwrap();
+        let mut retired = watch();
+        retired.id = "retired".into();
+        let mut old = observation.clone();
+        old.watch_id = retired.id.clone();
+        store.apply(&retired, &old).unwrap();
+        store.reconcile(std::slice::from_ref(&active)).unwrap();
+        // A malformed retired observation must not be loaded by startup.
+        store.connection.execute(
+            "UPDATE watch_observations SET observation_json='not-json' WHERE watch_id='retired'", [],
+        ).unwrap();
+        let ids = vec![
+            active.id.clone(),
+            "retired".into(),
+            "missing".into(),
+            active.id.clone(),
+        ];
+        let seeds = store.scheduler_status(&ids).unwrap();
+        assert_eq!(seeds.len(), 1);
+        assert_eq!(seeds[0]["watch_id"], active.id);
+        assert_eq!(seeds[0]["last_observed_at"], 100);
+        assert_eq!(seeds[0]["last_availability"], "available");
+        assert_eq!(seeds[0]["last_signature"].as_str().unwrap().len(), 64);
+        let encoded = serde_json::to_string(&seeds).unwrap();
+        assert!(!encoded.contains("private-"));
+        assert!(encoded.len() < 300);
+        assert!(store.scheduler_status(&[]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn scheduler_seeds_reject_oversized_or_mismatched_current_observations() {
+        let mut store = Store::open(Path::new(":memory:")).unwrap();
+        let watch = watch();
+        store
+            .apply(&watch, &observation(100, Availability::Unavailable))
+            .unwrap();
+        store.connection.execute(
+            "UPDATE watch_observations SET observation_json=zeroblob(16777217) WHERE watch_id=?1", [&watch.id],
+        ).unwrap();
+        assert!(
+            store
+                .scheduler_status(std::slice::from_ref(&watch.id))
+                .unwrap_err()
+                .to_string()
+                .contains("bound")
+        );
+        let mut mismatch = observation(100, Availability::Unavailable);
+        mismatch.watch_id = "different".into();
+        store
+            .connection
+            .execute(
+                "UPDATE watch_observations SET observation_json=?1 WHERE watch_id=?2",
+                params![serde_json::to_string(&mismatch).unwrap(), watch.id],
+            )
+            .unwrap();
+        assert!(
+            store
+                .scheduler_status(std::slice::from_ref(&watch.id))
+                .unwrap_err()
+                .to_string()
+                .contains("mismatch")
+        );
     }
 
     #[test]

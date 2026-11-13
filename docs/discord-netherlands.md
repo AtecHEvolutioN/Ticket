@@ -64,7 +64,9 @@ Channel provisioning does not start the watcher or configure alert routing.
 The existing sender uses its configured destination channel; routing these
 streams and a persistent worker are separate deployment tasks. The Vercel
 command endpoint already works, while the continuous watcher is not installed.
-The chart viewer supports exported history, not a live database connection.
+The chart viewer supports exported history and an authenticated connection to the
+[read-only history API](live-history-api.md). A production worker/API host still
+needs deployment and private configuration before real continuous updates work.
 
 The [Netherlands adapter audit](netherlands-mapping.md) has tested event metadata,
 displayed ticket categories/prices, explicit resale listings where exposed, and
@@ -72,17 +74,17 @@ overview maps. Individual Dutch seat hovering and cart reservations have not bee
 validated. Per-seat history support can store validated observations from
 supported adapters; it does not by itself add Dutch seat extraction.
 
-Full-country discovery must respect the API's pagination, quotas and configured
-capacity. A partial or capped scan is reported as incomplete and must not erase
-unseen cached events. Inventory checks need independent pacing and priority for
-imminent sales and recently changing events. No one-second country-wide detection
-guarantee is implied by removing the artist filter.
+Country discovery uses resumable date windows while respecting pagination,
+quotas and configured capacity. Saturated windows split; partial/capped scans
+remain incomplete and preserve unseen cached events. Inventory checks prioritize
+imminent sales and recent changes with fair older checks. Host pacing and provider
+cooldowns remain in force. No one-second country-wide detection guarantee follows.
 
 The [all-artists NL configuration](../examples/netherlands-all.example.toml)
 uses `all_artists = true` and `country = "NL"`, without an attraction ID. It
-includes all returned event types, preserves actual artist labels and published
-sale/presale information, and explicitly reports the 1,000-result paging and
-configured capacity limits. It has not been activated on a live host.
-Country-wide catalog coverage beyond that limit needs partitioned discovery;
-the current conservative per-host pacing also makes it unsuitable for a
-one-second sweep of every event.
+includes all returned event types and preserves actual artist labels and published
+sale/presale information. The example scans a 730-day dated horizon with a
+10,000-event capacity, while each API query keeps its 1,000-result ceiling.
+Undated/TBA events and dates outside the horizon are not covered. It has not been
+activated on a live host. The current conservative per-host pacing still makes
+a one-second sweep of every event impossible; use the measured freshness report.

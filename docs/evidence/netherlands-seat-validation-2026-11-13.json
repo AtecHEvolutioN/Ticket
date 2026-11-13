@@ -1,0 +1,144 @@
+{
+  "schema_version": 1,
+  "audit_date": "2026-11-13",
+  "method": "ordinary_headed_chromium_worker_hover_then_rust_event_bound_validation",
+  "summary": {
+    "headless_probe_events": 3,
+    "headless_http_403": 3,
+    "live_validated_events": 2,
+    "live_validated_venues": 2,
+    "live_primary_quotes": 1,
+    "live_resale_quotes": 1,
+    "confirmed_holds": 0
+  },
+  "headless_probes": [
+    {
+      "event_url": "https://www.ticketmaster.nl/event/monster-jam-2027-tickets/381518243?language=en-us",
+      "venue": "GelreDome",
+      "observed_at": "2026-11-13T07:33:58.592Z",
+      "http_status": 403,
+      "map_result": "unsupported_layout",
+      "section_clicks": 0,
+      "seat_clicks": 0,
+      "reservation_actions": 0
+    },
+    {
+      "event_url": "https://www.ticketmaster.nl/event/10cc-tickets/593318371?language=en-us",
+      "venue": "TivoliVredenburg",
+      "observed_at": "2026-11-13T07:35:25.506Z",
+      "http_status": 403,
+      "map_result": "unsupported_layout",
+      "section_clicks": 0,
+      "seat_clicks": 0,
+      "reservation_actions": 0
+    },
+    {
+      "event_url": "https://www.ticketmaster.nl/event/gypsy-jazz-festival-2027-tickets/1816750465?language=en-us",
+      "venue": "Musis Sacrum",
+      "observed_at": "2026-11-13T07:39:50.958Z",
+      "http_status": 403,
+      "map_result": "unsupported_layout",
+      "section_clicks": 0,
+      "seat_clicks": 0,
+      "reservation_actions": 0
+    }
+  ],
+  "validated_hover_observations": [
+    {
+      "event_url": "https://www.ticketmaster.nl/event/monster-jam-2027-tickets/381518243",
+      "venue": "GelreDome",
+      "language": "nl",
+      "observed_at": "2026-11-13T07:58:51.689Z",
+      "http_status": 200,
+      "browser_result": "section_ready",
+      "elapsed_ms": 9441,
+      "capture_sha256": "03c26cb2f0b261dc6e8d0f019fc1e61fc289fbe1103e3ca9357940634d73a0ea",
+      "evidence_seat_hash": "3e309229ef882d5f0dd01333696f1385699ce587c628e0759299f427df4e9428",
+      "section_clicks": 1,
+      "seat_clicks": 0,
+      "reservation_actions": 0,
+      "validated_inspection": {
+        "adapter_validation": "limited_live_validation",
+        "displayed_inventory_kind": "primary",
+        "section_id": "s_38",
+        "section_name": "101",
+        "coverage": "section_only",
+        "rendered_seat_count": 142,
+        "displayed_quote": {
+          "evidence": "rendered_seat_hover",
+          "zone": "1e Ring",
+          "section": "VAK 101",
+          "row": "11",
+          "seat": "213",
+          "ticket_type": "Presale | Zitplaats",
+          "restriction": null,
+          "price_minor": 8995,
+          "currency": "EUR",
+          "price_basis": "per_ticket",
+          "price_text": "\u20ac 89,95 per stuk",
+          "fees_complete": false,
+          "available_quantity": null
+        },
+        "stock_verified": false,
+        "adjacency_verified": false
+      }
+    },
+    {
+      "event_url": "https://www.ticketmaster.nl/event/new-wave-tickets/1861749472?language=en-us",
+      "venue": "Ziggo Dome",
+      "language": "en",
+      "observed_at": "2026-11-13T07:53:13.650Z",
+      "http_status": 200,
+      "browser_result": "section_ready",
+      "elapsed_ms": 8137,
+      "capture_sha256": "caf186ecdfdc97714498d3324a722b4d5436ab378c21e92c2548a2001f0fb2fd",
+      "evidence_seat_hash": "047ad8db8379a173f7960aa9a483f8be4d00f27a23a2a97b2f4e9648331576ca",
+      "section_clicks": 1,
+      "seat_clicks": 0,
+      "reservation_actions": 0,
+      "validated_inspection": {
+        "adapter_validation": "limited_live_validation",
+        "displayed_inventory_kind": "resale",
+        "section_id": "s_111",
+        "section_name": "209",
+        "coverage": "section_only",
+        "rendered_seat_count": 321,
+        "displayed_quote": {
+          "evidence": "rendered_seat_hover",
+          "zone": "2e Ring",
+          "section": "209",
+          "row": "8",
+          "seat": "292",
+          "ticket_type": "Verified Resale Tickets",
+          "restriction": "Zitplaatsen",
+          "price_minor": 7390,
+          "currency": "EUR",
+          "price_basis": "per_ticket",
+          "price_text": "\u20ac73.90 each",
+          "fees_complete": false,
+          "available_quantity": null
+        },
+        "stock_verified": false,
+        "adjacency_verified": false
+      }
+    }
+  ],
+  "adapter_validation": "limited_live_validation",
+  "historical_contract_sources": [
+    "docs/evidence/netherlands-mapping-2026-11-10.json"
+  ],
+  "fixes": [
+    "NL English tooltip Level and Dutch Niveau are bound to the configured source translations.",
+    "NL typed primary circle nodes preserve explicit provenance; Standard/VIP labels and colors do not identify a sale channel.",
+    "NL distinct named skybox blocks sharing one native section ID remain separate; requested ambiguous section IDs fail.",
+    "Section-only inspection uses the already bounded passive identification grace within its original deadline and Retry-After policy."
+  ],
+  "limits": [
+    "Headless403 outcomes do not establish the cause or inability to access via ordinary headed Chromium.",
+    "Live quotes were observed once at two venues; this is not exhaustive NL layout validation or sustained access.",
+    "Presale display does not prove eligibility; displayed prices do not prove stock, complete fees, adjacency or a successful reservation.",
+    "Dutch automatic seat scans and native cart actions remain disabled.",
+    "Native browser receipts remain uncertain; no successful Dutch hold or customer checkout handoff was established.",
+    "No raw DOM, private checkout identifiers, credentials, cookies or session material are published."
+  ]
+}

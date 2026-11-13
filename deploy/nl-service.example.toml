@@ -12,11 +12,15 @@ alert_max_age_secs = 120
 
 [catalog]
 refresh_interval_secs = 900
-max_requests_per_refresh = 10
+max_requests_per_refresh = 40
 max_requests_per_day = 4000
-max_events = 1000
-# Bounded country query, not exhaustive coverage. At 60 seconds per host request,
-# 1000 event pages take over 16 hours per sweep before response time/backoff.
+max_events = 10000
+country_partitioning = true
+country_horizon_days = 730
+country_window_days = 30
+# Resumable date windows cover this horizon, excluding undated/TBA events.
+# Same-time saturation and budget/storage limits remain explicitly incomplete.
+# At 60 seconds per host request, 1000 event pages still take over 16 hours.
 # A profile interval is not a per-event freshness or instant-alert guarantee.
 
 [browser]

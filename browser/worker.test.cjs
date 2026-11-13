@@ -52,11 +52,13 @@ test('request protocol has bounded sizes and durations', () => {
   assert.throws(() => validateRequest({...request,timeout_ms:0}));
 });
 
-test('section inspection requires explicit bounded Czech map targets', () => {
+test('section inspection requires explicit bounded Czech or draft Netherlands map targets', () => {
   const request = { id: 1, url: 'https://www.ticketmaster.cz/event/synthetic/12345678',
     timeout_ms: 1000, max_body_bytes: 1024, render_wait_ms: 0,
     adapter: 'ticketmaster', display: 'map', map_section_id: 's_12', map_seat_id: 'seat-2' };
   assert.doesNotThrow(() => validateRequest(request));
+  assert.doesNotThrow(() => validateRequest({ ...request,
+    url: 'https://www.ticketmaster.nl/event/synthetic/12345678' }));
   for (const change of [
     { display: undefined }, { adapter: 'selectors' }, { map_section_id: undefined },
     { url: 'https://www.ticketmaster.pl/event/synthetic/12345678' },
@@ -73,7 +75,8 @@ test('automatic seat scans are bounded and cannot combine with an explicit seat 
   assert.doesNotThrow(() => validateRequest(request));
   for (const change of [{ map_scan_limit: 0 }, { map_scan_limit: 51 }, { map_scan_limit: 1.5 },
     { map_scan_limit: '20' }, { map_scan_limit: null }, { map_section_id: undefined },
-    { map_seat_id: 'seat-1' }, { display: undefined }]) {
+    { map_seat_id: 'seat-1' }, { display: undefined },
+    { url: 'https://www.ticketmaster.nl/event/synthetic/12345678' }]) {
     assert.throws(() => validateRequest({ ...request, ...change }), /invalid_request/);
   }
 });

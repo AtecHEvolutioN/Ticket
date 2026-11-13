@@ -77,9 +77,11 @@ function validateRequest(request) {
   const url = validateUrl(request.url);
   const identifier = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
   if (request.map_section_id !== undefined && (request.display !== 'map'
-      || url.hostname.replace(/^www\./, '') !== 'ticketmaster.cz' || !identifier(request.map_section_id))) throw new Error('invalid_request');
+      || !['ticketmaster.cz', 'ticketmaster.nl'].includes(url.hostname.replace(/^www\./, ''))
+      || !identifier(request.map_section_id))) throw new Error('invalid_request');
   if (request.map_seat_id !== undefined && (request.map_section_id === undefined || !identifier(request.map_seat_id))) throw new Error('invalid_request');
   if (request.map_scan_limit !== undefined && (request.map_section_id === undefined
+      || url.hostname.replace(/^www\./, '') !== 'ticketmaster.cz'
       || request.map_seat_id !== undefined || !Number.isInteger(request.map_scan_limit)
       || request.map_scan_limit < 1 || request.map_scan_limit > 50)) throw new Error('invalid_request');
   if (request.display === 'cart_controls') {
@@ -249,10 +251,10 @@ async function capture(context, request, cartIsolation) {
       initialIdentification = document;
       identificationPending = true;
       await documents.synchronize();
-      // Section scans already allow a longer initial page load. A successful
+      // Section inspections/scans allow a longer initial page load. A successful
       // normal identification navigation may take more than five seconds; this
       // passive grace remains inside the original request deadline and cooldown.
-      const identificationGrace = request.map_scan_limit !== undefined || request.display === 'cart_controls' ? 15000 : 5000;
+      const identificationGrace = request.map_section_id !== undefined || request.display === 'cart_controls' ? 15000 : 5000;
       snapshot = await documents.waitForIdentification(Math.min(identificationGrace, Math.max(0, remaining() - 5)), identification, validateDocument);
       identificationPending = false;
       if (identification(snapshot)) return incompleteIdentification();

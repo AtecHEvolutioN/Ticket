@@ -22,7 +22,7 @@ bundle_dir="$stage_dir/ticket-watch-bot"
 mkdir -p "$bundle_dir/target/release" "$output_dir"
 cp "$binary_path" "$bundle_dir/target/release/ticket-watch"
 chmod 755 "$bundle_dir/target/release/ticket-watch"
-for entry in src browser tests docs examples deploy; do
+for entry in src browser server tests docs examples deploy; do
     cp -R "$repo_dir/$entry" "$bundle_dir/$entry"
 done
 for entry in Cargo.toml Cargo.lock package.json package-lock.json config.example.toml config.map-monitor.example.toml README.md HANDOFF.md; do
@@ -81,10 +81,12 @@ root. Supply TICKETMASTER_API_KEY privately, then use:
    ./target/release/ticket-watch --config config.nl.local.toml validate
    ./target/release/ticket-watch --config config.nl.local.toml sync
    ./target/release/ticket-watch --config config.nl.local.toml catalog
-Review the reported coverage before running the monitor. This query retains at
-most 1,000 events; it is not exhaustive Ticketmaster.nl coverage. The 60-second
-host interval can make a 1,000-event sweep take over 16 hours. This is not a
-second-level polling promise. Choose the destination explicitly; the server's
+Review the reported coverage before running the monitor. Resumable date windows
+cover a configured 730-day horizon, retaining at most 10,000 events. Undated/TBA
+events, saturated windows and storage/request limits remain explicit gaps.
+Priority scheduling favors imminent sales and recent changes, with fair older
+checks; the 60-second host interval still makes a 1,000-event sweep take over
+16 hours. This is not a second-level polling promise. Choose the destination explicitly; the server's
 Discord channel layout does not automatically route these watcher messages.
 
 For an always-on Debian 13 server, first review the offline preparation plan:
@@ -107,9 +109,16 @@ Export an existing database to a new standalone offline chart filename:
 Use --event-url and --from/--to to narrow large exports. Keep the source database
 path consistent with your configuration; no database is included in this package.
 Supported Czech map quotes also have individual section/row/seat histories.
-Netherlands overview maps do not yet supply validated individual-seat prices.
+Manual Dutch inspection has validated primary/resale seat prices at two venues;
+automatic Dutch section scans and seat-history collection remain disabled.
 These are asking-price observations, not completed sales or total event stock.
 Read docs/price-history.md for JSON exports, per-seat views and evidence gaps.
+
+For authenticated live charts, server/history-api.cjs provides a loopback,
+read-only API using the fixed configured binary and databases. Install a private
+TICKET_HISTORY_TOKEN and use an HTTPS reverse proxy for remote access. The hosted
+viewer connects only after you enter the endpoint and token; imported files and
+standalone snapshots remain local. Read docs/live-history-api.md before setup.
 
 Ticket preferences default to two adjacent tickets and the cheapest eligible group.
 Export defaults and per-event choices from Android Settings > Ticket preferences,

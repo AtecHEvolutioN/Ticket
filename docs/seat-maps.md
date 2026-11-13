@@ -5,14 +5,15 @@ selection zones and supported rendered SVG section outlines. Its browser mode
 keeps the native map display instead of switching to best available. It can
 export a clean section SVG, download a referenced image and save a draft static
 layout in the venue registry.
-Opt-in [Czech section and seat inspection](seat-inspection.md) also reads rendered
-seat identities and supported resale hover prices.
+Opt-in [section and seat inspection](seat-inspection.md) also reads rendered
+seat identities and supported hover prices in observed Czech and Dutch layouts.
 These source features are newer than the 0.6.0-test downloads and Android APK.
 
 The [Netherlands mapping audit](netherlands-mapping.md) adds verified parsing of
 observed Dutch section-name aliases and multiple same-text label placements.
-It includes seven overview maps, clean arena SVG exports and draft venue presets;
-individual-seat inspection remains Czech-only.
+It includes seven overview maps, clean arena SVG exports and draft venue presets.
+[Two live Dutch seat checks](netherlands-seat-validation.md) validate limited
+primary/resale hovering; automatic Dutch section scans and carting remain disabled.
 
 ```bash
 cargo build --release --locked

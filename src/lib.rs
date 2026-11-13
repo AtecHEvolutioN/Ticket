@@ -40,3 +40,4 @@ pub mod seat_map;
 pub mod store;
 pub mod ticketmaster;
 pub mod venues;
+pub mod watch_scheduler;

@@ -50,9 +50,11 @@ return adds a new observed quote. Neither transition proves a sale or a cart hol
 Known displayed prices can remain continuous while stock is unknown, with that
 uncertainty visible. Unscheduled captures remain isolated observations.
 
-Individual-seat extraction is currently validated only for the supported Czech
-map adapter. Netherlands overview maps do not yet provide validated individual
-seat observations. Adding history storage does not change that coverage limit.
+Scheduled individual-seat collection currently supports the Czech map adapter.
+[Manual Dutch inspection](netherlands-seat-validation.md) has validated one
+primary and one resale seat quote at two venues, but Dutch automatic section
+scans and history collection are not enabled. Adding history storage does not
+establish available stock or general layout coverage.
 
 The current sources do **not** provide verified market-wide sales volume. Future
 confirmed purchase/resale receipts need a separate transaction ledger; scraping
@@ -105,15 +107,29 @@ cargo run --example price_history_demo -- /tmp/ticket-history-demo
 Use a new directory. This creates synthetic observations and both export formats,
 including a blocked interval; it performs no provider requests or Discord sends.
 
-## Deployment status
+## Authenticated live charts
 
-The Vercel app serves the viewer and Discord commands. It has no live connection
-to the watcher database. A JSON/HTML export is a snapshot at its generation time,
-not a live feed. `/ticket ping` still checks only the command endpoint.
+The hosted viewer can connect to the worker's separate read-only history API.
+Enter the HTTPS endpoint and private history token in the connection form, then
+choose an optional event URL and history window. The viewer refreshes without
+discarding the selected event/source/series. Pause or disconnect at any time.
+The token stays in page memory, is sent only in an Authorization header, and is
+never written into a URL, browser storage or exported history. Imported files
+stay local; standalone embedded HTML exports keep networking disabled.
 
-Continuous history collection requires the persistent watcher host already
-listed in the production roadmap. Once installed, the next deployment step is an
-authenticated read-only history interface and fresh chart links in Discord;
-do not put SQLite history on ephemeral function storage or expose private
-watchlists through an unauthenticated endpoint. The present viewer deliberately
-does not fetch arbitrary URLs or upload imported files.
+The API runs beside the persistent watcher, using fixed configured database
+paths and the existing read-only exporter. It does not scrape Ticketmaster,
+modify watches or send alerts. Export limits remain enforced; a large country
+history may require an event filter or shorter time window. Freshness is based
+on source observation timestamps, not the time the API generated its response.
+A successful refresh does not turn blocked or unknown observations into stock.
+
+See [live history setup](live-history-api.md) for the private token, exact CORS
+origin allowlist, loopback service and HTTPS reverse proxy. The hosted viewer's
+CSP permits HTTPS connections so an operator can configure their own endpoint;
+narrow that directive to the deployed API origin when the host is known.
+
+The connection is implemented and can be tested locally. A persistent production
+watcher/API host is still required before real data updates continuously.
+Vercel serves the viewer and commands; SQLite stays on the worker. `/ticket ping`
+still checks only the command endpoint. No paid host is provisioned by this change.

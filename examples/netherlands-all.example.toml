@@ -1,14 +1,14 @@
 # Copy this file to config.nl.local.toml at the repository root.
 # Supply TICKETMASTER_API_KEY and DISCORD_BOT_TOKEN privately in the environment.
 # This selects all artists returned for NL, not a handpicked artist list.
-# Discovery coverage is bounded: 100 events/page, at most 10 pages/query and
-# 1,000 retained events. Incomplete scans/caps are reported by the catalog command;
-# they do NOT establish exhaustive Ticketmaster.nl coverage. Exhaustive country
-# discovery needs date/location partitioning beyond this initial bounded query.
+# Country Discovery uses resumable date windows, splitting saturated queries.
+# Scope is 730 days from the current UTC day; undated/TBA events and later dates
+# are not covered. Each query still has a 1,000-result ceiling. Same-time
+# saturation, budgets, 10,000 retained events and byte limits remain explicit.
 # The source's public-sale/presale schedules are metadata, never available stock.
-# No priority inventory scheduler or automatic multi-channel routing is enabled
-# by this configuration. With a 60s host interval, 1,000 event pages can take over
-# 16 hours per sweep; a 60s event interval is not a per-event freshness promise.
+# Automatic multi-channel routing is not enabled by this configuration.
+# With a 60s host interval, 1,000 event pages can take over 16 hours per sweep;
+# priority selection does not make a 60s interval a per-event freshness promise.
 database = "data/ticket-nl.sqlite"
 per_host_interval_secs = 60
 blocked_retry_secs = 900
@@ -17,9 +17,12 @@ max_in_flight = 2
 
 [catalog]
 refresh_interval_secs = 900
-max_requests_per_refresh = 10
+max_requests_per_refresh = 40
 max_requests_per_day = 4000
-max_events = 1000
+max_events = 10000
+country_partitioning = true
+country_horizon_days = 730
+country_window_days = 30
 
 [browser]
 script = "browser/worker.cjs"

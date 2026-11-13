@@ -289,6 +289,47 @@ test('prepare selects native controls online without Find and one durable-token 
   });
 });
 
+test('commit-bound adjacency diagnoses split requests without confirming seats or replaying actions', { skip: !enabled }, async () => {
+  // Reviewed public SDK query; only synthetic request values are observed below.
+  const query = "mutation GCOReserve ( $ totalReservationAmount : MonetaryAmountInput $ eventId : UniversalEventId $ systemEventId : SystemEventId $ reservations : [ Reservation ] $ passwordToken : PasswordToken $ cartId : SystemCartId $ queryParams : QueryParams $ requiresConfirmation : Boolean $ membershipSessionId : MembershipSessionId $ clubSiteId : String $ referrerSource : String ) { reserveTickets ( reservationRequest : { referrerSource : $ referrerSource totalReservationAmount : $ totalReservationAmount eventReservations : [ { eventId : $ eventId systemEventId : $ systemEventId reservations : $ reservations passwordToken : $ passwordToken cartId : $ cartId membershipSessionId : $ membershipSessionId clubSiteId : $ clubSiteId } ] requiresConfirmation : $ requiresConfirmation queryParams : $ queryParams } ) { ... on SuccessfulReservationResponse { __typename ... GcoReserveSuccessfulResponseFragment } ... on PollingReservationResponse { __typename ... GcoReservePollingResponseFragment } ... on SuccessfulProvisionalReservationResponse { __typename ... GcoSuccessfulProvisionalReservationResponseFragment } } } fragment GcoReserveSuccessfulResponseFragment on SuccessfulReservationResponse { accessTokenValid checkoutUrl expiresAt sessionId } fragment GcoReservePollingResponseFragment on PollingReservationResponse { pollingKey } fragment GcoSuccessfulProvisionalReservationResponseFragment on SuccessfulProvisionalReservationResponse { sessionId expiresAt tickets { id ids eventId description isExactMatch ticketUnitPrice { amount currencyCode } quantity seats { section row seat isGeneralAdmission seatInfos { type info } } } }";
+  for (const required of [true, false, undefined]) await withSession(async (session, calls) => {
+    const { preflight } = await session.prepare();
+    const command = { attempt_id: 'adjacency', dispatch_token: 'adjacency', preflight_id: preflight.preflight_id,
+      ...(required === undefined ? {} : { adjacent_required: required }) };
+    for (const invalid of [null, 'true', 1, {}]) {
+      await assert.rejects(session.commit({ ...command, adjacent_required: invalid }), /invalid_commit/);
+      assert.equal(session.spent, false);
+      assert.equal(calls(), 0);
+    }
+    const result = await session.commit(command);
+    assert.equal(result.outcome.kind, 'uncertain');
+    assert.equal(calls(), 1);
+    // Exercise the actual ledger created by commit, without additional browser
+    // requests, seat clicks or reservation actions. These are diagnostic inputs.
+    for (const acceptSplit of [true, false]) {
+      const body = { operationName: 'GCOReserve', query, variables: {
+        systemEventId: eventId, eventId: 'synthetic-event',
+        reservations: [{ acceptSplit, areaIds: ['4P'], priceLevelIds: ['6'],
+          offers: [{ offerType: 'TICKET', id: '2', quantity: 2 }] }],
+      } };
+      const nativeRequest = { url: () => 'https://checkout.prod.ticketmaster.cz/graphql',
+        method: () => 'POST', postData: () => JSON.stringify(body) };
+      const requestId = session.requestLedger.observeRequest(nativeRequest);
+      assert.ok(requestId);
+      const record = session.requestLedger.snapshot().records.find(item => item.request_id === requestId);
+      assert.equal(record.evidence_scope, 'diagnostic_only');
+      assert.equal(record.selection.groups[0].accept_split, acceptSplit);
+      assert.equal(record.selection.groups[0].adjacent_request_conflict,
+        required === undefined ? null : required && acceptSplit);
+      assert.equal(record.selection.groups[0].adjacency_verified, false);
+    }
+    await assert.rejects(session.commit({ ...command, adjacent_required: required !== true }), /invalid_commit/);
+    assert.equal(calls(), 1);
+    assert.equal(await session.page.locator('body').getAttribute('data-reserve-clicks'), '1');
+    assert.equal(await session.page.locator('body').getAttribute('data-seat-clicks'), '0');
+  });
+});
+
 test('stale or changed form never clicks Find, and consumed failed dispatch cannot retry', { skip: !enabled }, async () => {
   await withSession(async (session, calls) => {
     const { preflight } = await session.prepare();

@@ -84,10 +84,14 @@ Use the current Rust source for Netherlands overview inspection:
   --geometry-svg captures/maps/gelredome-sections.svg
 ```
 
-The output path must be new. Missing geometry remains explicit. Section opening,
-seat hover, scheduled section scans and carting still require the separately
-validated Czech implementation; Netherlands support here is for overview maps
-and ticket-display extraction. Colors, section counts and repeated labels do not
+The output path must be new. Missing geometry remains explicit. A
+[Dutch section/seat inspector](netherlands-seat-validation.md) was added
+on 13 November. Ordinary headed checks validated one explicit primary quote at
+GelreDome and one resale quote at Ziggo Dome after fixing observed Dutch tooltip
+and skybox formats. Its results are explicitly marked
+`limited_live_validation`; three earlier headless checks returned HTTP403.
+Scheduled section scans and carting still require
+the separately validated Czech implementation. Colors, section counts and repeated labels do not
 establish ticket availability, quantities or adjacency. The Android APK is
 unchanged. See the [artist coverage report](coverage-2026-11-10.md) for the full
 audit and validation results.

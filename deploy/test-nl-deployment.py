@@ -39,7 +39,9 @@ class NetherlandsDeployment(unittest.TestCase):
     def test_prepared_scope_is_netherlands_only_and_inactive(self):
         config = tomllib.loads((DEPLOY / "nl-service.example.toml").read_text())
         self.assertEqual(config["database"], "/var/lib/ticket-watch-nl/ticket.sqlite")
-        self.assertEqual(config["catalog"]["max_events"], 1000)
+        self.assertEqual(config["catalog"]["max_events"], 10000)
+        self.assertTrue(config["catalog"]["country_partitioning"])
+        self.assertEqual(config["catalog"]["country_horizon_days"], 730)
         self.assertEqual(config["per_host_interval_secs"], 60)
         self.assertEqual(len(config["subscriptions"]), 1)
         subscription = config["subscriptions"][0]
@@ -93,7 +95,8 @@ class NetherlandsDeployment(unittest.TestCase):
             )
             target.write_text(text)
             result = subprocess.run([verifier, "verify", str(target)], capture_output=True, text=True)
-            if "Failed to create directory '/run/systemd/': Read-only file system" in result.stderr:
+            if any(f"Failed to create directory '/run/systemd/': {reason}" in result.stderr
+                   for reason in ["Read-only file system", "Permission denied"]):
                 self.skipTest("sandbox prevents systemd-analyze runtime initialization; syntax requires target-host verification")
             self.assertEqual(result.returncode, 0, result.stderr)
 

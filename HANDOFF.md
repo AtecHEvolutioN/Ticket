@@ -1,12 +1,16 @@
-# Ticket Watch handoff — 10 November 2026
+# Ticket Watch handoff — 13 November 2026
 
 ## Current goal and stopping point
 
 Build a fast Ticketmaster monitor with Discord availability/asking-price alerts,
 history charts and eventually verified carting. The latest scope is **all artists
 and returned event types on Ticketmaster.nl**, across Dutch cities/venues. The
-user chose an **always-on server**, then asked to finish, commit to GitHub and
-write this handoff. **No paid server has been created or purchased.**
+user chose an **always-on server**, then requested broader/faster discovery,
+authenticated live charts and Dutch seat/cart validation. **No paid server has
+been created or purchased.** Latest changes implement date partitions, priority
+scheduling, read-only chart connections and limited Dutch seat extraction.
+Two headed Dutch seat checks validated explicit primary/resale quotes; three
+headless reads returned HTTP403. No Dutch reservation has been attempted.
 
 Do not infer an actual sale price from an asking price, a disappearing listing,
 or a seat becoming unobservable. Track those as observations. Confirmed sales
@@ -29,9 +33,10 @@ quotes are validated; map colors alone do not prove inventory or sales.
   this project despite team authorization; do not repeat that authorization
   blindly. Four non-secret Discord settings are in `apps/discord/vercel.json`.
 
-The viewer/assets and health endpoint were verified HTTP200. Health reports
+The prior viewer/assets and health endpoint were verified HTTP200. Health reports
 `configured` with `watcher_status: unverified`. The viewer reads JSON files
-locally or embedded standalone HTML; it has **no live database connection**.
+locally or embedded standalone HTML, and now supports an operator-configured
+authenticated live endpoint. **No production worker/API endpoint is connected.**
 Its built-in demo is explicitly synthetic. `/ticket ping`, `/ticket help` and
 `/ticket chart` are registered; command success is not watcher readiness.
 
@@ -101,17 +106,44 @@ catalog announcements, presale timers or live chart publishing.
   public-sale/presale metadata. A capped/resumed/failed scan remains explicitly
   incomplete; it must not silently evict unseen cached matches.
 
-**Scale limits:** the initial query covers at most ten 100-event pages and the
-example retains at most 1,000 events. This is not exhaustive NL coverage. The
-current conservative 60-second host interval could take over 16 hours for a
-1,000-event sweep. A one-second country-wide detection claim is not justified.
-Date/location partitioning, priority scheduling and measured capacity remain work.
+**Broader discovery:** [dated partitions](docs/discovery-partitions.md) split
+saturated country searches, persist window/page cursors and preserve cached
+matches during partial scans. NL examples cover a 730-day dated horizon and
+retain up to 10,000 events. Each query still stops at ten 100-event pages.
+One-second wire overlap protects date boundaries. TBA/TBD/undated events,
+out-of-horizon dates, saturated one-second windows and budget/storage limits
+remain explicit gaps. Completion refers only to the configured dated scope.
+
+**Priority and timing:** [scheduling](docs/scheduling.md) favors sale windows,
+recent changes and manual watches, with every-fourth-dispatch oldest-due fairness.
+Host pacing, cooldowns and concurrency limits are unchanged. Runtime reports
+show backlog, blocked/unknown reads, clock-invalid timestamps and rolling
+fetch/parse/storage timing percentiles. Delivery logs separately measure dispatch
+to response and second-resolution observation-age bounds. None measures an
+unknown upstream stock-change time. A 60-second host interval still means over
+16 hours for a 1,000-event sweep; one-second country-wide detection is not proven.
+
+**Live chart connection:** [the history API](docs/live-history-api.md) uses fixed
+existing database paths, a separate bearer token, exact CORS origins, loopback
+binding and the read-only Rust exporter. Exports are bounded, serialized and
+cancelled on timeout/disconnect. The viewer keeps the token only in memory and
+preserves selections while refreshing. Errors retain the last good snapshot
+with stale/error status. Production still needs the host, private token, TLS
+reverse proxy and actual-host read-only WAL validation.
 
 **Netherlands limits:** tested support includes metadata, displayed category
-prices, some explicit resale listings and overview maps. Dutch section/seat
-hovering and carting remain unvalidated. The new per-seat history uses the
-validated Czech extraction path; it does not make Dutch seat extraction work.
-See [the NL audit](docs/netherlands-mapping.md).
+prices, some explicit resale listings and overview maps. Guarded read-only
+section/seat hovering now has **limited live validation**: Monster Jam at GelreDome
+exposed primary section101/row11/seat213 at EUR89.95; New Wave at Ziggo Dome exposed
+resale section209/row8/seat292 at EUR73.90. These were ordinary headed Chromium
+checks followed by Rust validation. Three headless reads returned HTTP403;
+unattended access still needs a host test. Fees, stock, adjacency and presale
+eligibility remain unknown. No seats were selected or reserved. Dutch automatic
+section scans and carting remain disabled. The cart request diagnostic receives the user's actual
+adjacency preference from the durable dispatch binding; it does not manufacture
+proof of adjacent seats or a successful hold.
+See [the NL audit](docs/netherlands-mapping.md) and
+[live seat evidence](docs/netherlands-seat-validation.md).
 
 ## Always-on server preparation
 
@@ -147,16 +179,21 @@ paste keys into chat or copy credentials into Git/public logs.
 
 ## Verification completed
 
-- Rust: **546 tests passed**; formatting, Clippy `--all-targets -D warnings` and
+- Rust: **584 tests passed**; formatting, Clippy `--all-targets -D warnings` and
   optimized release build passed.
-- Discord/scripts/viewer: **65 tests passed**.
-- New real-Chromium regression passed: SVG visibility, candles, mobile layout,
-  safe imports and empty-file reset, with no external requests.
+- Discord/scripts/viewer/history API: **85 tests passed**.
+- Full local Chromium suite: **169 tests passed**, including authenticated live
+  chart transport, mobile layout, native-cart diagnostics and offline parsing.
+- Real SQLite WAL writer → release exporter → authenticated API → Chromium
+  refresh passed with synthetic data. A committed new price appeared while the
+  selected series remained selected. Invalid auth was rejected; no token was
+  written into URL/storage/cookies. Standalone embedded HTML retained its
+  no-network policy (served on loopback because managed Chrome blocks file URLs).
 - Offline parser → SQLite → JSON/HTML → Chromium rehearsal passed with 361
   synthetic samples, separate primary/resale/unknown series and 15 gap markers.
   Standalone export, final responsive resize and invalid-file rejection passed.
-- Feature CI [42857781689](https://github.com/AtecHEvolutioN/Ticket/actions/runs/42857781689)
-  passed both jobs, including the full existing browser suite.
+- Previous feature CI [42857781689](https://github.com/AtecHEvolutioN/Ticket/actions/runs/42857781689)
+  passed both jobs. Check the newest commit's GitHub run for this revision's result.
 - NL preparation: six checks passed, one explicit systemd-runtime check skipped
   because of the sandbox; no real host install/start was tested.
 - Linux bundle: archive and per-file checksums, service-readable permissions and
@@ -176,15 +213,19 @@ built local worker bundle is not automatically a published GitHub Release.
    status, original/resale observations, price changes and event updates. Keep
    unknown provenance out of primary/resale-only channels; do not duplicate nine
    independent scrapers. Preserve outbox identity, cooldowns and deduplication.
-3. Partition all-artist discovery beyond the deep-page ceiling; add inventory
-   priorities for imminent onsales/recent changes and report freshness/coverage.
+3. Validate the partitioned catalog and priority scheduler on the actual account
+   and host. Measure freshness/latency under real pacing and coverage gaps. Expand
+   undated discovery separately if required; do not imply exhaustive coverage.
 4. Run a measured preview/soak, verify delivery to the intended routes, then enable
    startup at boot. Check restart/stop behavior, disk growth, consistent SQLite
    backup/restore and off-host backup. No scheduled backups are configured yet.
-5. Add an authenticated read-only history interface for live charts. Keep private
-   watchlists/session data out of public Vercel storage and URLs.
-6. Validate Dutch seat extraction separately before displaying per-seat stock or
-   attempting carts. Actual transactions require separate verified receipts and
+5. Install the read-only history service, private token and HTTPS reverse proxy.
+   Verify the real watcher update reaches a chart and that no credentials appear
+   in URLs/logs. Keep SQLite and private state off public Vercel storage.
+6. Broaden Dutch seat validation before claiming general coverage or per-seat
+   purchasable stock. A Dutch live cart test still needs an event URL and maximum total
+   EUR including fees (default two adjacent tickets); user clarification is pending.
+   Actual transactions require separate verified receipts and
    accounting; listing churn is not a completed-sale ledger.
 
 ## Preserve these existing boundaries

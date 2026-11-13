@@ -650,7 +650,8 @@ class NativeCartSession {
   async commitOnce(command) {
     if (!command || !applicationId(command.attempt_id) || command.dispatch_token !== command.attempt_id
         || this.spent || !this.connected || this.state !== 'prepared' || !this.preflight
-        || command.preflight_id !== this.preflight.preflight_id) throw failure('invalid_commit');
+        || command.preflight_id !== this.preflight.preflight_id
+        || (Object.hasOwn(command, 'adjacent_required') && typeof command.adjacent_required !== 'boolean')) throw failure('invalid_commit');
     if (typeof this.checkoutNavigationPolicy !== 'function') throw failure('checkout_policy_unavailable');
     if (Date.now() >= this.preflight.config_expires_at_ms) throw failure('preflight_expired');
     // Consume permission BEFORE even preparing the click. A timeout or document
@@ -671,7 +672,10 @@ class NativeCartSession {
         if (!this.connected || Date.now() >= this.dispatchPreflight.config_expires_at_ms) throw failure('preflight_expired');
         this.requestLedger = new PassiveNativeRequestLedger({ eventUrl: this.request.event_url,
           sourceDocumentId: this.documentId, expectedSelection: { quantity: this.request.quantity,
-            categoryId: this.request.category_id, priceId: this.request.price_id, sectionIds: this.driver.effectiveSections },
+            categoryId: this.request.category_id, priceId: this.request.price_id, sectionIds: this.driver.effectiveSections,
+            // This is the controller's dispatch-bound preference, not proof of
+            // adjacent seats. Legacy callers lacking it retain an unknown check.
+            ...(Object.hasOwn(command, 'adjacent_required') ? { adjacentRequired: command.adjacent_required } : {}) },
           onRecord: record => this.enqueueEvidence('request-ledger', record) });
         this.requestLedger.arm({ attemptId: this.attemptId, clickedAtMs: Date.now(), monotonicMs: performance.now() });
         this.findClickAttempted = true;
@@ -890,7 +894,7 @@ async function main() {
         if (!command || !finiteInteger(command.id, 1, Number.MAX_SAFE_INTEGER)
             || !['prepare', 'refresh', 'resume_preparation', 'commit', 'observe', 'close'].includes(command.op)) throw failure('invalid_request');
         const keys = { prepare: ['id', 'op', 'request'], refresh: ['id', 'op'], resume_preparation: ['id', 'op'],
-          commit: ['id', 'op', 'attempt_id', 'preflight_id', 'dispatch_token'],
+          commit: ['id', 'op', 'attempt_id', 'preflight_id', 'dispatch_token', 'adjacent_required'],
           observe: ['id', 'op', 'attempt_id'], close: ['id', 'op'] }[command.op];
         if (Object.keys(command).some(key => !keys.includes(key))) throw failure('invalid_request');
         if (command.op === 'close') {

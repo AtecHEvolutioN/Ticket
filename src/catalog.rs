@@ -9,10 +9,11 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 const REFRESH_SCOPE: &str = "catalog:refresh";
 const API_SCOPE: &str = "discovery:api";
+const MAX_COUNTRY_WINDOWS: usize = 8192;
 fn now() -> i64 {
     chrono::Utc::now().timestamp()
 }
@@ -36,6 +37,94 @@ pub struct Selection {
     /// selected events to the configured storage/monitoring capacity.
     #[serde(default)]
     pub scan_capacity_limited: bool,
+    /// A bounded country scan keeps its pending date windows across restarts.
+    /// Completion describes this dated horizon only, never undated/TBA events.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub country_scan: Option<CountryScan>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DateWindow {
+    pub start: i64,
+    pub end: i64,
+    pub page: u32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CountryScan {
+    pub start: i64,
+    pub end: i64,
+    pub pending: VecDeque<DateWindow>,
+    pub created_windows: usize,
+    pub completed_windows: usize,
+    pub incomplete_windows: usize,
+}
+
+impl CountryScan {
+    fn new(at: i64, horizon_days: u32, window_days: u32) -> Result<Self> {
+        anyhow::ensure!(
+            (1..=3650).contains(&horizon_days)
+                && (1..=365).contains(&window_days)
+                && window_days <= horizon_days,
+            "Country scan requires a bounded nonzero horizon and window"
+        );
+        let start = at.div_euclid(86_400) * 86_400;
+        let end = start + i64::from(horizon_days) * 86_400 - 1;
+        let mut pending = VecDeque::new();
+        let mut next = start;
+        while next <= end {
+            let window_end = (next + i64::from(window_days) * 86_400 - 1).min(end);
+            pending.push_back(DateWindow {
+                start: next,
+                end: window_end,
+                page: 0,
+            });
+            next = window_end + 1;
+        }
+        Ok(Self {
+            start,
+            end,
+            created_windows: pending.len(),
+            pending,
+            completed_windows: 0,
+            incomplete_windows: 0,
+        })
+    }
+
+    fn valid(&self) -> bool {
+        self.start <= self.end
+            && self.end.saturating_sub(self.start) < 3651 * 86_400
+            && self.created_windows <= MAX_COUNTRY_WINDOWS
+            && self.completed_windows <= self.created_windows
+            && self.incomplete_windows <= self.created_windows
+            && self.pending.len() <= self.created_windows
+            && self.pending.iter().all(|window| {
+                window.start >= self.start
+                    && window.end <= self.end
+                    && window.start <= window.end
+                    && window.page < 10
+            })
+    }
+
+    fn split_or_skip(&mut self) {
+        let window = self.pending.pop_front().expect("active date window");
+        if window.start == window.end || self.created_windows + 2 > MAX_COUNTRY_WINDOWS {
+            self.incomplete_windows += 1;
+            return;
+        }
+        let middle = window.start + (window.end - window.start) / 2;
+        self.pending.push_front(DateWindow {
+            start: middle + 1,
+            end: window.end,
+            page: 0,
+        });
+        self.pending.push_front(DateWindow {
+            start: window.start,
+            end: middle,
+            page: 0,
+        });
+        self.created_windows += 2;
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -50,14 +139,25 @@ pub struct Snapshot {
 }
 
 pub fn fingerprint(config: &Config) -> Result<String> {
-    Ok(format!(
-        "{:x}",
-        Sha256::digest(serde_json::to_vec(&(
-            &config.subscriptions,
-            &config.profiles,
-            config.catalog.max_events,
-        ))?)
-    ))
+    // Keep old fingerprints byte-for-byte when partitioning is inactive.
+    let legacy = serde_json::to_vec(&(
+        &config.subscriptions,
+        &config.profiles,
+        config.catalog.max_events,
+    ))?;
+    let bytes = if config.catalog.country_partitioning
+        && config.subscriptions.iter().any(|s| s.all_artists)
+    {
+        serde_json::to_vec(&(
+            legacy,
+            "country-date-partitions-v1",
+            config.catalog.country_horizon_days,
+            config.catalog.country_window_days,
+        ))?
+    } else {
+        legacy
+    };
+    Ok(format!("{:x}", Sha256::digest(bytes)))
 }
 
 pub fn decode(config: &Config, value: Option<Value>) -> Result<Snapshot> {
@@ -106,6 +206,13 @@ pub trait Source: Send {
         subscription: &Subscription,
         page: u32,
     ) -> impl std::future::Future<Output = Result<Value>> + Send;
+    fn window_page(
+        &mut self,
+        _subscription: &Subscription,
+        _window: &DateWindow,
+    ) -> impl std::future::Future<Output = Result<Value>> + Send {
+        async { bail!("This Discovery source does not support bounded country date windows") }
+    }
     fn cooldown_until(&self) -> Option<i64> {
         None
     }
@@ -114,6 +221,18 @@ pub trait Source: Send {
     }
 }
 impl Source for Discovery {
+    async fn window_page(&mut self, s: &Subscription, window: &DateWindow) -> Result<Value> {
+        self.events_country_window_page(
+            s.country
+                .as_deref()
+                .context("Country window requires a country")?,
+            s.city.as_deref(),
+            window.page,
+            window.start,
+            window.end,
+        )
+        .await
+    }
     async fn page(&mut self, s: &Subscription, page: u32) -> Result<Value> {
         if s.all_artists {
             return self
@@ -224,11 +343,30 @@ pub async fn refresh<S: Source>(config: &Config, db: &Db, source: &mut S) -> Res
             id: sub.id.clone(),
             ..Selection::default()
         });
-        if selection.next_page >= 10 {
+        let partitioned = sub.all_artists && config.catalog.country_partitioning;
+        if partitioned {
+            let restart = selection
+                .country_scan
+                .as_ref()
+                .is_none_or(|scan| scan.pending.is_empty() || !scan.valid());
+            if restart {
+                selection.country_scan = Some(CountryScan::new(
+                    at,
+                    config.catalog.country_horizon_days,
+                    config.catalog.country_window_days,
+                )?);
+                selection.scan_watch_ids.clear();
+                selection.scan_capacity_limited = false;
+            }
             selection.next_page = 0;
-            selection.scan_watch_ids.clear();
+        } else {
+            selection.country_scan = None;
+            if selection.next_page >= 10 {
+                selection.next_page = 0;
+                selection.scan_watch_ids.clear();
+            }
         }
-        if selection.next_page == 0 {
+        if !partitioned && selection.next_page == 0 {
             selection.scan_watch_ids.clear();
             selection.scan_capacity_limited = false;
         }
@@ -240,6 +378,9 @@ pub async fn refresh<S: Source>(config: &Config, db: &Db, source: &mut S) -> Res
                 "Country scope {} has no artist filter. Coverage refers to returned Discovery metadata, not every website listing or verified ticket inventory.",
                 sub.country.as_deref().unwrap_or("unknown")
             ));
+            if let Some(scan) = &selection.country_scan {
+                notes.push(format!("Dated country scope: UTC {} through {} (inclusive). Undated/TBA events and dates outside this horizon are not covered; completion refers only to this bounded scope. Unseen cached events are preserved.", scan.start, scan.end));
+            }
         }
         let mut skipped = Vec::new();
         let mut observed = false;
@@ -269,7 +410,16 @@ pub async fn refresh<S: Source>(config: &Config, db: &Db, source: &mut S) -> Res
                 break;
             }
             snapshot.requests_attempted += 1;
-            let result = source.page(sub, page).await;
+            let window = selection
+                .country_scan
+                .as_ref()
+                .and_then(|scan| scan.pending.front())
+                .cloned();
+            let result = if let Some(window) = &window {
+                source.window_page(sub, window).await
+            } else {
+                source.page(sub, page).await
+            };
             save_backoff(source, db).await?;
             let response = match result {
                 Ok(value) => value,
@@ -282,6 +432,21 @@ pub async fn refresh<S: Source>(config: &Config, db: &Db, source: &mut S) -> Res
                 notes.push("Discovery response has no event array; retained cached matches".into());
                 break;
             };
+            if partitioned
+                && (items.len() > 100
+                    || response
+                        .pointer("/page/number")
+                        .and_then(Value::as_u64)
+                        .is_some_and(|number| {
+                            Some(number) != window.as_ref().map(|w| u64::from(w.page))
+                        }))
+            {
+                notes.push(
+                    "Invalid country-window page envelope; retained cached matches and cursor"
+                        .into(),
+                );
+                break;
+            }
             observed = true;
             let events: Vec<_> = items.iter().take(100).cloned().collect();
             let plan = hybrid::plan(sub, profile, &events);
@@ -291,19 +456,45 @@ pub async fn refresh<S: Source>(config: &Config, db: &Db, source: &mut S) -> Res
                 .iter()
                 .filter_map(|w| hybrid::canonical_event_url(&w.url).ok())
                 .collect();
-            for watch in plan.watches {
-                if !selection.scan_watch_ids.contains(&watch.id) {
-                    selection.scan_watch_ids.push(watch.id.clone());
+            // Merge once per page: parsing every cached URL for every incoming
+            // event becomes quadratic as country catalogs grow beyond 1,000.
+            let incoming_ids: HashSet<_> = plan.watches.iter().map(|w| w.id.as_str()).collect();
+            selection
+                .watches
+                .retain(|old| !incoming_ids.contains(old.id.as_str()));
+            if !partitioned {
+                let mut scan_ids: HashSet<_> = selection.scan_watch_ids.iter().cloned().collect();
+                for watch in &plan.watches {
+                    if scan_ids.insert(watch.id.clone()) {
+                        selection.scan_watch_ids.push(watch.id.clone());
+                    }
                 }
-                selection.watches.retain(|old| old.id != watch.id);
-                selection.watches.push(watch);
             }
-            for event in events.iter().filter(|event| {
-                event["url"]
+            selection.watches.extend(plan.watches);
+            let selected_events: Vec<_> = events
+                .iter()
+                .filter(|event| {
+                    event["url"]
+                        .as_str()
+                        .and_then(|url| hybrid::canonical_event_url(url).ok())
+                        .is_some_and(|url| selected.contains(&url))
+                })
+                .collect();
+            let incoming_event_ids: HashSet<_> = selected_events
+                .iter()
+                .filter_map(|event| event["id"].as_str())
+                .collect();
+            selection.metadata.retain(|old| {
+                !old["id"]
                     .as_str()
-                    .and_then(|url| hybrid::canonical_event_url(url).ok())
-                    .is_some_and(|url| selected.contains(&url))
-            }) {
+                    .is_some_and(|id| incoming_event_ids.contains(id))
+                    && !old["url"]
+                        .as_str()
+                        .and_then(|url| hybrid::canonical_event_url(url).ok())
+                        .is_some_and(|url| selected.contains(&url))
+            });
+            let mut new_metadata: Vec<Value> = Vec::new();
+            for event in selected_events {
                 let mut item = metadata(event);
                 let venue_event = event.clone();
                 match db.call(move |s| s.venue_register_event(&venue_event)).await {
@@ -317,23 +508,62 @@ pub async fn refresh<S: Source>(config: &Config, db: &Db, source: &mut S) -> Res
                 let identity = item["url"]
                     .as_str()
                     .and_then(|url| hybrid::canonical_event_url(url).ok());
-                selection.metadata.retain(|old| {
+                new_metadata.retain(|old| {
                     old["id"] != item["id"]
                         && old["url"]
                             .as_str()
                             .and_then(|url| hybrid::canonical_event_url(url).ok())
                             != identity
                 });
-                selection.metadata.push(item);
+                new_metadata.push(item);
             }
+            selection.metadata.extend(new_metadata);
             skipped.extend(plan.skipped);
+            if let Some(window) = window {
+                let scan = selection.country_scan.as_mut().expect("partitioned scan");
+                let saturated = response
+                    .pointer("/page/total_elements")
+                    .and_then(Value::as_u64)
+                    .is_some_and(|n| n > 1000)
+                    || response
+                        .pointer("/page/total_pages")
+                        .and_then(Value::as_u64)
+                        .is_some_and(|n| n > 10)
+                    || response["deep_paging_limit_reached"].as_bool() == Some(true)
+                    || (window.page == 9 && response["has_more"].as_bool() == Some(true));
+                if saturated {
+                    scan.split_or_skip();
+                } else if response["has_more"].as_bool() == Some(false) {
+                    scan.pending.pop_front();
+                    scan.completed_windows += 1;
+                } else if response["has_more"].as_bool() == Some(true)
+                    && window.page < 9
+                    && response["next_page"].as_u64() == Some(u64::from(window.page) + 1)
+                {
+                    scan.pending.front_mut().expect("active date window").page += 1;
+                } else {
+                    notes.push("Country-window pagination is incomplete or invalid; retained cached matches and cursor".into());
+                    break;
+                }
+                if scan.pending.is_empty() {
+                    complete = scan.incomplete_windows == 0 && !selection.scan_capacity_limited;
+                    // A dated horizon is not an absence proof for cached events
+                    // moved outside it or marked TBA. Only explicit retirement
+                    // evidence above can remove those watches.
+                    selection.scan_watch_ids.clear();
+                    break;
+                }
+                continue;
+            }
             if response["has_more"].as_bool() == Some(false) && items.len() <= 100 {
                 // Absence only retires a watch after every page in this scan has succeeded,
                 // including earlier pages persisted by preceding refreshes.
                 let accepted: HashSet<_> = selection.scan_watch_ids.iter().collect();
-                selection
-                    .watches
-                    .retain(|watch| accepted.contains(&watch.id));
+                if !selection.scan_capacity_limited {
+                    selection
+                        .watches
+                        .retain(|watch| accepted.contains(&watch.id));
+                }
                 selection.next_page = 0;
                 selection.scan_watch_ids.clear();
                 complete = !selection.scan_capacity_limited;
@@ -357,6 +587,15 @@ pub async fn refresh<S: Source>(config: &Config, db: &Db, source: &mut S) -> Res
             }
             page += 1;
             selection.next_page = page;
+        }
+        if let Some(scan) = &selection.country_scan {
+            notes.push(format!("Country date windows: {} completed, {} pending, {} incomplete; {} created (limit {}).", scan.completed_windows, scan.pending.len(), scan.incomplete_windows, scan.created_windows, MAX_COUNTRY_WINDOWS));
+            if scan.incomplete_windows > 0 {
+                notes.push("Country coverage is incomplete: at least one saturated one-second window or partition-count limit could not be exhausted. Cached matches were retained; date partitioning cannot enumerate more than 1,000 events sharing the same timestamp.".into());
+            }
+            if selection.scan_capacity_limited {
+                notes.push("This dated scan reached the configured event/storage capacity; coverage remains incomplete until a new scan can retain its matches.".into());
+            }
         }
         selection.complete = complete;
         selection.notes = notes;
@@ -465,6 +704,8 @@ fn bound_snapshot(snapshot: &mut Snapshot) -> Result<()> {
             selection.complete = false;
             selection.next_page = 0;
             selection.scan_watch_ids.clear();
+            selection.country_scan = None;
+            selection.scan_capacity_limited = true;
             selection.notes = vec![
                 "Catalog storage limit reached; watch coverage is incomplete and scan will restart"
                     .into(),

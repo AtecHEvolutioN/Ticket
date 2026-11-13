@@ -103,6 +103,127 @@
     let parsed; try { parsed = JSON.parse(raw); } catch { fail('This file is not valid JSON. Choose a Ticket Watch history export.'); }
     return validateExport(parsed);
   }
+  function liveEndpoint(value) {
+    if (typeof value !== 'string' || /[\u0000-\u0020\u007f]/.test(value)) fail('Enter the full HTTPS address of your history worker.');
+    let url;
+    try { url = new URL(value); } catch { fail('Enter the full HTTPS address of your history worker.'); }
+    const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+    if (value.length > 2048 || (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback))
+      || url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
+      fail('Use an HTTPS worker address without a path, query or credentials. HTTP is allowed only on localhost.');
+    }
+    return url.origin;
+  }
+  function liveRequestUrl(endpoint, eventUrl, hours, now) {
+    const url = new URL('/api/history', liveEndpoint(endpoint));
+    if (!Number.isSafeInteger(hours) || hours < 1 || hours > 366 * 24) fail('Choose a history window between 1 hour and 366 days.');
+    if (eventUrl) {
+      if (eventUrl.length > 4096 || !safeUrl(eventUrl)) fail('The event filter must be a public HTTPS event URL.');
+      const event = new URL(eventUrl);
+      if (!event.pathname.startsWith('/event/')) fail('The event filter must use a public Ticketmaster /event/ page.');
+      event.search = ''; event.hash = '';
+      url.searchParams.set('event_url', event.href);
+    }
+    url.searchParams.set('from', new Date(now - hours * 3600000).toISOString());
+    url.searchParams.set('to', new Date(now).toISOString());
+    return url.href;
+  }
+  async function readLiveExport(response) {
+    if (!/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') || '')) fail('The worker returned an unsupported response.');
+    const length = Number(response.headers.get('content-length'));
+    if (Number.isFinite(length) && length > MAX_BYTES) fail('History exceeds 16 MiB. Choose a shorter window or one event.');
+    if (!response.body || typeof response.body.getReader !== 'function') fail('Streaming history responses are not supported by this browser.');
+    const reader = response.body.getReader(); const decoder = new TextDecoder('utf-8', { fatal: true });
+    let size = 0; let raw = '';
+    try {
+      for (;;) {
+        const { done, value } = await reader.read(); if (done) break;
+        size += value.byteLength;
+        if (size > MAX_BYTES) fail('History exceeds 16 MiB. Choose a shorter window or one event.');
+        raw += decoder.decode(value, { stream: true });
+      }
+      raw += decoder.decode();
+      return parseExport(raw);
+    } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+  }
+  function createLiveConnection(options) {
+    const fetchHistory = options.fetch || root.fetch.bind(root);
+    const schedule = options.setTimeout || root.setTimeout.bind(root);
+    const unschedule = options.clearTimeout || root.clearTimeout.bind(root);
+    const now = options.now || Date.now;
+    const onState = options.onState || (() => {}); const onData = options.onData || (() => {});
+    let connection = null; let timer = null; let controller = null; let generation = 0;
+    let paused = false; let busy = false; let lastSuccess = null;
+    function report(phase, message) { onState({ phase, message, connected: Boolean(connection), busy, paused, lastSuccess }); }
+    function cancel() {
+      generation += 1;
+      if (timer !== null) unschedule(timer); timer = null;
+      controller?.abort(); controller = null; busy = false;
+    }
+    function disconnect() { cancel(); connection = null; paused = false; report('disconnected', 'Disconnected. The last chart is a snapshot; the access token has been cleared.'); }
+    async function refresh() {
+      if (!connection || paused || busy) return;
+      if (timer !== null) unschedule(timer); timer = null;
+      busy = true; const current = generation; const active = connection;
+      const abort = new AbortController(); controller = abort;
+      const timeout = schedule(() => abort.abort(), 35000); let delay = 30000;
+      report('loading', lastSuccess ? 'Refreshing recorded history…' : 'Connecting to the history worker…');
+      try {
+        const url = liveRequestUrl(active.endpoint, active.eventUrl, active.hours, now());
+        const response = await fetchHistory(url, { method: 'GET', headers: { Authorization: `Bearer ${active.token}`, Accept: 'application/json' },
+          credentials: 'omit', redirect: 'error', cache: 'no-store', referrerPolicy: 'no-referrer', mode: 'cors', signal: abort.signal });
+        if (current !== generation) return;
+        if (response.status === 401 || response.status === 403) {
+          await response.body?.cancel().catch(() => {});
+          cancel(); connection = null; paused = false;
+          report('unauthorized', 'Access rejected. The token was cleared. Enter a valid token and reconnect.'); return;
+        }
+        if (!response.ok) {
+          const retry = Number(response.headers.get('retry-after'));
+          if (response.status === 429 && Number.isFinite(retry) && retry > 0) delay = Math.max(30000, Math.min(3600000, retry * 1000));
+          await response.body?.cancel().catch(() => {});
+          const messages = { 400: 'The worker rejected the history filters.', 404: 'No observations match this event and time range.',
+            413: 'History is too large. Reconnect with one event or a shorter window.', 429: 'The worker is busy; refresh has been delayed.',
+            503: 'The history worker is temporarily unavailable.', 504: 'The history export timed out.' };
+          fail(messages[response.status] || 'The worker could not return history.');
+        }
+        const checked = await readLiveExport(response);
+        if (current !== generation) return;
+        onData(checked.data); lastSuccess = now();
+        report('live', 'Connected. History refreshes every 30 seconds; check each source’s observation time.');
+      } catch (error) {
+        if (current !== generation) return;
+        // Never surface transport/server error text: it can contain addresses,
+        // credentials or untrusted response bodies. Last valid data is retained.
+        const safeMessages = ['The worker rejected the history filters.', 'No observations match this event and time range.',
+          'History is too large. Reconnect with one event or a shorter window.', 'The worker is busy; refresh has been delayed.',
+          'The history worker is temporarily unavailable.', 'The history export timed out.', 'The worker could not return history.',
+          'History exceeds 16 MiB. Choose a shorter window or one event.'];
+        report('error', `${safeMessages.includes(error?.message) ? error.message : 'History refresh failed or returned invalid data. Check the worker, access settings and connection.'} Last valid observations remain a snapshot.`);
+      } finally {
+        unschedule(timeout);
+        abort.abort();
+        if (current === generation) {
+          busy = false; controller = null;
+          if (connection && !paused) timer = schedule(refresh, delay);
+          // Keep the last phase/message while making refresh controls available.
+          options.onIdle?.();
+        }
+      }
+    }
+    function connect(input) {
+      const endpoint = liveEndpoint(input.endpoint);
+      if (typeof input.token !== 'string' || !/^[\x21-\x7e]{32,512}$/.test(input.token)) fail('Enter a read-only token with 32–512 printable characters and no spaces.');
+      const eventUrl = (input.eventUrl || '').trim();
+      liveRequestUrl(endpoint, eventUrl, input.hours, now());
+      cancel(); connection = { endpoint, token: input.token, eventUrl, hours: input.hours };
+      paused = false; lastSuccess = null;
+      void refresh();
+    }
+    function pause() { if (!connection) return; cancel(); paused = true; report('paused', 'Refresh paused. The chart shows the last fetched snapshot.'); }
+    function resume() { if (!connection || !paused) return; paused = false; void refresh(); }
+    return { connect, disconnect, refresh, pause, resume };
+  }
   function minorDigits(currency) {
     if (!currency) return null;
     try {
@@ -191,7 +312,8 @@
     }
     return { schema_version: 1, generated_at: now, events: [{ event_id: 'synthetic-event', event_url: 'https://www.ticketmaster.cz/', name: 'Synthetic concert · demonstration', artist: 'Fictional artist', country: 'CZ', city: 'Example venue', first_observed_at: start, last_observed_at: now, sources: [source] }] };
   }
-  const helpers = { MAX_BYTES, validateExport, parseExport, buildBuckets, bucketWidth, quoteVisible, money, minorDigits, seriesCatalog, demoExport, basisLabel, seatLabel };
+  const helpers = { MAX_BYTES, validateExport, parseExport, buildBuckets, bucketWidth, quoteVisible, money, minorDigits, seriesCatalog, demoExport, basisLabel, seatLabel,
+    liveEndpoint, liveRequestUrl, readLiveExport, createLiveConnection };
   root.TicketHistory = helpers;
   if (typeof module !== 'undefined' && module.exports) module.exports = helpers;
   if (typeof document === 'undefined') return;
@@ -199,40 +321,90 @@
   function boot() {
     const $ = id => document.getElementById(id);
     if (!$('price-chart')) return;
-    const state = { data: null, demo: false, window: 'all', event: null, source: null, series: null, buckets: [], selected: 0 };
+    const state = { data: null, demo: false, mode: 'offline', window: 'all', event: null, source: null, series: null, buckets: [], selected: 0 };
+    let liveState = { phase: 'disconnected', connected: false, busy: false, paused: false, lastSuccess: null };
+    let contentGeneration = 0;
     function set(id, value) { $(id).textContent = value; }
     function option(select, value, label) { const element = document.createElement('option'); element.value = value; element.textContent = label; select.appendChild(element); }
     function clear(select) { select.replaceChildren(); }
     function date(at, short) { return new Date(at * 1000).toLocaleString(undefined, short ? { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' } : { dateStyle: 'medium', timeStyle: 'medium' }); }
-    function age(at) { const seconds = Math.max(0, Math.floor(Date.now() / 1000) - at); return seconds < 60 ? 'less than 1 min old' : seconds < 3600 ? `${Math.floor(seconds / 60)} min old` : seconds < 86400 ? `${Math.floor(seconds / 3600)}h old` : `${Math.floor(seconds / 86400)}d old`; }
+    function age(at) { const seconds = Math.floor(Date.now() / 1000) - at; return seconds < 0 ? 'ahead of this device clock' : seconds < 60 ? 'less than 1 min old' : seconds < 3600 ? `${Math.floor(seconds / 60)} min old` : seconds < 86400 ? `${Math.floor(seconds / 3600)}h old` : `${Math.floor(seconds / 86400)}d old`; }
     function sourceLabel(source) { return `${source.watch_id} · ${source.scope} · ${source.interval_secs ? `${source.interval_secs}s cadence` : 'unscheduled'}`; }
     function seriesLabel(series) { return `${series.ticket_type || 'Ticket type unknown'} · ${series.inventory_kind} · ${series.currency || 'currency unknown'} · ${basisLabel(series)} · ${FEES_LABELS[series.fees]} · ${seatLabel(series) || KIND_LABELS[series.kind]} · ${QUANTITY_LABELS[series.quantity_kind]}`; }
-    function load(data, isDemo, label) {
-      const checked = validateExport(data); state.data = data; state.demo = isDemo;
+    function load(data, isDemo, label, live = false) {
+      const checked = validateExport(data);
+      const selected = live && state.mode === 'live' ? { eventId: state.event?.event_id, sourceId: state.source?.source_id, seriesId: state.series?.series_id } : {};
+      state.data = data; state.demo = isDemo; state.mode = live ? 'live' : isDemo ? 'demo' : 'offline';
       $('error-banner').hidden = true;
-      set('load-status', `${isDemo ? 'SYNTHETIC DEMO — invented prices and counts. ' : ''}${label} · ${data.events.length} events · ${checked.sampleCount.toLocaleString()} observations. File remains on this device.`);
+      set('load-status', `${isDemo ? 'SYNTHETIC DEMO — invented prices and counts. ' : ''}${label} · ${data.events.length} events · ${checked.sampleCount.toLocaleString()} observations. ${live ? 'Recorded history from your connected worker; no ticket purchases are performed.' : 'File remains on this device.'}`);
+      set('data-mode-badge', live ? 'Connected history · read only' : 'Local data · no uploads');
       clear($('event-select'));
       for (const event of data.events) option($('event-select'), event.event_id, `${event.name} · ${[event.city, event.country].filter(Boolean).join(', ')}`);
       $('event-select').disabled = data.events.length === 0;
       if (!data.events.length) { state.event = null; state.source = null; state.series = null; render(); return; }
-      chooseEvent();
+      if (data.events.some(event => event.event_id === selected.eventId)) $('event-select').value = selected.eventId;
+      chooseEvent(selected);
     }
-    function chooseEvent() {
+    function chooseEvent(selected = {}) {
       state.event = state.data.events.find(event => event.event_id === $('event-select').value) || state.data.events[0];
       clear($('source-select'));
       for (const source of state.event.sources) option($('source-select'), source.source_id, sourceLabel(source));
       $('source-select').disabled = !state.event.sources.length;
-      chooseSource();
+      if (state.event.sources.some(source => source.source_id === selected.sourceId)) $('source-select').value = selected.sourceId;
+      chooseSource(selected.seriesId);
     }
-    function chooseSource() {
+    function chooseSource(selectedId) {
       state.source = state.event.sources.find(source => source.source_id === $('source-select').value) || state.event.sources[0] || null;
       clear($('series-select'));
       const catalog = state.source ? seriesCatalog(state.source) : [];
       for (const series of catalog) option($('series-select'), series.series_id, seriesLabel(series));
       $('series-select').disabled = !catalog.length;
-      state.series = catalog[0] || null;
+      state.series = catalog.find(series => series.series_id === selectedId) || catalog[0] || null;
+      if (state.series) $('series-select').value = state.series.series_id;
       render();
     }
+    function snapshotStatus() {
+      if (!state.data || state.demo) {
+        set('snapshot-badge', state.demo ? 'SYNTHETIC DATA' : 'Offline viewer');
+        $('snapshot-badge').className = `status-badge${state.demo ? ' demo' : ''}`; return;
+      }
+      const sourceSample = state.source?.samples[state.source.samples.length - 1];
+      const sourceAt = sourceSample?.observed_at;
+      const freshLimit = Math.max(300, (state.source?.interval_secs || 0) * 3);
+      const current = Math.floor(Date.now() / 1000);
+      const clockInvalid = state.data.generated_at > current || (sourceAt !== undefined && sourceAt > current);
+      const stale = current - state.data.generated_at > freshLimit || sourceAt === undefined || current - sourceAt > freshLimit;
+      if (state.mode !== 'live') {
+        set('snapshot-badge', `${clockInvalid ? 'Snapshot clock mismatch' : stale ? 'Stale snapshot' : 'Export snapshot'} · ${age(state.data.generated_at)}`);
+        $('snapshot-badge').className = `status-badge${stale || clockInvalid ? ' warning' : ''}`; return;
+      }
+      const unavailable = !liveState.connected || liveState.paused || ['error', 'unauthorized'].includes(liveState.phase);
+      const sourceWarning = sourceSample?.availability === 'blocked' || sourceSample?.availability === 'unknown' || sourceSample?.complete === false;
+      const label = !liveState.connected ? 'Disconnected snapshot' : liveState.paused ? 'Paused snapshot'
+        : liveState.phase === 'error' ? 'Refresh failed' : clockInvalid ? 'Connected · clock mismatch' : stale ? 'Connected · source stale'
+          : sourceSample?.availability === 'blocked' ? 'Connected · source blocked'
+            : sourceSample?.availability === 'unknown' ? 'Connected · stock unknown'
+              : sourceSample?.complete === false ? 'Connected · partial snapshot' : 'Connected · source recent';
+      set('snapshot-badge', `${label} · ${sourceAt === undefined ? 'no observations' : age(sourceAt)}`);
+      $('snapshot-badge').className = `status-badge ${unavailable || stale || clockInvalid || sourceWarning ? 'warning' : 'live'}`;
+      set('data-mode-badge', unavailable ? 'Worker snapshot · not updating' : 'Connected history · read only');
+    }
+    function liveControls() {
+      const locked = liveState.connected;
+      for (const id of ['live-endpoint', 'live-event-url', 'live-lookback', 'live-token', 'live-connect']) $(id).disabled = locked;
+      $('live-refresh').disabled = !locked || liveState.paused || liveState.busy;
+      $('live-pause').disabled = !locked;
+      $('live-disconnect').disabled = !locked;
+      set('live-pause', liveState.paused ? 'Resume' : 'Pause');
+      $('live-status').dataset.phase = liveState.phase;
+      if (liveState.message) set('live-status', liveState.message);
+      snapshotStatus();
+    }
+    const live = createLiveConnection({
+      onData: data => load(data, false, 'Worker history', true),
+      onState: value => { liveState = value; liveControls(); },
+      onIdle: () => { liveState.busy = false; liveControls(); },
+    });
     function tag(label, style) { const node = document.createElement('span'); node.className = `tag ${style || ''}`; node.textContent = label; $('series-tags').appendChild(node); }
     function latestQuote() {
       const sample = state.source?.samples[state.source.samples.length - 1];
@@ -257,19 +429,15 @@
         for (const id of ['price-value', 'count-value', 'time-value', 'change-value']) set(id, '—');
         set('price-label', 'Latest observed lowest ask'); set('price-subtitle', 'No data loaded');
         set('count-label', 'Latest observed entries'); set('count-subtitle', 'Not ticket sales');
-        set('time-subtitle', 'No live connection'); $('change-value').className = '';
+        set('time-subtitle', state.mode === 'live' ? 'Waiting for source observations' : 'No live connection'); $('change-value').className = '';
         for (const id of ['source-select', 'series-select']) { clear($(id)); $(id).disabled = true; }
-        $('series-tags').replaceChildren(); set('snapshot-badge', 'Offline viewer'); $('snapshot-badge').className = 'status-badge';
+        $('series-tags').replaceChildren(); snapshotStatus();
         set('chart-caption', 'Asking prices, not completed transactions.'); set('bucket-caption', 'No observations'); return;
       }
       set('event-context', state.demo ? 'SYNTHETIC DEMONSTRATION' : `${event.artist || 'ARTIST UNKNOWN'} / RECORDED HISTORY`);
       set('event-heading', event.name); set('event-location', [event.city, event.country].filter(Boolean).join(' · ') || 'Location unknown');
       const link = safeUrl(event.event_url); $('event-link').hidden = !link || state.demo; if (link) $('event-link').href = link;
-      const freshLimit = Math.max(300, (source?.interval_secs || 0) * 3);
-      const sourceAt = source?.samples[source.samples.length - 1]?.observed_at;
-      const stale = Math.floor(Date.now() / 1000) - state.data.generated_at > freshLimit || (sourceAt !== undefined && Math.floor(Date.now() / 1000) - sourceAt > freshLimit);
-      set('snapshot-badge', state.demo ? 'SYNTHETIC DATA' : `${stale ? 'Stale snapshot' : 'Export snapshot'} · ${age(state.data.generated_at)}`);
-      $('snapshot-badge').className = `status-badge${state.demo ? ' demo' : stale ? ' warning' : ''}`;
+      snapshotStatus();
       $('series-tags').replaceChildren();
       if (!source || !series) {
         for (const id of ['price-value', 'count-value', 'time-value', 'change-value']) set(id, '—');
@@ -379,11 +547,26 @@
     }
     $('history-file').addEventListener('change', async event => {
       const file = event.target.files?.[0]; if (!file) return;
-      try { if (file.size > MAX_BYTES) fail('History files must be 16 MiB or smaller.'); const checked = parseExport(await file.text()); load(checked.data, false, file.name); }
-      catch (error) { set('error-banner', error instanceof Error ? error.message : 'This history file could not be loaded.'); $('error-banner').hidden = false; }
+      live.disconnect(); const current = ++contentGeneration;
+      try { if (file.size > MAX_BYTES) fail('History files must be 16 MiB or smaller.'); const checked = parseExport(await file.text()); if (current === contentGeneration) load(checked.data, false, file.name); }
+      catch (error) { if (current === contentGeneration) { set('error-banner', error instanceof Error ? error.message : 'This history file could not be loaded.'); $('error-banner').hidden = false; } }
       event.target.value = '';
     });
-    $('demo-button').addEventListener('click', () => load(demoExport(Math.floor(Date.now() / 1000)), true, 'Built-in synthetic demonstration'));
+    $('demo-button').addEventListener('click', () => { contentGeneration += 1; live.disconnect(); load(demoExport(Math.floor(Date.now() / 1000)), true, 'Built-in synthetic demonstration'); });
+    $('live-form').addEventListener('submit', event => {
+      event.preventDefault();
+      try {
+        const options = { endpoint: $('live-endpoint').value.trim(), token: $('live-token').value,
+          eventUrl: $('live-event-url').value.trim(), hours: Number($('live-lookback').value) };
+        $('live-token').value = ''; contentGeneration += 1;
+        live.connect(options);
+      } catch (error) { set('live-status', error.message); $('live-status').dataset.phase = 'error'; }
+    });
+    $('live-refresh').addEventListener('click', () => { void live.refresh(); });
+    $('live-pause').addEventListener('click', () => liveState.paused ? live.resume() : live.pause());
+    $('live-disconnect').addEventListener('click', () => live.disconnect());
+    root.addEventListener('pagehide', () => live.disconnect());
+    root.setInterval(snapshotStatus, 30000);
     $('event-select').addEventListener('change', chooseEvent); $('source-select').addEventListener('change', chooseSource);
     $('series-select').addEventListener('change', () => { state.series = seriesCatalog(state.source).find(series => series.series_id === $('series-select').value); render(); });
     $('chart-mode').addEventListener('change', render); $('count-mode').addEventListener('change', render);
@@ -403,6 +586,7 @@
     if (typeof ResizeObserver === 'function') new ResizeObserver(resizeChart).observe($('chart-area'));
     else root.addEventListener('resize', resizeChart);
     const embedded = $('ticket-history-data');
+    $('live-panel').hidden = Boolean(embedded) || root.location.protocol === 'file:';
     if (embedded) { try { load(parseExport(embedded.textContent).data, false, 'Embedded history export'); } catch (error) { set('error-banner', error.message); $('error-banner').hidden = false; } }
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();

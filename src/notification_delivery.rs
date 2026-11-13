@@ -1,7 +1,7 @@
 //! Durable, bounded Discord delivery for the ordinary event monitor.
 //! Polling owns its own task; this module keeps the existing outbox, freshness,
 //! nonce and preview behavior while retaining provider cooldowns across restarts.
-use std::collections::HashSet;
+use std::{collections::HashSet, time::Instant};
 
 use anyhow::{Result, bail};
 
@@ -13,6 +13,50 @@ use crate::{
 
 fn now() -> i64 {
     chrono::Utc::now().timestamp()
+}
+
+/// Observation timestamps have only whole-second precision. Report an interval,
+/// not an invented subsecond stock-change timestamp. Clock-invalid ages stay null.
+fn observation_age_range(observed_at: i64, at_ms: i64) -> Option<(u64, u64)> {
+    if observed_at < 0 || at_ms < 0 {
+        return None;
+    }
+    let beginning = observed_at.checked_mul(1_000)?;
+    let upper = at_ms.checked_sub(beginning)?;
+    if upper < 0 {
+        return None;
+    }
+    Some((upper.saturating_sub(999).max(0) as u64, upper as u64))
+}
+
+fn delivery_timing(
+    alert: &crate::model::PendingAlert,
+    dispatch_at_ms: i64,
+    response_at_ms: i64,
+    send_elapsed_ms: u128,
+    outcome: &str,
+) -> serde_json::Value {
+    let clock_valid = response_at_ms >= dispatch_at_ms;
+    let age = clock_valid
+        .then(|| observation_age_range(alert.payload.observed_at, response_at_ms))
+        .flatten();
+    serde_json::json!({
+        "kind": "discord_delivery_timing",
+        "outbox_id": alert.id,
+        "watch_id": alert.payload.watch_id,
+        "outcome": outcome,
+        "previous_failed_attempts": alert.attempts,
+        "observed_at_seconds": alert.payload.observed_at,
+        "dispatch_started_at_ms": dispatch_at_ms,
+        "response_at_ms": response_at_ms,
+        "send_elapsed_ms": send_elapsed_ms.min(u64::MAX as u128) as u64,
+        "observation_to_response_ms": age.map(|(minimum, maximum)| serde_json::json!({
+            "minimum": minimum, "maximum": maximum
+        })),
+        "acknowledged": outcome == "accepted",
+        "stock_change_time_known": false,
+        "notice": "Observation-to-response includes queue/retry delay and second-resolution observation time; it is not stock-change detection latency."
+    })
 }
 
 fn print_json(value: &impl serde::Serialize) -> Result<()> {
@@ -49,7 +93,27 @@ pub async fn dispatch_batch(
                 break;
             };
             let id = alert.id;
+            let dispatch_at_ms = chrono::Utc::now().timestamp_millis();
+            let send_started = Instant::now();
             let delivered = sender.send(&alert).await;
+            let send_elapsed_ms = send_started.elapsed().as_millis();
+            let response_at_ms = chrono::Utc::now().timestamp_millis();
+            let outcome = match &delivered {
+                Ok(Delivery::Sent { .. }) => "accepted",
+                Ok(Delivery::Retry { .. }) => "retry_or_ambiguous",
+                Ok(Delivery::Permanent { .. }) => "rejected",
+                Err(_) => "error",
+            };
+            eprintln!(
+                "{}",
+                delivery_timing(
+                    &alert,
+                    dispatch_at_ms,
+                    response_at_ms,
+                    send_elapsed_ms,
+                    outcome
+                )
+            );
             // Successful responses can exhaust Discord's bucket too. Persist
             // the limiter before acknowledging a message or returning an error,
             // even when this is the only pending alert. The journal stores whole
@@ -118,6 +182,46 @@ mod tests {
         model::{Availability, Evidence, Observation, PendingAlert},
         store::Store,
     };
+
+    #[test]
+    fn timing_keeps_second_resolution_and_clock_uncertainty_explicit() {
+        assert_eq!(observation_age_range(100, 100_000), Some((0, 0)));
+        assert_eq!(observation_age_range(100, 100_850), Some((0, 850)));
+        assert_eq!(observation_age_range(100, 102_250), Some((1_251, 2_250)));
+        assert_eq!(observation_age_range(101, 100_999), None);
+        assert_eq!(observation_age_range(-1, 100_999), None);
+        assert_eq!(observation_age_range(i64::MAX, i64::MAX), None);
+    }
+
+    #[test]
+    fn delivery_timing_does_not_turn_retries_into_acknowledgements_or_log_payloads() {
+        let alert = PendingAlert {
+            id: 7,
+            nonce: "private-nonce-marker".into(),
+            payload: crate::model::Alert {
+                watch_id: "synthetic-watch".into(),
+                event_name: "private-name-marker".into(),
+                artist: String::new(),
+                location: String::new(),
+                event_url: "https://fixture.invalid/private-url-marker".into(),
+                observed_at: 100,
+                kind: "available".into(),
+                detail: "private-detail-marker".into(),
+                offers: vec![],
+            },
+            attempts: 2,
+        };
+        let retry = delivery_timing(&alert, 101_100, 102_250, 1_150, "retry_or_ambiguous");
+        assert_eq!(retry["acknowledged"], false);
+        assert_eq!(retry["stock_change_time_known"], false);
+        assert_eq!(retry["observation_to_response_ms"]["minimum"], 1_251);
+        assert!(!retry.to_string().contains("private-"));
+        let accepted = delivery_timing(&alert, 101_100, 102_250, 1_150, "accepted");
+        assert_eq!(accepted["acknowledged"], true);
+        let skew = delivery_timing(&alert, 102_500, 102_250, 1_150, "accepted");
+        assert!(skew["observation_to_response_ms"].is_null());
+        assert_eq!(skew["send_elapsed_ms"], 1_150);
+    }
 
     struct Fixture {
         endpoint: String,

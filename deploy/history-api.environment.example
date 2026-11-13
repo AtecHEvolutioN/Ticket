@@ -1,0 +1,8 @@
+# Install privately as /etc/ticket-watch-nl/history-api.environment, root:root 0600.
+# Generate a NEW random token privately. Do not reuse Ticketmaster/Discord tokens.
+# TICKET_HISTORY_TOKEN=replace_with_at_least_32_random_printable_characters
+TICKET_HISTORY_BINARY=/opt/ticket-watch/target/release/ticket-watch
+TICKET_HISTORY_DATABASES='["/var/lib/ticket-watch-nl/ticket.sqlite"]'
+TICKET_HISTORY_ALLOWED_ORIGINS='["https://ticket-discord.vercel.app"]'
+TICKET_HISTORY_HOST=127.0.0.1
+TICKET_HISTORY_PORT=8787

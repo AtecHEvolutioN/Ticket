@@ -4,7 +4,7 @@
   "private": true,
   "description": "Optional ordinary Chromium transport for the Rust ticket monitor",
   "scripts": {
-    "test": "node --test browser/*.test.cjs",
+    "test": "node --test browser/*.test.cjs server/*.test.cjs",
     "browser:install": "playwright install chromium",
     "capture": "node browser/capture.cjs"
   },
