@@ -147,6 +147,12 @@ See [the NL audit](docs/netherlands-mapping.md) and
 
 ## Always-on server preparation
 
+Desktop setup: [Linux launcher](docs/linux-desktop.md) installs/reuses Discord
+and opens the existing server and chart viewer. The operator-triggered
+`discord-preview.yml` workflow verifies application/channel identity, then posts
+one clearly labelled recorded-evidence preview in `bot-status`. It uses the
+existing setup secret only in its final step. This does not start the watcher.
+
 See [the deployment guide](docs/netherlands-server.md). Prepared files:
 
 - `deploy/prepare-nl-server.sh`: default `--plan`; `--check` offline prerequisites;

@@ -85,6 +85,10 @@ Catalog refreshes preserve matching cached watches through partial failures and 
 
 ## Implemented behavior
 
+On a Linux desktop, [install/open Discord and the bot interface](docs/linux-desktop.md)
+with `bash deploy/open-ticket-watch-linux.sh`. The launcher reuses an existing
+Discord installation or installs the official build for your user.
+
 - [Broader country discovery](docs/discovery-partitions.md) and [priority checks](docs/scheduling.md): resumable date windows expand beyond one query's 1,000-result ceiling; imminent sales and changed observations get priority with fair older checks. Backlog, freshness and processing timings remain explicit; provider pacing is unchanged.
 - [Netherlands Discord layout](docs/discord-netherlands.md): nine created channels separate sale schedules, observed original/resale offers, price changes, charts, event updates and monitor status. Country subscriptions can discover all returned artists; coverage and worker capacity limits remain explicit. Live feeds and multi-channel routing still need deployment.
 - [Event price history and charts](docs/price-history.md): watcher and map snapshots persist independently of alerts. Export asking-price lines/candles and observed-entry counts, with separate ticket types, primary/resale channels, currencies and price/fee basis. `/ticket chart` opens a viewer supporting local imports and an [authenticated worker connection](docs/live-history-api.md). The production worker/API still needs deployment. Observed volume is not confirmed sales volume.
