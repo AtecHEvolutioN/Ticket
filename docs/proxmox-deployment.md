@@ -56,6 +56,24 @@ Never paste credentials into chat or a guest-exec command argument. Proxmox's
 documented `--pass-stdin` option can pass private input without putting it in
 command arguments; credential setup needs a separate reviewed step.
 
+## Private credentials from the Proxmox Shell
+
+After installation, download `deploy/proxmox-credentials.py` from the reviewed
+checkout to a private path on the **Proxmox node**, then run it interactively:
+
+```sh
+python3 /root/ticket-watch-credentials.py 101
+```
+
+The helper first checks the VM's private environment file and inactive worker.
+It then prompts for the Ticketmaster Discovery key and Discord bot token with
+terminal echo disabled. It sends their JSON through `qm guest exec --pass-stdin`,
+and the guest writes them atomically as root:root mode0600. Existing credentials,
+unsafe permissions, links and ambiguous results stop for inspection. The helper
+does not start the service, make provider requests or print credential values.
+Run the downloaded file directly; piping code into Python is incompatible with
+its private interactive prompt. Do not send the entered values to chat.
+
 The authenticated chart API and HTTPS access are separate deployment steps;
 see [the server guide](netherlands-server.md) and [live charts](live-history-api.md).
 This installation does not activate Dutch carting.

@@ -161,9 +161,19 @@ command execution from its node Shell. Available resources were checked; host
 addresses and application inventory remain in chat. The isolated
 [Proxmox installer](docs/proxmox-deployment.md) is prepared for this path.
 It installs the v0.8.0-server-test package, limits the worker to one concurrent
-check/one CPU/1536 MiB and leaves the service stopped. No target-host installation
-or startup has yet been confirmed. Obtain the installation log before claiming
-deployment. Credentials and source-access validation are the next steps.
+check/one CPU/1536 MiB and leaves the service stopped. Installation is confirmed
+below; credentials, source-access validation and service startup remain pending.
+
+The user subsequently provided a successful `INSTALLATION PREPARED` log from
+their VM: Chromium156, Node/Playwright and the worker validate. The worker remains
+stopped and disabled. One headless live check as the service account returned
+HTTP 403/blocked with no offers or categories; a normal PC browser displays ticket
+types/prices for the same event. This narrows the comparison but does not identify
+the cause. Virtual-display tools and a controlled headed comparison are next;
+respect the configured 900-second backoff rather than repeating the blocked read.
+The private Proxmox credential helper is implemented and locally tested, but
+credential installation has not been confirmed. It uses hidden terminal prompts,
+guest stdin and an atomic mode0600 environment file; it refuses existing values.
 
 Desktop setup: [Linux launcher](docs/linux-desktop.md) installs/reuses Discord
 and opens the existing server and chart viewer. The operator-triggered

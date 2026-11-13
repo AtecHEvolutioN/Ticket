@@ -1,9 +1,11 @@
 # Prepare an always-on Netherlands watcher
 
 The Discord category and nine channels already exist; `/ticket chart` and the
-Vercel viewer are deployed. **No persistent watcher server has been provisioned.**
-These files prepare the host; they do not create a paid cloud resource or start
-monitoring. Live alert routing and actual-host validation remain unfinished.
+Vercel viewer are deployed. Installation was prepared on an operator-owned
+Debian VM; **the watcher is still stopped and credentials are pending**. Its first
+headless website check returned HTTP403, while a normal PC browser displayed
+ticket types/prices. Source access, live alert routing and runtime validation
+remain unfinished. These files do not create a paid cloud resource.
 Country date partitioning and inventory priorities are implemented with explicit
 coverage/freshness reports; they do not establish full or instant NL coverage.
 
