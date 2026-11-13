@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "purpose": "User-requested desktop demonstration of the existing Ticket Watch Discord bot",
+  "source_commit": "e290ddf158e7e7c13a014ea42cc3b4190e1fe759",
+  "workflow_url": "https://github.com/AtecHEvolutioN/Ticket/actions/runs/43458151314",
+  "workflow_completed_at": "2026-11-13T15:59:51Z",
+  "verified_by": "Discord create-message response with matching bot author and channel",
+  "application_id": "1569720679757127740",
+  "guild_id": "1569717598709350491",
+  "channel_id": "1569753975182332027",
+  "message_id": "1570830552636858460",
+  "message_url": "https://discord.com/channels/1569717598709350491/1569753975182332027/1570830552636858460",
+  "confirmed_messages": 1,
+  "mentions_enabled": false,
+  "content_kind": "Explicitly labelled recorded seat-price evidence and setup status",
+  "continuous_collection_started": false,
+  "carting_enabled": false,
+  "credentials_returned": false
+}

@@ -76,6 +76,15 @@ Actions secret only in their final step. Its value has not been retrieved.
 destination. Creating nine channels does not implement multi-channel routing,
 catalog announcements, presale timers or live chart publishing.
 
+On November 13 the user requested a desktop demonstration. **One preview message
+was delivered** to `bot-status`, confirmed by the Discord response and successful
+[workflow 43458151314](https://github.com/AtecHEvolutioN/Ticket/actions/runs/43458151314).
+[Open the message](https://discord.com/channels/1569717598709350491/1569753975182332027/1570830552636858460).
+It contains clearly dated recorded primary/resale quotes, chart links and the
+inactive watcher/carting status, with mentions suppressed. See
+[delivery evidence](docs/evidence/discord-preview-2026-11-13.json).
+Do not rerun this workflow just to inspect the message.
+
 ## Implemented history and discovery
 
 - `src/market_history.rs`: additive SQLite history tables, compact samples,
@@ -152,6 +161,13 @@ and opens the existing server and chart viewer. The operator-triggered
 `discord-preview.yml` workflow verifies application/channel identity, then posts
 one clearly labelled recorded-evidence preview in `bot-status`. It uses the
 existing setup secret only in its final step. This does not start the watcher.
+The official Discord launcher was installed under
+`/workspace/.ticket-desktop/ticket-watch/discord/Discord/discord` in this cloud
+environment. Its native updater rejected the environment's HTTPS inspection
+certificate (`UnknownIssuer`), so the full desktop app was not bootstrapped here.
+TLS verification was preserved. There is no active DISPLAY/Wayland socket or
+desktop-control tool in this session; this does not install or open an app on the
+user's physical PC. The Linux launcher is intended to run in their desktop terminal.
 
 See [the deployment guide](docs/netherlands-server.md). Prepared files:
 
@@ -187,7 +203,11 @@ paste keys into chat or copy credentials into Git/public logs.
 
 - Rust: **584 tests passed**; formatting, Clippy `--all-targets -D warnings` and
   optimized release build passed.
-- Discord/scripts/viewer/history API: **85 tests passed**.
+- Discord/scripts/viewer/history API: **89 tests passed**, including four preview
+  delivery guards. The latest desktop change reran all 76 Discord/script/viewer
+  checks; the 13 unchanged API checks passed in the preceding feature validation.
+  [CI for the desktop code](https://github.com/AtecHEvolutioN/Ticket/actions/runs/43458074680)
+  passed both jobs.
 - Full local Chromium suite: **169 tests passed**, including authenticated live
   chart transport, mobile layout, native-cart diagnostics and offline parsing.
 - Real SQLite WAL writer → release exporter → authenticated API → Chromium

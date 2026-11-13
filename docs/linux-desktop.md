@@ -35,6 +35,8 @@ stock, fees and adjacency as unknown. Try `/ticket ping`, `/ticket help` and
 `/ticket chart`. In the chart viewer, **Try synthetic demo** shows the chart
 controls using clearly labelled invented history.
 
+[Open the confirmed preview message](https://discord.com/channels/1569717598709350491/1569753975182332027/1570830552636858460).
+
 The launcher opens the interfaces. Continuous collection and real live charts
 still need the persistent watcher/API host and private credentials described in
 [the server guide](netherlands-server.md). Dutch carting remains disabled.
@@ -50,3 +52,4 @@ rerunning. No token is returned in the workflow output.
 
 The workflow does not start continuous collection. Its seat quotes come from
 [the dated validation evidence](evidence/netherlands-seat-validation-2026-11-13.json).
+The first delivery is recorded in [the preview evidence](evidence/discord-preview-2026-11-13.json).
