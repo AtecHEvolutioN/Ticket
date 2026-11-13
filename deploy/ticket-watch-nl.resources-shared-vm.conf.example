@@ -1,0 +1,6 @@
+# Limits for the Ticket Watch service only; existing VM applications are separate.
+[Service]
+MemoryHigh=1G
+MemoryMax=1536M
+CPUQuota=100%
+TasksMax=512

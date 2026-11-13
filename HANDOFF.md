@@ -156,6 +156,15 @@ See [the NL audit](docs/netherlands-mapping.md) and
 
 ## Always-on server preparation
 
+The user now has an existing Proxmox Debian 13 VM and confirmed guest-agent
+command execution from its node Shell. Available resources were checked; host
+addresses and application inventory remain in chat. The isolated
+[Proxmox installer](docs/proxmox-deployment.md) is prepared for this path.
+It installs the v0.8.0-server-test package, limits the worker to one concurrent
+check/one CPU/1536 MiB and leaves the service stopped. No target-host installation
+or startup has yet been confirmed. Obtain the installation log before claiming
+deployment. Credentials and source-access validation are the next steps.
+
 Desktop setup: [Linux launcher](docs/linux-desktop.md) installs/reuses Discord
 and opens the existing server and chart viewer. The operator-triggered
 `discord-preview.yml` workflow verifies application/channel identity, then posts

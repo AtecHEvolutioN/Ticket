@@ -22,6 +22,11 @@ is also suitable for the first measured run. This is a starting resource size,
 not a capacity or detection-latency guarantee. Scaling the CPU does not remove
 provider pacing, catalog-pagination limits or blocked website access.
 
+For an existing Proxmox VM, [the guest-agent installation guide](proxmox-deployment.md)
+uses the operator's Proxmox Shell and a checksum-verified server package. The
+new installer prepares a dedicated service with resource limits, leaving startup
+and private credentials for the following validation step.
+
 Vercel continues to host commands and the chart viewer. SQLite and Chromium run
 on the VM. Initially there is no public worker HTTP service: allow SSH only from
 the operator's trusted addresses; keep the database and browser state private.

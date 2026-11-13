@@ -10,12 +10,14 @@ For the current deployment state and next steps, read [HANDOFF.md](HANDOFF.md).
 The [always-on Netherlands server guide](docs/netherlands-server.md) prepares a
 dedicated worker; no paid server or live feed has been activated yet.
 
-The [0.7.0-test release](https://github.com/AtecHEvolutioN/Ticket/releases/tag/v0.7.0-test)
-contains the tested app/bot builds and SHA-256 checksums. The venue catalog is
-maintained separately on `main`:
+The [server test release](https://github.com/AtecHEvolutioN/Ticket/releases/tag/v0.8.0-server-test)
+contains the current Linux worker, discovery/scheduler and live chart API.
+[Proxmox installation](docs/proxmox-deployment.md) prepares an existing Debian VM.
+The Android build remains at [0.7.0-test](https://github.com/AtecHEvolutioN/Ticket/releases/tag/v0.7.0-test).
+The venue catalog is maintained separately on `main`:
 
 - [Android APK](https://github.com/AtecHEvolutioN/Ticket/raw/refs/tags/v0.7.0-test/downloads/ticket-watch-android.apk) — Android 8.0 or newer; editable ticket preferences, manual page checks and venue presets.
-- [Linux x86_64 bot](https://github.com/AtecHEvolutioN/Ticket/raw/refs/tags/v0.7.0-test/downloads/ticket-watch-bot-linux-x86_64.tar.gz) — continuous monitoring after configuration, offline preference import and cart planning; glibc 2.39 or newer.
+- [Linux x86_64 bot](https://github.com/AtecHEvolutioN/Ticket/releases/download/v0.8.0-server-test/ticket-watch-bot-linux-x86_64.tar.gz) — current worker/source package with [SHA-256 checksum](https://github.com/AtecHEvolutioN/Ticket/releases/download/v0.8.0-server-test/ticket-watch-bot-linux-x86_64.tar.gz.sha256); glibc 2.39 or newer.
 - [29-venue starter database](https://github.com/AtecHEvolutioN/Ticket/raw/refs/heads/main/downloads/venue-presets.sqlite) — venue metadata and six draft Dutch static layouts, with no saved watches. To add venues to an existing monitor, import [the JSON seed](examples/venue-presets.json) using [the venue commands](docs/venue-presets.md).
 
 Release verification: 360 Rust tests, Clippy, and 364 offline Android assertions
